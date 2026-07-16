@@ -45,6 +45,11 @@ function computeTagSets(items: Item[], mechanicsByItem: Map<string, MechanicRow[
     return tagSets;
 }
 
+/** Ids of every upgrade tier past the first — power-scaled clones of the base item. */
+export function higherTierIds(upgradeChains: UpgradeChain[]): Set<string> {
+    return new Set(upgradeChains.flatMap((chain) => chain.itemIds.slice(1)));
+}
+
 /** Maps each item id to the set of other item ids sharing its upgrade chain. */
 function buildChainMates(upgradeChains: UpgradeChain[]): Map<string, Set<string>> {
     const mates = new Map<string, Set<string>>();
@@ -294,11 +299,13 @@ export function relatedItems(
         )
     );
     const targetFingerprints = fieldFingerprints(targetMechanics);
+    const excludedTiers = higherTierIds(upgradeChains);
 
     const results: RelatedItem[] = [];
 
     for (const other of items) {
-        if (other.id === itemId) continue;
+        // Upgrade tiers (+/++) are power-scaled clones of the base item — noise here, not a distinct suggestion.
+        if (other.id === itemId || excludedTiers.has(other.id)) continue;
 
         const reasons: string[] = [];
         let strength: "strong" | "weak" = "weak";

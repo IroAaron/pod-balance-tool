@@ -1,6 +1,7 @@
 import type { Item } from "../models/Item";
 import type { Build } from "../models/Build";
 import type { UpgradeChain } from "../models/UpgradeChain";
+import { higherTierIds } from "../domain/relations";
 
 export interface GraphNode {
     id: string;
@@ -30,8 +31,8 @@ export class GraphService {
      * power-scaled clones of the base item and just clutter the layout.
      */
     build(items: Item[], builds: Build[], upgradeChains: UpgradeChain[], resolveItemLabel: (item: Item) => string): GraphData {
-        const higherTierIds = new Set(upgradeChains.flatMap((chain) => chain.itemIds.slice(1)));
-        const graphItems = items.filter((item) => !higherTierIds.has(item.id));
+        const excludedTiers = higherTierIds(upgradeChains);
+        const graphItems = items.filter((item) => !excludedTiers.has(item.id));
 
         const nodes: GraphNode[] = [
             ...graphItems.map((item) => ({ id: item.id, kind: "item" as const, label: resolveItemLabel(item) })),
