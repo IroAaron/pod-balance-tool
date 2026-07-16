@@ -1,9 +1,12 @@
-import { Typography } from "@mui/material";
+import Typography from "@mui/material/Typography";
+import MainLayout from "../layout/MainLayout";
 
 export default function App() {
     return (
-        <Typography variant="h3">
-            Balance Tool
-        </Typography>
+        <MainLayout>
+            <Typography variant="h4">
+                Добро пожаловать!
+            </Typography>
+        </MainLayout>
     );
 }
