@@ -7,7 +7,6 @@ import type { ReplaceRule } from "./models/ReplaceRule";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
-import { GraphService } from "./services/GraphService";
 import { ImportService, type ImportReport, type ImportResult } from "./services/ImportService";
 
 import { computeSuggestedBuilds } from "./domain/relations";
@@ -74,8 +73,6 @@ export class GameStore {
     readonly itemService = new ItemService();
 
     readonly buildService = new BuildService();
-
-    readonly graphService = new GraphService();
 
     readonly importService = new ImportService();
 

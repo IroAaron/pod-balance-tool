@@ -1,34 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Autocomplete, Box, Stack, TextField, Typography } from "@mui/material";
-import ForceGraph2D, { type NodeObject } from "react-force-graph-2d";
+import { useMemo, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
+import { Autocomplete, Box, Card, CardActionArea, CardContent, Chip, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
-import type { GraphNode } from "../../../core/services/GraphService";
+import { higherTierIds } from "../../../core/domain/relations";
 
 export default function GraphPage() {
     const store = useStore();
-    const navigate = useNavigate();
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [size, setSize] = useState({ width: 800, height: 600 });
     const [tagFilter, setTagFilter] = useState<string | null>(null);
 
-    useEffect(() => {
-        const el = containerRef.current;
-        if (!el) return;
-
-        const observer = new ResizeObserver((entries) => {
-            const entry = entries[0];
-            if (entry) {
-                setSize({
-                    width: Math.max(entry.contentRect.width, 200),
-                    height: Math.max(entry.contentRect.height, 400),
-                });
-            }
-        });
-
-        observer.observe(el);
-        return () => observer.disconnect();
-    }, []);
+    const excludedTiers = useMemo(() => higherTierIds(store.upgradeChains), [store.upgradeChains]);
 
     const filteredBuilds = useMemo(() => {
         if (!tagFilter) return store.builds;
@@ -39,17 +19,10 @@ export default function GraphPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.builds, store.items, tagFilter]);
 
-    const graphData = useMemo(
-        () => store.graphService.build(store.items, filteredBuilds, store.upgradeChains, (item) => store.itemName(item)),
-        // graphService/itemName are stable methods on the long-lived store singleton.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [store.items, filteredBuilds, store.upgradeChains, store.translations]
-    );
-
     const availableTags = store.paramValues.ItemTag ?? [];
 
     return (
-        <Stack spacing={2} sx={{ height: "100%" }}>
+        <Stack spacing={2}>
             <Typography variant="h4">Граф</Typography>
 
             <Autocomplete
@@ -60,51 +33,60 @@ export default function GraphPage() {
                 sx={{ maxWidth: 300 }}
             />
 
-            <Box
-                ref={containerRef}
-                sx={{
-                    flex: 1,
-                    minHeight: 500,
-                    border: "1px solid",
-                    borderColor: "divider",
-                    borderRadius: 2,
-                    overflow: "hidden",
-                }}
-            >
-                {graphData.nodes.length === 0 ? (
-                    <Stack sx={{ height: "100%", alignItems: "center", justifyContent: "center" }}>
-                        <Typography color="text.secondary">
-                            Нет данных для графа — загрузите предметы и создайте билды.
-                        </Typography>
-                    </Stack>
-                ) : (
-                    <ForceGraph2D<GraphNode, object>
-                        graphData={graphData}
-                        width={size.width}
-                        height={size.height}
-                        nodeId="id"
-                        nodeLabel="label"
-                        nodeRelSize={5}
-                        nodeVal={(node) => (node.kind === "build" ? 8 : 3)}
-                        nodeColor={(node) => (node.kind === "build" ? "#5B8CFF" : "#8f97a3")}
-                        linkColor={() => "rgba(255,255,255,0.2)"}
-                        backgroundColor="rgba(0,0,0,0)"
-                        onNodeClick={(node) => {
-                            const encodedId = encodeURIComponent(String(node.id));
-                            navigate(node.kind === "build" ? `/builds/${encodedId}` : `/items/${encodedId}`);
-                        }}
-                        nodeCanvasObjectMode={() => "after"}
-                        nodeCanvasObject={(node: NodeObject<GraphNode>, ctx, globalScale) => {
-                            const fontSize = (node.kind === "build" ? 14 : 11) / globalScale;
-                            ctx.font = `${fontSize}px sans-serif`;
-                            ctx.textAlign = "center";
-                            ctx.textBaseline = "top";
-                            ctx.fillStyle = node.kind === "build" ? "#5B8CFF" : "#c7ccd4";
-                            ctx.fillText(node.label, node.x ?? 0, (node.y ?? 0) + 6);
-                        }}
-                    />
-                )}
-            </Box>
+            {filteredBuilds.length === 0 ? (
+                <Typography color="text.secondary">Билдов пока нет — создайте их на странице «Билды».</Typography>
+            ) : (
+                <Box
+                    sx={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                        gap: 2,
+                    }}
+                >
+                    {filteredBuilds.map((build) => {
+                        const buildItems = build.items
+                            .filter((itemId) => !excludedTiers.has(itemId))
+                            .map((itemId) => store.getItem(itemId))
+                            .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+                        return (
+                            <Card key={build.id} variant="outlined">
+                                <CardActionArea component={RouterLink} to={`/builds/${encodeURIComponent(build.id)}`}>
+                                    <CardContent sx={{ pb: 1 }}>
+                                        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                            <Typography variant="h6">{build.icon || "🧠"}</Typography>
+                                            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                                                {build.name || "Без названия"}
+                                            </Typography>
+                                        </Stack>
+                                    </CardContent>
+                                </CardActionArea>
+
+                                <CardContent sx={{ pt: 0 }}>
+                                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
+                                        {buildItems.length === 0 ? (
+                                            <Typography variant="body2" color="text.secondary">
+                                                Предметы не добавлены.
+                                            </Typography>
+                                        ) : (
+                                            buildItems.map((item) => (
+                                                <Chip
+                                                    key={item.id}
+                                                    label={store.itemName(item)}
+                                                    size="small"
+                                                    component={RouterLink}
+                                                    to={`/items/${encodeURIComponent(item.id)}`}
+                                                    clickable
+                                                />
+                                            ))
+                                        )}
+                                    </Stack>
+                                </CardContent>
+                            </Card>
+                        );
+                    })}
+                </Box>
+            )}
         </Stack>
     );
 }
