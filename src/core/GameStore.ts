@@ -3,6 +3,7 @@ import type { Build } from "./models/Build";
 import type { Translation } from "./models/Translation";
 import type { MechanicRow } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
+import type { ReplaceRule } from "./models/ReplaceRule";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
@@ -10,7 +11,7 @@ import { GraphService } from "./services/GraphService";
 import { ImportService, type ImportReport, type ImportResult } from "./services/ImportService";
 
 import { computeSuggestedBuilds } from "./domain/relations";
-import { deriveParamValues, mergeWithCustomValues } from "./domain/paramRegistry";
+import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 
 import {
     loadPersistedState,
@@ -45,6 +46,10 @@ export class GameStore {
     mechanics: MechanicRow[] = [];
 
     upgradeChains: UpgradeChain[] = [];
+
+    replaceRules: ReplaceRule[] = [];
+
+    enumValues: Record<string, string[]> = {};
 
     builds: Build[] = [];
 
@@ -88,6 +93,8 @@ export class GameStore {
             this.translations = persisted.importCache.translations;
             this.mechanics = persisted.importCache.mechanics;
             this.upgradeChains = persisted.importCache.upgradeChains ?? [];
+            this.replaceRules = persisted.importCache.replaceRules ?? [];
+            this.enumValues = persisted.importCache.enumValues ?? {};
         }
     }
 
@@ -102,7 +109,11 @@ export class GameStore {
     }
 
     get paramValues(): Record<string, string[]> {
-        return mergeWithCustomValues(deriveParamValues(this.items, this.mechanics), this.customParamValues);
+        return mergeParamValueSources(
+            deriveParamValues(this.items, this.mechanics),
+            this.enumValues,
+            this.customParamValues
+        );
     }
 
     getItem(id: string): Item | undefined {
@@ -144,11 +155,15 @@ export class GameStore {
             this.translations = mergeByKey(this.translations, result.data.translations);
             this.mechanics = [...this.mechanics, ...result.data.mechanics];
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
+            this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
+            this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
             this.items = result.data.items;
             this.translations = result.data.translations;
             this.mechanics = result.data.mechanics;
             this.upgradeChains = result.data.upgradeChains;
+            this.replaceRules = result.data.replaceRules;
+            this.enumValues = result.data.enumValues;
         }
 
         this.importReport = result.report;
@@ -158,6 +173,8 @@ export class GameStore {
             translations: this.translations,
             mechanics: this.mechanics,
             upgradeChains: this.upgradeChains,
+            replaceRules: this.replaceRules,
+            enumValues: this.enumValues,
         });
     }
 
@@ -242,7 +259,13 @@ export class GameStore {
 
     /** Runs the tag/id clustering pass and appends new draft builds (deduped against existing ones). */
     suggestBuilds(): number {
-        const drafts = computeSuggestedBuilds(this.items, this.mechanics, this.upgradeChains, this.builds);
+        const drafts = computeSuggestedBuilds(
+            this.items,
+            this.mechanics,
+            this.upgradeChains,
+            this.replaceRules,
+            this.builds
+        );
         this.builds = [...this.builds, ...drafts];
         saveBuilds(this.builds);
         this.notify();
@@ -276,6 +299,8 @@ export class GameStore {
                 translations: this.translations,
                 mechanics: this.mechanics,
                 upgradeChains: this.upgradeChains,
+                replaceRules: this.replaceRules,
+                enumValues: this.enumValues,
             },
             importCacheTimestamp: this.importedAt,
         });
@@ -295,6 +320,8 @@ export class GameStore {
             this.translations = state.importCache.translations;
             this.mechanics = state.importCache.mechanics;
             this.upgradeChains = state.importCache.upgradeChains ?? [];
+            this.replaceRules = state.importCache.replaceRules ?? [];
+            this.enumValues = state.importCache.enumValues ?? {};
         }
 
         this.notify();

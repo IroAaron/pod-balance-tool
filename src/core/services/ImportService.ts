@@ -1,5 +1,6 @@
 import { fetchSourceTables } from "../import/sheetSource";
 import { parseCsv } from "../import/csv";
+import { sanitizeParsedTable } from "../import/sanitize";
 import { classifyTable, type TableType } from "../import/tableClassifier";
 import { normalizeClassifiedTables, type NormalizedData } from "../import/normalize";
 import type { ParsedTable } from "../import/types";
@@ -24,7 +25,8 @@ export interface ImportResult {
     report: ImportReport;
 }
 
-function buildResult(parsedTables: ParsedTable[]): ImportResult {
+function buildResult(rawParsedTables: ParsedTable[]): ImportResult {
+    const parsedTables = rawParsedTables.map(sanitizeParsedTable);
     const classified = parsedTables.map(classifyTable);
     const { data, warnings } = normalizeClassifiedTables(classified);
 

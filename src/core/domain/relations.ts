@@ -2,6 +2,7 @@ import type { Item } from "../models/Item";
 import type { Build } from "../models/Build";
 import type { MechanicRow } from "../models/Mechanic";
 import type { UpgradeChain } from "../models/UpgradeChain";
+import type { ReplaceRule } from "../models/ReplaceRule";
 import { MECHANIC_TAG_FIELDS } from "./mechanicTables";
 
 function splitList(value: string): string[] {
@@ -60,6 +61,28 @@ function buildChainMates(upgradeChains: UpgradeChain[]): Map<string, Set<string>
     return mates;
 }
 
+/** All item-id-shaped tokens a replace rule references (itemIdToReplace, replacementItem, and any id-like value in its extra fields, e.g. ReplaceItem's NeededItem). */
+function replaceRuleIdTokens(rule: ReplaceRule): string[] {
+    return [rule.itemIdToReplace, rule.replacementItem, ...Object.values(rule.fields).flatMap(splitList)];
+}
+
+/** Maps each item id to the set of other item ids it's linked to via a replace rule (either direction). */
+function buildReplaceMates(replaceRules: ReplaceRule[], knownIds: Set<string>): Map<string, Set<string>> {
+    const mates = new Map<string, Set<string>>();
+
+    for (const rule of replaceRules) {
+        const ids = replaceRuleIdTokens(rule).filter((id) => knownIds.has(id));
+        for (const id of ids) {
+            if (!mates.has(id)) mates.set(id, new Set());
+            for (const other of ids) {
+                if (other !== id) mates.get(id)!.add(other);
+            }
+        }
+    }
+
+    return mates;
+}
+
 class UnionFind {
     private parent = new Map<string, string>();
 
@@ -84,10 +107,10 @@ class UnionFind {
 /**
  * Draft Build clusters from strong signals only: items sharing a relevant
  * tag, items whose mechanics reference another item's Id directly
- * (UseTargetIds, MechAddItem spawn/replace targets — detected generically
- * by scanning field values against known item Ids, since MechAddItem's
- * column layout isn't finalized in the design doc), or items that are tiers
- * of the same upgrade chain.
+ * (UseTargetIds, MechAddItem's NewItemId, etc. — detected generically by
+ * scanning field values against known item Ids), items linked by a
+ * ReplaceItem/ReplaceOnTrigger rule, or items that are tiers of the same
+ * upgrade chain.
  *
  * These are a starting point, not a final answer — a common tag can pull
  * unrelated items into one cluster, so the user is expected to split/merge/
@@ -97,6 +120,7 @@ export function computeSuggestedBuilds(
     items: Item[],
     mechanics: MechanicRow[],
     upgradeChains: UpgradeChain[],
+    replaceRules: ReplaceRule[],
     existingBuilds: Build[] = []
 ): Build[] {
     const knownIds = new Set(items.map((item) => item.id));
@@ -132,6 +156,11 @@ export function computeSuggestedBuilds(
     for (const chain of upgradeChains) {
         const tierIds = chain.itemIds.filter((id) => knownIds.has(id));
         for (let i = 1; i < tierIds.length; i++) unionFind.union(tierIds[0], tierIds[i]);
+    }
+
+    for (const rule of replaceRules) {
+        const ids = replaceRuleIdTokens(rule).filter((id) => knownIds.has(id));
+        for (let i = 1; i < ids.length; i++) unionFind.union(ids[0], ids[i]);
     }
 
     const clusters = new Map<string, string[]>();
@@ -197,13 +226,16 @@ export function relatedItems(
     itemId: string,
     items: Item[],
     mechanics: MechanicRow[],
-    upgradeChains: UpgradeChain[]
+    upgradeChains: UpgradeChain[],
+    replaceRules: ReplaceRule[]
 ): RelatedItem[] {
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
     const tagSets = computeTagSets(items, mechanicsByItem);
     const chainMates = buildChainMates(upgradeChains);
     const targetChainMates = chainMates.get(itemId) ?? new Set<string>();
+    const replaceMates = buildReplaceMates(replaceRules, knownIds);
+    const targetReplaceMates = replaceMates.get(itemId) ?? new Set<string>();
 
     const targetTags = tagSets.get(itemId) ?? new Set<string>();
     const targetMechanics = mechanicsByItem.get(itemId) ?? [];
@@ -240,6 +272,12 @@ export function relatedItems(
             strength = "strong";
             score += 15;
             reasons.push("та же цепочка прокачки");
+        }
+
+        if (targetReplaceMates.has(other.id)) {
+            strength = "strong";
+            score += 15;
+            reasons.push("связаны правилом замены");
         }
 
         const otherTags = tagSets.get(other.id) ?? new Set<string>();

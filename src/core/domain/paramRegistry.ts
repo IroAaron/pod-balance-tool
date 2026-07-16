@@ -46,17 +46,16 @@ export function deriveParamValues(items: Item[], mechanics: MechanicRow[]): Reco
     return Object.fromEntries(Object.entries(result).map(([dimension, values]) => [dimension, [...values].sort()]));
 }
 
-/** Merges data-derived values with the user's manually added custom values. */
-export function mergeWithCustomValues(
-    derived: Record<string, string[]>,
-    custom: Record<string, string[]>
-): Record<string, string[]> {
-    const merged: Record<string, string[]> = { ...derived };
+/** Unions any number of dimension -> values sources (data-derived, curated Enums sheet, user-added custom). */
+export function mergeParamValueSources(...sources: Record<string, string[]>[]): Record<string, string[]> {
+    const merged: Record<string, Set<string>> = {};
 
-    for (const [dimension, values] of Object.entries(custom)) {
-        const set = new Set([...(merged[dimension] ?? []), ...values]);
-        merged[dimension] = [...set].sort();
+    for (const source of sources) {
+        for (const [dimension, values] of Object.entries(source)) {
+            if (!merged[dimension]) merged[dimension] = new Set();
+            values.forEach((value) => merged[dimension].add(value));
+        }
     }
 
-    return merged;
+    return Object.fromEntries(Object.entries(merged).map(([dimension, values]) => [dimension, [...values].sort()]));
 }

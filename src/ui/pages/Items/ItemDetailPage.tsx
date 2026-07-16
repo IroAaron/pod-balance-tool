@@ -14,8 +14,11 @@ export default function ItemDetailPage() {
 
     const related = useMemo(() => {
         if (!item) return [];
-        return relatedItems(item.id, store.items, store.mechanics, store.upgradeChains).slice(0, 12);
-    }, [item, store.items, store.mechanics, store.upgradeChains]);
+        return relatedItems(item.id, store.items, store.mechanics, store.upgradeChains, store.replaceRules).slice(
+            0,
+            12
+        );
+    }, [item, store.items, store.mechanics, store.upgradeChains, store.replaceRules]);
 
     if (!item) {
         return (
@@ -31,6 +34,9 @@ export default function ItemDetailPage() {
     const builds = store.buildsForItem(item.id);
     const chain = store.chainForItem(item.id);
     const icon = store.getItemIcon(item.id) ?? "🧩";
+
+    const replacesInto = store.replaceRules.filter((rule) => rule.itemIdToReplace === item.id);
+    const replacedFrom = store.replaceRules.filter((rule) => rule.replacementItem === item.id);
 
     const mechanicsByTable = new Map<string, MechanicRow[]>();
     for (const mechanic of store.mechanics.filter((row) => row.itemId === item.id)) {
@@ -139,6 +145,46 @@ export default function ItemDetailPage() {
                                         to={`/items/${encodeURIComponent(tierId)}`}
                                         clickable
                                         color={tierId === item.id ? "primary" : "default"}
+                                    />
+                                </Stack>
+                            );
+                        })}
+                    </Stack>
+                </Paper>
+            )}
+
+            {(replacesInto.length > 0 || replacedFrom.length > 0) && (
+                <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                        Замены
+                    </Typography>
+                    <Stack spacing={1.5}>
+                        {replacesInto.map((rule) => {
+                            const target = store.getItem(rule.replacementItem);
+                            return (
+                                <Stack key={rule.id} direction="row" sx={{ alignItems: "center", gap: 1 }}>
+                                    <Typography color="text.secondary">{rule.source}: заменяется на</Typography>
+                                    <Chip
+                                        label={target ? store.itemName(target) : rule.replacementItem}
+                                        component={RouterLink}
+                                        to={`/items/${encodeURIComponent(rule.replacementItem)}`}
+                                        clickable
+                                        size="small"
+                                    />
+                                </Stack>
+                            );
+                        })}
+                        {replacedFrom.map((rule) => {
+                            const source = store.getItem(rule.itemIdToReplace);
+                            return (
+                                <Stack key={rule.id} direction="row" sx={{ alignItems: "center", gap: 1 }}>
+                                    <Typography color="text.secondary">{rule.source}: получается заменой из</Typography>
+                                    <Chip
+                                        label={source ? store.itemName(source) : rule.itemIdToReplace}
+                                        component={RouterLink}
+                                        to={`/items/${encodeURIComponent(rule.itemIdToReplace)}`}
+                                        clickable
+                                        size="small"
                                     />
                                 </Stack>
                             );

@@ -4,6 +4,8 @@ import type { Item } from "../models/Item";
 import type { Translation } from "../models/Translation";
 import type { MechanicRow, MechanicTableName } from "../models/Mechanic";
 import type { UpgradeChain } from "../models/UpgradeChain";
+import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
+import { tableNameOf } from "./tableNames";
 
 export interface NormalizedData {
     items: Item[];
@@ -13,6 +15,11 @@ export interface NormalizedData {
     mechanics: MechanicRow[];
 
     upgradeChains: UpgradeChain[];
+
+    replaceRules: ReplaceRule[];
+
+    /** Valid values per parameter dimension, as curated in the Enums sheet. */
+    enumValues: Record<string, string[]>;
 }
 
 export interface ImportWarning {
@@ -20,6 +27,13 @@ export interface ImportWarning {
 
     message: string;
 }
+
+/** These tables have no ItemType column at all — the category is implicit in which table a row came from. */
+const ITEM_CATEGORY_HINTS: Record<string, string> = {
+    cards: "Card",
+    houses: "House",
+    artefacts: "Artefact",
+};
 
 function splitList(value: string): string[] {
     return value
@@ -52,9 +66,12 @@ function normalizeItemsTable(table: ParsedTable): Item[] {
     if (!idColumn) return [];
 
     const tagsColumn = findColumn(table.headers, ["ItemTag", "Tags"]) ?? findColumnContaining(table.headers, ["tag"]);
-    const typeColumn = findColumn(table.headers, ["ItemType", "Type"]) ?? findColumnContaining(table.headers, ["type"]);
+    // Exact match only — "type" as a substring also matches ValueUsageType/BonusCountingType/etc,
+    // which are different dimensions entirely, not the item's own category.
+    const typeColumn = findColumn(table.headers, ["ItemType", "Type"]);
     const nameKeyColumn = findColumn(table.headers, ["NameKey", "Name"]);
     const descKeyColumn = findColumn(table.headers, ["DescKey", "DescriptionKey", "Description"]);
+    const categoryHint = ITEM_CATEGORY_HINTS[tableNameOf(table.sourceName)];
 
     return table.rows
         .filter((row) => (row[idColumn] ?? "").trim() !== "")
@@ -63,7 +80,7 @@ function normalizeItemsTable(table: ParsedTable): Item[] {
             return {
                 id,
                 tags: tagsColumn ? splitList(row[tagsColumn] ?? "") : [],
-                itemType: typeColumn ? row[typeColumn]?.trim() || undefined : undefined,
+                itemType: (typeColumn ? row[typeColumn]?.trim() : "") || categoryHint,
                 nameKey: (nameKeyColumn ? row[nameKeyColumn]?.trim() : "") || id,
                 descKey: (descKeyColumn ? row[descKeyColumn]?.trim() : "") || `${id}_desc`,
                 raw: row,
@@ -131,6 +148,62 @@ function normalizeMechanicTable(table: ParsedTable, type: MechanicTableName): Me
         });
 }
 
+function normalizeReplaceRuleTable(table: ParsedTable, source: ReplaceRuleSource): ReplaceRule[] {
+    const fromColumn = findColumn(table.headers, ["ItemIdToReplace"]);
+    const toColumn = findColumn(table.headers, ["ReplacementItem"]);
+    if (!fromColumn || !toColumn) return [];
+
+    return table.rows
+        .filter((row) => (row[fromColumn] ?? "").trim() !== "" && (row[toColumn] ?? "").trim() !== "")
+        .map((row, index): ReplaceRule => {
+            const fields: Record<string, string> = {};
+            for (const [key, value] of Object.entries(row)) {
+                if (key === fromColumn || key === toColumn) continue;
+                if (value !== undefined && value !== "") fields[key] = value;
+            }
+
+            return {
+                id: `${source}:${row[fromColumn].trim()}:${index}`,
+                source,
+                itemIdToReplace: row[fromColumn].trim(),
+                replacementItem: row[toColumn].trim(),
+                fields,
+            };
+        });
+}
+
+/**
+ * The Enums sheet lists valid values per parameter dimension as independent,
+ * ragged columns (one column per dimension, N unrelated values stacked down
+ * it) — not a normal row-per-record table. Columns with no header (used for
+ * human-readable labels alongside another column) are skipped.
+ */
+function normalizeEnumsTable(table: ParsedTable): Record<string, string[]> {
+    const result: Record<string, string[]> = {};
+
+    for (const header of table.headers) {
+        const dimension = header.trim();
+        if (!dimension) continue;
+
+        const values = new Set<string>();
+        for (const row of table.rows) {
+            const value = row[header]?.trim();
+            if (value) values.add(value);
+        }
+
+        if (values.size > 0) result[dimension] = [...values].sort();
+    }
+
+    return result;
+}
+
+function mergeEnumValues(target: Record<string, string[]>, incoming: Record<string, string[]>): void {
+    for (const [dimension, values] of Object.entries(incoming)) {
+        const set = new Set([...(target[dimension] ?? []), ...values]);
+        target[dimension] = [...set].sort();
+    }
+}
+
 export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     data: NormalizedData;
     warnings: ImportWarning[];
@@ -139,6 +212,8 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const translations: Translation[] = [];
     const mechanics: MechanicRow[] = [];
     const upgradeChains: UpgradeChain[] = [];
+    const replaceRules: ReplaceRule[] = [];
+    const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
 
     for (const { type, table } of classified) {
@@ -169,6 +244,17 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             upgradeChains.push(...normalized);
+        } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
+            const normalized = normalizeReplaceRuleTable(table, type);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдены колонки ItemIdToReplace/ReplacementItem — таблица замен пропущена",
+                });
+            }
+            replaceRules.push(...normalized);
+        } else if (type === "Enums") {
+            mergeEnumValues(enumValues, normalizeEnumsTable(table));
         } else if (type === "Unknown") {
             warnings.push({
                 sourceName: table.sourceName,
@@ -186,5 +272,8 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
         }
     }
 
-    return { data: { items, translations, mechanics, upgradeChains }, warnings };
+    return {
+        data: { items, translations, mechanics, upgradeChains, replaceRules, enumValues },
+        warnings,
+    };
 }
