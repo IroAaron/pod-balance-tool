@@ -1,13 +1,15 @@
 export interface Item {
     id: string;
 
-    name: string;
+    tags: string[];
 
-    description: string;
+    itemType?: string;
 
     icon?: string;
 
-    tags: string[];
+    nameKey?: string;
 
-    mechanics: string[];
+    descKey?: string;
+
+    raw: Record<string, string>;
 }

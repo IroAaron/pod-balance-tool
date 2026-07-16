@@ -1,16 +1,66 @@
 import type { Item } from "./models/Item";
 import type { Build } from "./models/Build";
+import type { Translation } from "./models/Translation";
+import type { MechanicRow } from "./models/Mechanic";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
 import { GraphService } from "./services/GraphService";
-import { ImportService } from "./services/ImportService";
+import { ImportService, type ImportReport, type ImportResult } from "./services/ImportService";
+
+import { computeSuggestedBuilds } from "./domain/relations";
+import { deriveParamValues, mergeWithCustomValues } from "./domain/paramRegistry";
+
+import {
+    loadPersistedState,
+    saveBuilds,
+    saveItemIcons,
+    saveCustomParamValues,
+    saveSources,
+    saveImportCache,
+    exportSnapshot as writeSnapshotFile,
+    importSnapshotFile,
+    type SourceUrls,
+} from "./persistence/localStore";
+
+function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+    const map = new Map(existing.map((entry) => [entry.id, entry]));
+    for (const entry of incoming) map.set(entry.id, entry);
+    return [...map.values()];
+}
+
+function mergeByKey(existing: Translation[], incoming: Translation[]): Translation[] {
+    const map = new Map(existing.map((entry) => [entry.key, entry]));
+    for (const entry of incoming) map.set(entry.key, entry);
+    return [...map.values()];
+}
 
 export class GameStore {
 
     items: Item[] = [];
 
+    translations: Translation[] = [];
+
+    mechanics: MechanicRow[] = [];
+
     builds: Build[] = [];
+
+    itemIcons: Record<string, string> = {};
+
+    customParamValues: Record<string, string[]> = {};
+
+    sources: SourceUrls = { configUrl: "", translationsUrl: "" };
+
+    importReport: ImportReport | null = null;
+
+    importError: string | null = null;
+
+    importing = false;
+
+    importedAt: string | null = null;
+
+    /** Bumped on every mutation; read by useStore() via useSyncExternalStore. */
+    version = 0;
 
     readonly itemService = new ItemService();
 
@@ -19,5 +69,214 @@ export class GameStore {
     readonly graphService = new GraphService();
 
     readonly importService = new ImportService();
+
+    private listeners = new Set<() => void>();
+
+    constructor() {
+        const persisted = loadPersistedState();
+        this.builds = persisted.builds;
+        this.itemIcons = persisted.itemIcons;
+        this.customParamValues = persisted.customParamValues;
+        this.sources = persisted.sources;
+        this.importedAt = persisted.importCacheTimestamp;
+
+        if (persisted.importCache) {
+            this.items = persisted.importCache.items;
+            this.translations = persisted.importCache.translations;
+            this.mechanics = persisted.importCache.mechanics;
+        }
+    }
+
+    subscribe = (listener: () => void): (() => void) => {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    };
+
+    private notify(): void {
+        this.version += 1;
+        this.listeners.forEach((listener) => listener());
+    }
+
+    get paramValues(): Record<string, string[]> {
+        return mergeWithCustomValues(deriveParamValues(this.items, this.mechanics), this.customParamValues);
+    }
+
+    getItem(id: string): Item | undefined {
+        return this.items.find((item) => item.id === id);
+    }
+
+    getBuild(id: string): Build | undefined {
+        return this.builds.find((build) => build.id === id);
+    }
+
+    buildsForItem(itemId: string): Build[] {
+        return this.builds.filter((build) => build.items.includes(itemId));
+    }
+
+    getItemIcon(itemId: string): string | undefined {
+        return this.itemIcons[itemId];
+    }
+
+    getTranslation(key: string | undefined): string | undefined {
+        if (!key) return undefined;
+        return this.translations.find((translation) => translation.key === key)?.value;
+    }
+
+    itemName(item: Item): string {
+        return this.getTranslation(item.nameKey) ?? item.nameKey ?? item.id;
+    }
+
+    itemDescription(item: Item): string {
+        return this.getTranslation(item.descKey) ?? "";
+    }
+
+    private applyImportResult(result: ImportResult, options?: { merge?: boolean }): void {
+        if (options?.merge) {
+            this.items = mergeById(this.items, result.data.items);
+            this.translations = mergeByKey(this.translations, result.data.translations);
+            this.mechanics = [...this.mechanics, ...result.data.mechanics];
+        } else {
+            this.items = result.data.items;
+            this.translations = result.data.translations;
+            this.mechanics = result.data.mechanics;
+        }
+
+        this.importReport = result.report;
+        this.importedAt = new Date().toISOString();
+        saveImportCache({ items: this.items, translations: this.translations, mechanics: this.mechanics });
+    }
+
+    async importFromSources(sources: SourceUrls): Promise<void> {
+        this.sources = sources;
+        saveSources(sources);
+        this.importing = true;
+        this.importError = null;
+        this.notify();
+
+        try {
+            const result = await this.importService.importFromUrls(sources);
+            this.applyImportResult(result);
+        } catch (error) {
+            this.importError = error instanceof Error ? error.message : String(error);
+        } finally {
+            this.importing = false;
+            this.notify();
+        }
+    }
+
+    async importCsvFiles(files: File[]): Promise<void> {
+        this.importing = true;
+        this.importError = null;
+        this.notify();
+
+        try {
+            const result = await this.importService.importCsvFiles(files);
+            this.applyImportResult(result, { merge: true });
+        } catch (error) {
+            this.importError = error instanceof Error ? error.message : String(error);
+        } finally {
+            this.importing = false;
+            this.notify();
+        }
+    }
+
+    createBuild(name = ""): Build {
+        const build: Build = {
+            id: `build-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name,
+            items: [],
+        };
+        this.builds = [...this.builds, build];
+        saveBuilds(this.builds);
+        this.notify();
+        return build;
+    }
+
+    upsertBuild(build: Build): void {
+        const exists = this.builds.some((entry) => entry.id === build.id);
+        this.builds = exists
+            ? this.builds.map((entry) => (entry.id === build.id ? build : entry))
+            : [...this.builds, build];
+        saveBuilds(this.builds);
+        this.notify();
+    }
+
+    deleteBuild(id: string): void {
+        this.builds = this.builds.filter((build) => build.id !== id);
+        saveBuilds(this.builds);
+        this.notify();
+    }
+
+    addItemToBuild(buildId: string, itemId: string): void {
+        this.builds = this.builds.map((build) =>
+            build.id === buildId && !build.items.includes(itemId)
+                ? { ...build, items: [...build.items, itemId] }
+                : build
+        );
+        saveBuilds(this.builds);
+        this.notify();
+    }
+
+    removeItemFromBuild(buildId: string, itemId: string): void {
+        this.builds = this.builds.map((build) =>
+            build.id === buildId ? { ...build, items: build.items.filter((id) => id !== itemId) } : build
+        );
+        saveBuilds(this.builds);
+        this.notify();
+    }
+
+    /** Runs the tag/id clustering pass and appends new draft builds (deduped against existing ones). */
+    suggestBuilds(): number {
+        const drafts = computeSuggestedBuilds(this.items, this.mechanics, this.builds);
+        this.builds = [...this.builds, ...drafts];
+        saveBuilds(this.builds);
+        this.notify();
+        return drafts.length;
+    }
+
+    setItemIcon(itemId: string, icon: string): void {
+        this.itemIcons = { ...this.itemIcons, [itemId]: icon };
+        saveItemIcons(this.itemIcons);
+        this.notify();
+    }
+
+    addCustomParamValue(dimension: string, value: string): void {
+        const trimmed = value.trim();
+        if (!trimmed) return;
+        const existing = this.customParamValues[dimension] ?? [];
+        if (existing.includes(trimmed)) return;
+        this.customParamValues = { ...this.customParamValues, [dimension]: [...existing, trimmed] };
+        saveCustomParamValues(this.customParamValues);
+        this.notify();
+    }
+
+    exportSnapshot(): void {
+        writeSnapshotFile({
+            builds: this.builds,
+            itemIcons: this.itemIcons,
+            customParamValues: this.customParamValues,
+            sources: this.sources,
+            importCache: { items: this.items, translations: this.translations, mechanics: this.mechanics },
+            importCacheTimestamp: this.importedAt,
+        });
+    }
+
+    async importSnapshot(file: File): Promise<void> {
+        const state = await importSnapshotFile(file);
+
+        this.builds = state.builds;
+        this.itemIcons = state.itemIcons;
+        this.customParamValues = state.customParamValues;
+        this.sources = state.sources;
+        this.importedAt = state.importCacheTimestamp;
+
+        if (state.importCache) {
+            this.items = state.importCache.items;
+            this.translations = state.importCache.translations;
+            this.mechanics = state.importCache.mechanics;
+        }
+
+        this.notify();
+    }
 
 }

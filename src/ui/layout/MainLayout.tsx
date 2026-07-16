@@ -19,6 +19,8 @@ export default function MainLayout({ children }: Props) {
                 sx={{
                     flex: 1,
                     p: 3,
+                    overflowY: "auto",
+                    minWidth: 0,
                 }}
             >
                 {children}

@@ -1,11 +1,17 @@
-export interface Mechanic {
+export type MechanicTableName =
+    | "MechActivate"
+    | "MechAddValue"
+    | "MechChangeColor"
+    | "MechAddItem"
+    | "MechAddTag"
+    | "Unknown";
+
+export interface MechanicRow {
     id: string;
 
-    type: string;
+    table: MechanicTableName | string;
 
-    source: string;
+    itemId: string;
 
-    target: string;
-
-    weight: number;
+    fields: Record<string, string>;
 }

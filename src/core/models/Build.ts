@@ -12,4 +12,6 @@ export interface Build {
     items: string[];
 
     notes?: string;
+
+    auto?: boolean;
 }
