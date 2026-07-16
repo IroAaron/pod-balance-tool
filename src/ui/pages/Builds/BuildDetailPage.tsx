@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { Autocomplete, Box, Button, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
+import { relatedBuilds } from "../../../core/domain/relations";
 
 export default function BuildDetailPage() {
     const { id } = useParams<{ id: string }>();
@@ -15,6 +16,18 @@ export default function BuildDetailPage() {
     const [dirty, setDirty] = useState(false);
 
     const itemsById = useMemo(() => new Map(store.items.map((item) => [item.id, item])), [store.items]);
+
+    const related = useMemo(() => {
+        if (!build) return [];
+        return relatedBuilds(
+            build.id,
+            store.builds,
+            store.items,
+            store.mechanics,
+            store.upgradeChains,
+            store.replaceRules
+        );
+    }, [build, store.builds, store.items, store.mechanics, store.upgradeChains, store.replaceRules]);
 
     if (!build) {
         return (
@@ -132,6 +145,40 @@ export default function BuildDetailPage() {
                     value={null}
                     blurOnSelect
                 />
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" sx={{ mb: 2 }}>
+                    Возможно связано с
+                </Typography>
+                {related.length === 0 ? (
+                    <Typography color="text.secondary">Связанные билды не найдены.</Typography>
+                ) : (
+                    <Stack spacing={1}>
+                        {related.map((rel) => {
+                            const relatedBuild = store.getBuild(rel.id);
+                            if (!relatedBuild) return null;
+                            return (
+                                <Stack
+                                    key={rel.id}
+                                    direction="row"
+                                    spacing={1}
+                                    component={RouterLink}
+                                    to={`/builds/${encodeURIComponent(rel.id)}`}
+                                    sx={{ textDecoration: "none", color: "inherit", alignItems: "center" }}
+                                >
+                                    <Chip
+                                        label={`${relatedBuild.icon || "🧠"} ${relatedBuild.name || "Без названия"}`}
+                                        size="small"
+                                    />
+                                    <Typography variant="caption" color="text.secondary">
+                                        {rel.reasons.join("; ")}
+                                    </Typography>
+                                </Stack>
+                            );
+                        })}
+                    </Stack>
+                )}
             </Paper>
         </Stack>
     );

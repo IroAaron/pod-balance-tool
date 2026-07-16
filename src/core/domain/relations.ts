@@ -221,6 +221,49 @@ function fieldFingerprints(mechanics: MechanicRow[]): Set<string> {
     return fingerprints;
 }
 
+/**
+ * The ActivatorType event a mechanic row's own effect structurally produces,
+ * if any — e.g. a MechChangeColor row always fires a ColorChange event when
+ * it triggers, regardless of what its own ActivatorType/filters are. This is
+ * what connects a "recolors things" item to an item that listens for
+ * ActivatorType=ColorChange, even with no shared tag between them.
+ */
+function producedActivatorType(mechanic: MechanicRow): string | undefined {
+    if (mechanic.table === "MechChangeColor") return "ColorChange";
+    if (mechanic.table === "MechAddItem") {
+        const itemMech = mechanic.fields.ItemMech;
+        if (itemMech === "удалить") return "ItemRemoved";
+        if (itemMech === "поставить") return "ItemPlaced";
+    }
+    return undefined;
+}
+
+function computeProducedEvents(mechanicsByItem: Map<string, MechanicRow[]>): Map<string, Set<string>> {
+    const produced = new Map<string, Set<string>>();
+    for (const [itemId, rows] of mechanicsByItem) {
+        const events = new Set<string>();
+        for (const row of rows) {
+            const event = producedActivatorType(row);
+            if (event) events.add(event);
+        }
+        if (events.size > 0) produced.set(itemId, events);
+    }
+    return produced;
+}
+
+function computeListenedEvents(mechanicsByItem: Map<string, MechanicRow[]>): Map<string, Set<string>> {
+    const listened = new Map<string, Set<string>>();
+    for (const [itemId, rows] of mechanicsByItem) {
+        const events = new Set<string>();
+        for (const row of rows) {
+            const value = row.fields.ActivatorType;
+            if (value) events.add(value);
+        }
+        if (events.size > 0) listened.set(itemId, events);
+    }
+    return listened;
+}
+
 /** Ranked "possibly related" items for an item's detail page — informational only, never auto-clusters. */
 export function relatedItems(
     itemId: string,
@@ -236,6 +279,10 @@ export function relatedItems(
     const targetChainMates = chainMates.get(itemId) ?? new Set<string>();
     const replaceMates = buildReplaceMates(replaceRules, knownIds);
     const targetReplaceMates = replaceMates.get(itemId) ?? new Set<string>();
+    const producedEvents = computeProducedEvents(mechanicsByItem);
+    const listenedEvents = computeListenedEvents(mechanicsByItem);
+    const targetProduces = producedEvents.get(itemId) ?? new Set<string>();
+    const targetListens = listenedEvents.get(itemId) ?? new Set<string>();
 
     const targetTags = tagSets.get(itemId) ?? new Set<string>();
     const targetMechanics = mechanicsByItem.get(itemId) ?? [];
@@ -280,6 +327,21 @@ export function relatedItems(
             reasons.push("связаны правилом замены");
         }
 
+        const otherProduces = producedEvents.get(other.id) ?? new Set<string>();
+        const otherListens = listenedEvents.get(other.id) ?? new Set<string>();
+        const targetFeedsOther = [...targetProduces].filter((event) => otherListens.has(event));
+        const otherFeedsTarget = [...otherProduces].filter((event) => targetListens.has(event));
+        if (targetFeedsOther.length > 0 || otherFeedsTarget.length > 0) {
+            strength = "strong";
+            score += 12;
+            if (targetFeedsOther.length > 0) {
+                reasons.push(`производит ${targetFeedsOther.join(", ")}, на что реагирует другой`);
+            }
+            if (otherFeedsTarget.length > 0) {
+                reasons.push(`реагирует на ${otherFeedsTarget.join(", ")}, которое производит другой`);
+            }
+        }
+
         const otherTags = tagSets.get(other.id) ?? new Set<string>();
         const sharedTags = [...targetTags].filter((tag) => otherTags.has(tag));
         if (sharedTags.length > 0) {
@@ -298,6 +360,67 @@ export function relatedItems(
         if (reasons.length > 0) {
             results.push({ id: other.id, strength, score, reasons });
         }
+    }
+
+    return results.sort((a, b) => b.score - a.score);
+}
+
+export interface RelatedBuild {
+    id: string;
+
+    score: number;
+
+    reasons: string[];
+}
+
+/**
+ * Ranked "possibly related" builds for a build's detail page — informational
+ * only, derived from item overlap plus the same strong item-level signals
+ * used by relatedItems (shared tags/ids/chains/replace-rules/produced-events),
+ * rolled up to build level. Does not attempt the deeper "this build's payoff
+ * is fed by that other build" composition — that needs a human to notice.
+ */
+export function relatedBuilds(
+    buildId: string,
+    builds: Build[],
+    items: Item[],
+    mechanics: MechanicRow[],
+    upgradeChains: UpgradeChain[],
+    replaceRules: ReplaceRule[]
+): RelatedBuild[] {
+    const target = builds.find((build) => build.id === buildId);
+    if (!target) return [];
+
+    const targetItemSet = new Set(target.items);
+
+    const stronglyRelatedToTarget = new Set<string>();
+    for (const itemId of target.items) {
+        for (const rel of relatedItems(itemId, items, mechanics, upgradeChains, replaceRules)) {
+            if (rel.strength === "strong") stronglyRelatedToTarget.add(rel.id);
+        }
+    }
+
+    const results: RelatedBuild[] = [];
+
+    for (const other of builds) {
+        if (other.id === buildId) continue;
+
+        const sharedItems = other.items.filter((id) => targetItemSet.has(id));
+        const bridgingItems = other.items.filter(
+            (id) => !targetItemSet.has(id) && stronglyRelatedToTarget.has(id)
+        );
+
+        if (sharedItems.length === 0 && bridgingItems.length === 0) continue;
+
+        const reasons: string[] = [];
+        if (sharedItems.length > 0) reasons.push(`общие предметы (${sharedItems.length})`);
+        if (bridgingItems.length > 0) reasons.push(`связанные предметы (${bridgingItems.length})`);
+
+        results.push({
+            id: other.id,
+            score: sharedItems.length * 10 + bridgingItems.length * 3,
+            reasons,
+        });
     }
 
     return results.sort((a, b) => b.score - a.score);
