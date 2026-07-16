@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { Box, Button, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
+import ItemIcon from "../../components/ItemIcon";
 import { relatedItems } from "../../../core/domain/relations";
 import type { MechanicRow } from "../../../core/models/Mechanic";
 
@@ -73,8 +74,7 @@ export default function ItemDetailPage() {
                                 </Button>
                             </Stack>
                         ) : (
-                            <Typography
-                                variant="h2"
+                            <Box
                                 onClick={() => {
                                     setIconDraft(icon);
                                     setEditingIcon(true);
@@ -82,8 +82,8 @@ export default function ItemDetailPage() {
                                 sx={{ cursor: "pointer" }}
                                 title="Изменить иконку"
                             >
-                                {icon}
-                            </Typography>
+                                <ItemIcon item={item} size={96} />
+                            </Box>
                         )}
                     </Box>
 

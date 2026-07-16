@@ -13,6 +13,7 @@ import {
     Typography,
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
+import ItemIcon from "../../components/ItemIcon";
 import type { ItemSortKey } from "../../../core/services/ItemService";
 import type { Item } from "../../../core/models/Item";
 
@@ -113,7 +114,7 @@ export default function ItemsPage() {
                         >
                             <CardContent>
                                 <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
-                                    <Typography variant="h5">{store.getItemIcon(item.id) ?? "🧩"}</Typography>
+                                    <ItemIcon item={item} size={32} />
                                     <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                                         {resolveName(item)}
                                     </Typography>
