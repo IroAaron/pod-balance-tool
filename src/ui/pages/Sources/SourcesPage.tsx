@@ -148,7 +148,7 @@ export default function SourcesPage() {
 
                         <Typography variant="body2" color="text.secondary">
                             Загружено: {store.items.length} предметов, {store.translations.length} переводов,{" "}
-                            {store.mechanics.length} строк механик.
+                            {store.mechanics.length} строк механик, {store.upgradeChains.length} цепочек прокачки.
                         </Typography>
                     </Stack>
                 </Paper>

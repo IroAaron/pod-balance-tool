@@ -111,7 +111,7 @@ export default function BuildDetailPage() {
                                 key={itemId}
                                 label={item ? store.itemName(item) : itemId}
                                 component={RouterLink}
-                                to={`/items/${itemId}`}
+                                to={`/items/${encodeURIComponent(itemId)}`}
                                 clickable
                                 onDelete={() => store.removeItemFromBuild(build.id, itemId)}
                             />

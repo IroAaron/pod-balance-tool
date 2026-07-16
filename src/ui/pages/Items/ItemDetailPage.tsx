@@ -14,8 +14,8 @@ export default function ItemDetailPage() {
 
     const related = useMemo(() => {
         if (!item) return [];
-        return relatedItems(item.id, store.items, store.mechanics).slice(0, 12);
-    }, [item, store.items, store.mechanics]);
+        return relatedItems(item.id, store.items, store.mechanics, store.upgradeChains).slice(0, 12);
+    }, [item, store.items, store.mechanics, store.upgradeChains]);
 
     if (!item) {
         return (
@@ -29,6 +29,7 @@ export default function ItemDetailPage() {
     }
 
     const builds = store.buildsForItem(item.id);
+    const chain = store.chainForItem(item.id);
     const icon = store.getItemIcon(item.id) ?? "🧩";
 
     const mechanicsByTable = new Map<string, MechanicRow[]>();
@@ -113,13 +114,38 @@ export default function ItemDetailPage() {
                                 key={build.id}
                                 label={`${build.icon || "🧠"} ${build.name || "Без названия"}`}
                                 component={RouterLink}
-                                to={`/builds/${build.id}`}
+                                to={`/builds/${encodeURIComponent(build.id)}`}
                                 clickable
                             />
                         ))}
                     </Stack>
                 )}
             </Paper>
+
+            {chain && (
+                <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                        Цепочка прокачки
+                    </Typography>
+                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1, alignItems: "center" }}>
+                        {chain.itemIds.map((tierId, index) => {
+                            const tierItem = store.getItem(tierId);
+                            return (
+                                <Stack key={tierId} direction="row" sx={{ alignItems: "center", gap: 1 }}>
+                                    {index > 0 && <Typography color="text.secondary">→</Typography>}
+                                    <Chip
+                                        label={tierItem ? store.itemName(tierItem) : tierId}
+                                        component={RouterLink}
+                                        to={`/items/${encodeURIComponent(tierId)}`}
+                                        clickable
+                                        color={tierId === item.id ? "primary" : "default"}
+                                    />
+                                </Stack>
+                            );
+                        })}
+                    </Stack>
+                </Paper>
+            )}
 
             <Paper sx={{ p: 3 }}>
                 <Typography variant="h6" sx={{ mb: 2 }}>
@@ -171,7 +197,7 @@ export default function ItemDetailPage() {
                                     direction="row"
                                     spacing={1}
                                     component={RouterLink}
-                                    to={`/items/${rel.id}`}
+                                    to={`/items/${encodeURIComponent(rel.id)}`}
                                     sx={{ textDecoration: "none", color: "inherit", alignItems: "center" }}
                                 >
                                     <Chip

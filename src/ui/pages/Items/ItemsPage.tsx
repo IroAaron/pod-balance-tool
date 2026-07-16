@@ -106,7 +106,11 @@ export default function ItemsPage() {
             >
                 {filtered.map((item) => (
                     <Card key={item.id} variant="outlined">
-                        <CardActionArea component={RouterLink} to={`/items/${item.id}`} sx={{ height: "100%" }}>
+                        <CardActionArea
+                            component={RouterLink}
+                            to={`/items/${encodeURIComponent(item.id)}`}
+                            sx={{ height: "100%" }}
+                        >
                             <CardContent>
                                 <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
                                     <Typography variant="h5">{store.getItemIcon(item.id) ?? "🧩"}</Typography>

@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate, useParams } from "react-router-dom";
+import { Routes, Route, Navigate, useParams, Link as RouterLink } from "react-router-dom";
+import { Button, Stack, Typography } from "@mui/material";
 
 import SourcesPage from "../pages/Sources/SourcesPage";
 import ItemsPage from "../pages/Items/ItemsPage";
@@ -20,6 +21,17 @@ function BuildDetailRoute() {
     return <BuildDetailPage key={id} />;
 }
 
+function NotFoundPage() {
+    return (
+        <Stack spacing={2}>
+            <Typography variant="h5">Страница не найдена</Typography>
+            <Button component={RouterLink} to="/items" sx={{ alignSelf: "flex-start" }}>
+                ← К списку предметов
+            </Button>
+        </Stack>
+    );
+}
+
 export default function AppRouter() {
     return (
         <Routes>
@@ -32,6 +44,7 @@ export default function AppRouter() {
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
             <Route path="/graph" element={<GraphPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="*" element={<NotFoundPage />} />
         </Routes>
     );
 }

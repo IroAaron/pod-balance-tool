@@ -36,6 +36,26 @@ export async function fetchGoogleSheetCsv(url: string, sourceName: string): Prom
 }
 
 /**
+ * getValues()-backed Apps Script responses carry native cell types (numbers,
+ * booleans) for numeric-looking cells, not just strings. Every other part of
+ * the pipeline assumes string values (per ParsedTable's contract), so cells
+ * are coerced here — the one place that talks to the untyped JSON response.
+ */
+function cellToString(value: unknown): string {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    return String(value);
+}
+
+function stringifyRow(row: Record<string, unknown>): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(row)) {
+        result[key] = cellToString(value);
+    }
+    return result;
+}
+
+/**
  * An Apps Script web app is expected to return JSON shaped
  * `{ [tabName]: Array<Record<string, string>> }` — one entry per
  * spreadsheet tab, each an array of row objects keyed by header. This is
@@ -47,13 +67,16 @@ export async function fetchAppsScriptJson(url: string): Promise<ParsedTable[]> {
         throw new Error(`Не удалось получить данные из Apps Script (HTTP ${response.status})`);
     }
 
-    const json = (await response.json()) as Record<string, Array<Record<string, string>>>;
+    const json = (await response.json()) as Record<string, Array<Record<string, unknown>>>;
 
-    return Object.entries(json).map(([sourceName, rows]) => ({
-        sourceName,
-        headers: rows.length > 0 ? Object.keys(rows[0]) : [],
-        rows,
-    }));
+    return Object.entries(json).map(([sourceName, rawRows]) => {
+        const rows = rawRows.map(stringifyRow);
+        return {
+            sourceName,
+            headers: rows.length > 0 ? Object.keys(rows[0]) : [],
+            rows,
+        };
+    });
 }
 
 export async function fetchSourceTables(url: string, sourceLabel: string): Promise<ParsedTable[]> {

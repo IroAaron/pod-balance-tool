@@ -2,6 +2,7 @@ import type { Item } from "./models/Item";
 import type { Build } from "./models/Build";
 import type { Translation } from "./models/Translation";
 import type { MechanicRow } from "./models/Mechanic";
+import type { UpgradeChain } from "./models/UpgradeChain";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
@@ -42,6 +43,8 @@ export class GameStore {
     translations: Translation[] = [];
 
     mechanics: MechanicRow[] = [];
+
+    upgradeChains: UpgradeChain[] = [];
 
     builds: Build[] = [];
 
@@ -84,6 +87,7 @@ export class GameStore {
             this.items = persisted.importCache.items;
             this.translations = persisted.importCache.translations;
             this.mechanics = persisted.importCache.mechanics;
+            this.upgradeChains = persisted.importCache.upgradeChains ?? [];
         }
     }
 
@@ -113,6 +117,10 @@ export class GameStore {
         return this.builds.filter((build) => build.items.includes(itemId));
     }
 
+    chainForItem(itemId: string): UpgradeChain | undefined {
+        return this.upgradeChains.find((chain) => chain.itemIds.includes(itemId));
+    }
+
     getItemIcon(itemId: string): string | undefined {
         return this.itemIcons[itemId];
     }
@@ -135,15 +143,22 @@ export class GameStore {
             this.items = mergeById(this.items, result.data.items);
             this.translations = mergeByKey(this.translations, result.data.translations);
             this.mechanics = [...this.mechanics, ...result.data.mechanics];
+            this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
         } else {
             this.items = result.data.items;
             this.translations = result.data.translations;
             this.mechanics = result.data.mechanics;
+            this.upgradeChains = result.data.upgradeChains;
         }
 
         this.importReport = result.report;
         this.importedAt = new Date().toISOString();
-        saveImportCache({ items: this.items, translations: this.translations, mechanics: this.mechanics });
+        saveImportCache({
+            items: this.items,
+            translations: this.translations,
+            mechanics: this.mechanics,
+            upgradeChains: this.upgradeChains,
+        });
     }
 
     async importFromSources(sources: SourceUrls): Promise<void> {
@@ -227,7 +242,7 @@ export class GameStore {
 
     /** Runs the tag/id clustering pass and appends new draft builds (deduped against existing ones). */
     suggestBuilds(): number {
-        const drafts = computeSuggestedBuilds(this.items, this.mechanics, this.builds);
+        const drafts = computeSuggestedBuilds(this.items, this.mechanics, this.upgradeChains, this.builds);
         this.builds = [...this.builds, ...drafts];
         saveBuilds(this.builds);
         this.notify();
@@ -256,7 +271,12 @@ export class GameStore {
             itemIcons: this.itemIcons,
             customParamValues: this.customParamValues,
             sources: this.sources,
-            importCache: { items: this.items, translations: this.translations, mechanics: this.mechanics },
+            importCache: {
+                items: this.items,
+                translations: this.translations,
+                mechanics: this.mechanics,
+                upgradeChains: this.upgradeChains,
+            },
             importCacheTimestamp: this.importedAt,
         });
     }
@@ -274,6 +294,7 @@ export class GameStore {
             this.items = state.importCache.items;
             this.translations = state.importCache.translations;
             this.mechanics = state.importCache.mechanics;
+            this.upgradeChains = state.importCache.upgradeChains ?? [];
         }
 
         this.notify();

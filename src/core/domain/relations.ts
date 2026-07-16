@@ -1,6 +1,7 @@
 import type { Item } from "../models/Item";
 import type { Build } from "../models/Build";
 import type { MechanicRow } from "../models/Mechanic";
+import type { UpgradeChain } from "../models/UpgradeChain";
 import { MECHANIC_TAG_FIELDS } from "./mechanicTables";
 
 function splitList(value: string): string[] {
@@ -43,6 +44,22 @@ function computeTagSets(items: Item[], mechanicsByItem: Map<string, MechanicRow[
     return tagSets;
 }
 
+/** Maps each item id to the set of other item ids sharing its upgrade chain. */
+function buildChainMates(upgradeChains: UpgradeChain[]): Map<string, Set<string>> {
+    const mates = new Map<string, Set<string>>();
+
+    for (const chain of upgradeChains) {
+        for (const id of chain.itemIds) {
+            if (!mates.has(id)) mates.set(id, new Set());
+            for (const other of chain.itemIds) {
+                if (other !== id) mates.get(id)!.add(other);
+            }
+        }
+    }
+
+    return mates;
+}
+
 class UnionFind {
     private parent = new Map<string, string>();
 
@@ -66,10 +83,11 @@ class UnionFind {
 
 /**
  * Draft Build clusters from strong signals only: items sharing a relevant
- * tag, or items whose mechanics reference another item's Id directly
+ * tag, items whose mechanics reference another item's Id directly
  * (UseTargetIds, MechAddItem spawn/replace targets — detected generically
  * by scanning field values against known item Ids, since MechAddItem's
- * column layout isn't finalized in the design doc).
+ * column layout isn't finalized in the design doc), or items that are tiers
+ * of the same upgrade chain.
  *
  * These are a starting point, not a final answer — a common tag can pull
  * unrelated items into one cluster, so the user is expected to split/merge/
@@ -78,6 +96,7 @@ class UnionFind {
 export function computeSuggestedBuilds(
     items: Item[],
     mechanics: MechanicRow[],
+    upgradeChains: UpgradeChain[],
     existingBuilds: Build[] = []
 ): Build[] {
     const knownIds = new Set(items.map((item) => item.id));
@@ -108,6 +127,11 @@ export function computeSuggestedBuilds(
                 }
             }
         }
+    }
+
+    for (const chain of upgradeChains) {
+        const tierIds = chain.itemIds.filter((id) => knownIds.has(id));
+        for (let i = 1; i < tierIds.length; i++) unionFind.union(tierIds[0], tierIds[i]);
     }
 
     const clusters = new Map<string, string[]>();
@@ -169,10 +193,17 @@ function fieldFingerprints(mechanics: MechanicRow[]): Set<string> {
 }
 
 /** Ranked "possibly related" items for an item's detail page — informational only, never auto-clusters. */
-export function relatedItems(itemId: string, items: Item[], mechanics: MechanicRow[]): RelatedItem[] {
+export function relatedItems(
+    itemId: string,
+    items: Item[],
+    mechanics: MechanicRow[],
+    upgradeChains: UpgradeChain[]
+): RelatedItem[] {
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
     const tagSets = computeTagSets(items, mechanicsByItem);
+    const chainMates = buildChainMates(upgradeChains);
+    const targetChainMates = chainMates.get(itemId) ?? new Set<string>();
 
     const targetTags = tagSets.get(itemId) ?? new Set<string>();
     const targetMechanics = mechanicsByItem.get(itemId) ?? [];
@@ -203,6 +234,12 @@ export function relatedItems(itemId: string, items: Item[], mechanics: MechanicR
             strength = "strong";
             score += 10;
             reasons.push("прямая ссылка по Id");
+        }
+
+        if (targetChainMates.has(other.id)) {
+            strength = "strong";
+            score += 15;
+            reasons.push("та же цепочка прокачки");
         }
 
         const otherTags = tagSets.get(other.id) ?? new Set<string>();

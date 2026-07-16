@@ -33,7 +33,7 @@ export default function BuildsPage() {
 
     const handleCreate = () => {
         const build = store.createBuild();
-        navigate(`/builds/${build.id}`);
+        navigate(`/builds/${encodeURIComponent(build.id)}`);
     };
 
     const handleSuggest = () => {
@@ -95,7 +95,11 @@ export default function BuildsPage() {
             >
                 {filtered.map((build) => (
                     <Card key={build.id} variant="outlined">
-                        <CardActionArea component={RouterLink} to={`/builds/${build.id}`} sx={{ height: "100%" }}>
+                        <CardActionArea
+                            component={RouterLink}
+                            to={`/builds/${encodeURIComponent(build.id)}`}
+                            sx={{ height: "100%" }}
+                        >
                             <CardContent>
                                 <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
                                     <Typography variant="h5">{build.icon || "🧠"}</Typography>

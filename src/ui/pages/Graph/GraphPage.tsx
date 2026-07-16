@@ -40,10 +40,10 @@ export default function GraphPage() {
     }, [store.builds, store.items, tagFilter]);
 
     const graphData = useMemo(
-        () => store.graphService.build(store.items, filteredBuilds, (item) => store.itemName(item)),
+        () => store.graphService.build(store.items, filteredBuilds, store.upgradeChains, (item) => store.itemName(item)),
         // graphService/itemName are stable methods on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [store.items, filteredBuilds, store.translations]
+        [store.items, filteredBuilds, store.upgradeChains, store.translations]
     );
 
     const availableTags = store.paramValues.ItemTag ?? [];
@@ -90,7 +90,8 @@ export default function GraphPage() {
                         linkColor={() => "rgba(255,255,255,0.2)"}
                         backgroundColor="rgba(0,0,0,0)"
                         onNodeClick={(node) => {
-                            navigate(node.kind === "build" ? `/builds/${node.id}` : `/items/${node.id}`);
+                            const encodedId = encodeURIComponent(String(node.id));
+                            navigate(node.kind === "build" ? `/builds/${encodedId}` : `/items/${encodedId}`);
                         }}
                         nodeCanvasObjectMode={() => "after"}
                         nodeCanvasObject={(node: NodeObject<GraphNode>, ctx, globalScale) => {
