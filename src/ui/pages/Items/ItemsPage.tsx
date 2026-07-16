@@ -1,5 +1,19 @@
-import Typography from "@mui/material/Typography";
+import { Typography } from "@mui/material";
+import { useStore } from "../../hooks/useStore";
 
 export default function ItemsPage() {
-    return <Typography variant="h4">Предметы</Typography>;
+
+    const store = useStore();
+
+    return (
+        <>
+            <Typography variant="h4">
+                Предметы
+            </Typography>
+
+            <Typography>
+                Items loaded: {store.items.length}
+            </Typography>
+        </>
+    );
 }
