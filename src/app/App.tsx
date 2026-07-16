@@ -1,12 +1,10 @@
-import Typography from "@mui/material/Typography";
 import MainLayout from "../layout/MainLayout";
+import AppRouter from "./Router";
 
 export default function App() {
     return (
         <MainLayout>
-            <Typography variant="h4">
-                Добро пожаловать!
-            </Typography>
+            <AppRouter />
         </MainLayout>
     );
 }
