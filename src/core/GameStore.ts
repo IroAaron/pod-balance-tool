@@ -39,7 +39,8 @@ function mergeByKey(existing: Translation[], incoming: Translation[]): Translati
 
 export class GameStore {
 
-    items: Item[] = [];
+    /** Every item seen from a config import, regardless of whether it has a translation. */
+    allItems: Item[] = [];
 
     translations: Translation[] = [];
 
@@ -89,7 +90,7 @@ export class GameStore {
         this.importedAt = persisted.importCacheTimestamp;
 
         if (persisted.importCache) {
-            this.items = persisted.importCache.items;
+            this.allItems = persisted.importCache.items;
             this.translations = persisted.importCache.translations;
             this.mechanics = persisted.importCache.mechanics;
             this.upgradeChains = persisted.importCache.upgradeChains ?? [];
@@ -114,6 +115,15 @@ export class GameStore {
             this.enumValues,
             this.customParamValues
         );
+    }
+
+    /** Config items without a matching translation are treated as unfinished/removed content — hidden everywhere. */
+    get items(): Item[] {
+        return this.allItems.filter((item) => this.hasTranslation(item));
+    }
+
+    private hasTranslation(item: Item): boolean {
+        return this.translations.some((translation) => translation.key === item.nameKey);
     }
 
     getItem(id: string): Item | undefined {
@@ -151,14 +161,14 @@ export class GameStore {
 
     private applyImportResult(result: ImportResult, options?: { merge?: boolean }): void {
         if (options?.merge) {
-            this.items = mergeById(this.items, result.data.items);
+            this.allItems = mergeById(this.allItems, result.data.items);
             this.translations = mergeByKey(this.translations, result.data.translations);
-            this.mechanics = [...this.mechanics, ...result.data.mechanics];
+            this.mechanics = mergeById(this.mechanics, result.data.mechanics);
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
-            this.items = result.data.items;
+            this.allItems = result.data.items;
             this.translations = result.data.translations;
             this.mechanics = result.data.mechanics;
             this.upgradeChains = result.data.upgradeChains;
@@ -169,7 +179,7 @@ export class GameStore {
         this.importReport = result.report;
         this.importedAt = new Date().toISOString();
         saveImportCache({
-            items: this.items,
+            items: this.allItems,
             translations: this.translations,
             mechanics: this.mechanics,
             upgradeChains: this.upgradeChains,
@@ -295,7 +305,7 @@ export class GameStore {
             customParamValues: this.customParamValues,
             sources: this.sources,
             importCache: {
-                items: this.items,
+                items: this.allItems,
                 translations: this.translations,
                 mechanics: this.mechanics,
                 upgradeChains: this.upgradeChains,
@@ -316,7 +326,7 @@ export class GameStore {
         this.importedAt = state.importCacheTimestamp;
 
         if (state.importCache) {
-            this.items = state.importCache.items;
+            this.allItems = state.importCache.items;
             this.translations = state.importCache.translations;
             this.mechanics = state.importCache.mechanics;
             this.upgradeChains = state.importCache.upgradeChains ?? [];
