@@ -130,7 +130,12 @@ export default function BuildDetailPage() {
                                 component={RouterLink}
                                 to={`/items/${encodeURIComponent(itemId)}`}
                                 clickable
-                                onDelete={() => store.removeItemFromBuild(build.id, itemId)}
+                                onDelete={(event) => {
+                                    // Without this, the click "leaks" through to the Link and opens the item card too.
+                                    event.stopPropagation();
+                                    event.preventDefault();
+                                    store.removeItemFromBuild(build.id, itemId);
+                                }}
                             />
                         );
                     })}
@@ -166,7 +171,11 @@ export default function BuildDetailPage() {
                                 component={RouterLink}
                                 to={`/builds/${encodeURIComponent(linkedId)}`}
                                 clickable
-                                onDelete={() => store.unlinkBuilds(build.id, linkedId)}
+                                onDelete={(event) => {
+                                    event.stopPropagation();
+                                    event.preventDefault();
+                                    store.unlinkBuilds(build.id, linkedId);
+                                }}
                             />
                         );
                     })}
