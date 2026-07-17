@@ -71,11 +71,10 @@ export async function fetchAppsScriptJson(url: string): Promise<ParsedTable[]> {
 
     return Object.entries(json).map(([sourceName, rawRows]) => {
         const rows = rawRows.map(stringifyRow);
-        return {
-            sourceName,
-            headers: rows.length > 0 ? Object.keys(rows[0]) : [],
-            rows,
-        };
+        // Union of keys across every row, not just the first — a sparse first row (e.g. a blank cell in a
+        // placeholder/comment row) would otherwise silently drop a column from `headers` for the whole table.
+        const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+        return { sourceName, headers, rows };
     });
 }
 

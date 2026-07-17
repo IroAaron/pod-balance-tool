@@ -26,8 +26,16 @@ export interface ImportResult {
 }
 
 function buildResult(rawParsedTables: ParsedTable[]): ImportResult {
-    const parsedTables = rawParsedTables.map(sanitizeParsedTable);
-    const classified = parsedTables.map(classifyTable);
+    // Classify on the raw table first (classification only reads headers, never values, so
+    // sanitizing beforehand isn't needed for this) — then only sanitize non-Translations tables.
+    // The prose-comment heuristic strips any 3+ word Cyrillic cell, which is exactly what a real
+    // item name/description *is*; running it on Translations would silently blank every real
+    // multi-word description while leaving short ones (accidentally) intact.
+    const classified = rawParsedTables
+        .map(classifyTable)
+        .map((entry) =>
+            entry.type === "Translations" ? entry : { type: entry.type, table: sanitizeParsedTable(entry.table) }
+        );
     const { data, warnings } = normalizeClassifiedTables(classified);
 
     const tables: ImportReportTable[] = classified.map(({ type, table }) => ({

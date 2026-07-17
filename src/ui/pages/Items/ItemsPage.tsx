@@ -122,6 +122,21 @@ export default function ItemsPage() {
                                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
                                     {item.id}
                                 </Typography>
+                                {store.itemDescription(item) && (
+                                    <Typography
+                                        variant="body2"
+                                        color="text.secondary"
+                                        sx={{
+                                            mb: 1,
+                                            display: "-webkit-box",
+                                            WebkitLineClamp: 3,
+                                            WebkitBoxOrient: "vertical",
+                                            overflow: "hidden",
+                                        }}
+                                    >
+                                        {store.itemDescription(item)}
+                                    </Typography>
+                                )}
                                 <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
                                     {item.tags.map((tag) => (
                                         <Chip key={tag} label={tag} size="small" />
