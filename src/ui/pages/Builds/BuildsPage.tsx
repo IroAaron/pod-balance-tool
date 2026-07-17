@@ -11,12 +11,14 @@ import {
     Checkbox,
     Chip,
     FormControlLabel,
+    IconButton,
     MenuItem,
     Stack,
     TextField,
     Tooltip,
     Typography,
 } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import { higherTierIds, relatedBuilds, type RelatedBuild } from "../../../core/domain/relations";
@@ -30,6 +32,7 @@ export default function BuildsPage() {
     const [sortKey, setSortKey] = useState<BuildSortKey>("name");
     const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
     const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
+    const [deleteMode, setDeleteMode] = useState(false);
 
     const excludedTiers = useMemo(() => higherTierIds(store.upgradeChains), [store.upgradeChains]);
 
@@ -122,6 +125,17 @@ export default function BuildsPage() {
                     label="Учитывать прокачки (+/++)"
                     sx={{ mr: 0 }}
                 />
+                <FormControlLabel
+                    control={
+                        <Checkbox
+                            size="small"
+                            checked={deleteMode}
+                            onChange={(event) => setDeleteMode(event.target.checked)}
+                        />
+                    }
+                    label="Режим удаления"
+                    sx={{ mr: 0 }}
+                />
                 <Button variant="outlined" onClick={handleSuggest} disabled={store.items.length === 0}>
                     Предложить билды
                 </Button>
@@ -159,7 +173,29 @@ export default function BuildsPage() {
                     const related = (relatedByBuild.get(build.id) ?? []).slice(0, 6);
 
                     return (
-                        <Card key={build.id} variant="outlined">
+                        <Card key={build.id} variant="outlined" sx={{ position: "relative" }}>
+                            {deleteMode && (
+                                <IconButton
+                                    size="small"
+                                    aria-label="Удалить билд"
+                                    onClick={(event) => {
+                                        // Sibling to the CardActionArea's Link, but stop/prevent anyway in case of future nesting.
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        store.deleteBuild(build.id);
+                                    }}
+                                    sx={{
+                                        position: "absolute",
+                                        top: 4,
+                                        right: 4,
+                                        zIndex: 1,
+                                        bgcolor: "background.paper",
+                                        "&:hover": { bgcolor: "error.main", color: "error.contrastText" },
+                                    }}
+                                >
+                                    <CloseIcon fontSize="small" />
+                                </IconButton>
+                            )}
                             <CardActionArea component={RouterLink} to={`/builds/${encodeURIComponent(build.id)}`}>
                                 <CardContent sx={{ pb: 1 }}>
                                     <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>

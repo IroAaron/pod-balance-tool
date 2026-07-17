@@ -30,7 +30,7 @@ export default function GraphPage() {
     const navigate = useNavigate();
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 800, height: 600 });
-    const [showLabels, setShowLabels] = useState(true);
+    const [showLabels, setShowLabels] = useState(false);
 
     useEffect(() => {
         const el = containerRef.current;
