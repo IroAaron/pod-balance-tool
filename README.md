@@ -1,75 +1,101 @@
-# React + TypeScript + Vite
+# PoD Balance Tool
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Сайт-справочник по контенту и балансу для **PoD** — карточного рогалика на Godot (Steam). Статический React-сайт (без бэкенда), который затягивает игровые данные из Google Sheets/Apps Script/CSV, даёт браузер предметов и позволяет вручную собирать «билды» — тематические группы предметов, которые усиливают друг друга.
 
-Currently, two official plugins are available:
+Полное ТЗ (на русском): `PoD_Web_Balance_Prompt.md` (лежит вне репозитория, у пользователя в Загрузках — путь может отличаться). Оно во многом устарело после знакомства с реальными таблицами — актуальная схема данных описана ниже.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Быстрый старт
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # tsc -b && vite build (+ пересобирает манифест спрайтов, см. ниже)
+npm run lint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Развёртывание — GitHub Pages (статика, `dist/`), бэкенда нет. Все правки пользователя (билды, иконки, кастомные значения) живут в `localStorage` браузера + экспорт/импорт JSON-снапшота на странице «Источники».
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Что здесь есть (страницы)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- **Источники** (`/sources`) — два поля-ссылки (конфиг / переводы: Google Sheets CSV-ссылка ИЛИ URL Apps Script Web App, см. ниже) + ручная загрузка CSV. Показывает отчёт о распознанных таблицах и предупреждения.
+- **Предметы** (`/items`, `/items/:id`) — список с поиском/фильтром по тегу и типу/сортировкой, карточка предмета: спрайт/иконка, имя, описание, теги, механики, цепочка прокачки, замены (ReplaceItem/ReplaceOnTrigger), панель «Возможно связано».
+- **Билды** (`/builds`, `/builds/:id`) — единая страница (раньше была отдельно ещё и «Граф», склеена сюда). Список карточек: заголовок (иконка+название, клик → карточка билда), под ним — кликабельные спрайты предметов, и раздел «Возможно связано с» (кликабельные иконки других билдов). Поиск/фильтр по тегу/сортировка/кнопка «Предложить билды» (автокластеризация)/«+ Создать билд». `/builds/:id` — форма редактирования (имя/иконка/описание/состав).
+- **Аналитика** (`/analytics`) — сейчас только раздел «неиспользуемые спрайты» (файлы в `public/pod-mini-characters/`, на которые не ссылается ни один загруженный предмет).
 
-```
+`/graph` больше не существует как отдельная страница — редиректит на `/builds`.
+
+## Архитектура
+
+- React 19 + Vite + MUI v9 (⚠️ **не v5/v6** — `Stack` больше не принимает `alignItems`/`justifyContent`/`flexWrap`/`gap` напрямую как пропсы, только через `sx`, иначе TS-ошибка) + react-router.
+- `src/core/GameStore.ts` — рукописный mutable-класс-синглтон (не Redux/Zustand). Реактивность — через собственный pub/sub: счётчик `version` + `notify()` после каждой мутации, `useStore()` (`src/ui/hooks/useStore.ts`) подписывается через `useSyncExternalStore`. **Если добавляете новый метод-мутатор в GameStore — не забудьте вызвать `this.notify()` в конце, иначе компоненты не перерисуются.**
+- `store.items` — **геттер**, не поле: фильтрует `store.allItems` (весь импортированный набор) по наличию перевода (см. «Правила видимости» ниже). Для «сырых», непрофильтрованных данных используйте `store.allItems`.
+- Персистентность — `localStorage`, ключи `pod-balance-tool:v1:*` (`src/core/persistence/localStore.ts`), плюс экспорт/импорт JSON.
+- `src/core/import/` — пайплайн импорта: `csv.ts` (papaparse), `sheetSource.ts` (fetch Google Sheets CSV или Apps Script JSON), `sanitize.ts` (чистка «строк-комментариев», см. ниже), `tableClassifier.ts` (определяет тип таблицы по заголовкам колонок), `tableNames.ts` (сопоставление имени вкладки), `normalize.ts` (сырые строки → доменные модели).
+- `src/core/domain/` — доменная логика без UI: `mechanicTables.ts` (структура колонок механик), `paramRegistry.ts` (динамический список значений параметров), `relations.ts` (связи предметов/билдов — сердце «Возможно связано» и автосборки билдов), `sprites.ts` (путь к спрайту).
+- **Принцип «никаких зашитых констант»**: ни одно допустимое значение параметра (ItemType/TargetColor/Place/ActivatorType/ItemTag и т.д.) не хардкодится в коде — все выводится из загруженных данных (`paramRegistry.ts`) + ручные кастомные значения пользователя. Зашиты только *имена* колонок (структура), не значения.
+
+## Реальная схема данных (важно!)
+
+ТЗ описывало упрощённые примеры — реальные таблицы (проверено на живом экспорте пользователя) устроены иначе:
+
+| Таблица | Что это | Особенности |
+|---|---|---|
+| `Cards` / `Houses` / `Artefacts` | Предметы, **три отдельные таблицы**, не одна | Нет колонки `ItemType` — категория (`Card`/`House`/`Artefact`) выводится из **имени вкладки**, не из данных (`ITEM_CATEGORY_HINTS` в `normalize.ts`) |
+| `item_name` / `item_desc` | Переводы | Формат `key,ru,en` (не `key,value`). `item_desc`: ключ = `{id}_desc` |
+| `Enums` | Справочник допустимых значений параметров | **Широкий/рваный формат** — одна колонка = одно измерение (ItemType/TargetColor/.../ItemTag), независимые списки без связи между строками. НЕ строка-на-запись |
+| `MechActivate`, `MechAddValue`, `MechChangeColor` | Механики (Activator→Target фильтры) | В целом совпадают с ТЗ, плюс реальные доп.колонки `UseActivatorIds`/`MyPositionReq`/`Chance` |
+| `MechAddItem` | Спавн/замена предмета | В ТЗ было не дописано; реальные колонки: `...,ItemMech,NewItemId,CopiedTargetType,...` (`ItemMech` = `поставить`/`удалить`) |
+| `MechAddTag` | Выдача/снятие тега | В ТЗ было не дописано; реальные колонки: `...,TagMech,NewTags,TagsCount` |
+| `ReplaceItem` | Условная замена предмета | `ItemIdToReplace,ReplacementItem,NeededItem,NeededItemPlace,NeededItemNumber` — именно этот механизм стоит за примером «Продюсер создаёт Рок музыканта из Уличного музыканта» |
+| `ReplaceOnTrigger` | Замена по таймеру/триггеру | `ItemIdToReplace,ReplacementItem,ReplacementItemsTagForName,OnballStop,DurationType,Duration` |
+| `CardUpgrades` | Цепочки прокачки | `UpgradeChainId,UpgradeId1,UpgradeId2,UpgradeId3...` (число тиров не фиксировано, ищем по regex `UpgradeId\d+`) |
+
+Классификация таблиц — по **сигнатуре колонок**, не по имени вкладки (см. `tableClassifier.ts`), потому что имя вкладки ненадёжно (см. ниже).
+
+### Реальные грабли, на которые уже наступали
+
+- **Имена вкладок ≠ имена файлов.** CSV, выгруженный из Google Sheets, называется `"<Название таблицы> - <ИмяВкладки>.csv"`, а Apps Script (`sheet.getName()`) отдаёт просто `"ИмяВкладки"`. Сопоставление имени — только через `tableNameOf()`/`matchesTableName()` (`tableNames.ts`), которые берут последний сегмент после `" - "`.
+- **Строки-комментарии выдают себя за данные.** Во второй строке нескольких таблиц (`MechAddValue`, `MechAddTag`, `MechChangeColor`, `ReplaceOnTrigger`) — описание колонки на русском, иногда прямо в колонке Id. Отличаем от настоящих коротких кириллических значений (`поставить`/`удалить`/`дать`) по числу слов (`sanitize.ts`: 3+ слова с кириллицей → считаем комментарием и затираем).
+- **Числа из Apps Script — не строки.** `getValues()` отдаёт реальные JS `number`/`boolean` для числовых ячеек, а не строки. Раньше это ронял весь сайт (`.trim()` на числе). Чинится один раз в `sheetSource.ts` (`cellToString`/`stringifyRow`) — единственное место, где вообще может прийти не-строка.
+- **Подстрочный поиск колонки — опасен.** Fallback-поиск колонки по подстроке `"type"` однажды поймал `ValueUsageType` вместо настоящего типа предмета (`ItemType` не было, а `*Type`-колонки — есть всегда). Урок: подстрочные fallback'и — только когда точное совпадение действительно недоступно, и проверять на коллизии с соседними `*Type`/`*Tag` колонками.
+- **Несовпадение id между конфигом и переводами.** ~40 предметов из конфига не находили перевод напрямую — у 38 из них в конфиге не хватало префикса `standart_`, который есть в ключе перевода (например `in_a_money_per_red_loop` vs `standart_in_a_money_per_red_loop`). Это НЕ починено эвристикой (слишком ненадёжно угадывать по паттерну id) — предметы без перевода просто скрываются (см. ниже), пользователю показано как факт, ждёт решения на стороне таблиц.
+
+## Правила видимости и очистки данных
+
+- **Предмет без перевода — скрыт везде.** Если для `item.nameKey` нет записи в `translations`, предмет не попадает в `store.items` (геттер, фильтрует `store.allItems`). Иначе — везде.
+- **Уровни прокачки (+/++) — не самостоятельные карточки в списках связей/графа.** `higherTierIds(upgradeChains)` (`relations.ts`) — общая утилита, вычисляет все id-тиры кроме первого в каждой цепочке `CardUpgrades`; используется и в билд-карточках, и в «Возможно связано». Предмет всё ещё существует и доступен напрямую (`/items/:id`), просто не всплывает как отдельная подсказка.
+  - ⚠️ Работает только для того, что реально прописано в `CardUpgrades` — если у предмета нет записи там (даже если имя в переводах явно "Х+"), фильтр его не поймает. Известный пробел: Черлидер/Болельщик не зарегистрированы в `CardUpgrades`, хотя явно апгрейдятся.
+
+## Модель «билда» (для автоподсказок)
+
+Билд — это не просто «общий тег». Настоящая механика (по разобранным вместе с пользователем примерам, реальные id — см. `src/core/domain/relations.ts` и историю чата):
+
+**payoff-предмет** слушает событие/фильтр (свой `ActivatorType` + `ActivatorTag`/`ActivatorColor`/`Place`) — **feeder-предметы** производят ровно это условие, часто из совсем другой таблицы механик, без общего тега вовсе. Пример: Черлидер/Болельщик (`MechChangeColor` — перекраска) кормят Художника (`MechAddValue`, `ActivatorType=ColorChange, Place=All` — слушает любую смену цвета где угодно).
+
+Сигналы, которые реально участвуют в автосборке билдов (`computeSuggestedBuilds`) — «сильные», объединяют предметы в один черновик:
+1. Общий тег (включая теги, только *упомянутые* в фильтрах механики — `ActivatorTag`/`TargetTag`/`BonusTargetTag`/`NewTags` — а не обязательно буквально висящие на предмете, см. `MECHANIC_TAG_FIELDS`)
+2. Прямая ссылка по Id в любом поле механики (генерический скан значений против известных id)
+3. Общая цепочка прокачки (`CardUpgrades`)
+4. Связь через `ReplaceItem`/`ReplaceOnTrigger`
+
+Сигнал «производит событие → слушает событие» (`producedActivatorType`/`computeListenedEvents`, например `MechChangeColor` → `ColorChange`) — **сознательно НЕ участвует** в автосборке (риск разрастить и так большой тег-кластер), только в информационных панелях «Возможно связано»/«Возможно связано с».
+
+Транзитивную композицию билдов (билд A кормит билд B через то, что payoff билда A — фидер в билде B) — сознательно не автоматизировали, слишком нечёткая логика для авто-эвристики.
+
+## Спрайты
+
+- Реальный путь: **`public/pod-mini-characters/`** (Vite отдаёт как статику только `public/` — куда угодно ещё класть файлы бесполезно, браузер их не увидит).
+- Имя файла берётся из колонки `CardSpriteNameMini` (есть у `Cards`/`Houses`, у `Artefacts` — нет, там только эмодзи). Расширение `.png` уже включено в значение колонки в реальных данных.
+- `src/core/domain/sprites.ts` → `getItemSpriteFileName()` / `getItemSpritePath()`. Приоритет отображения (`src/ui/components/ItemIcon.tsx`): ручная эмодзи-иконка пользователя → реальный спрайт (с `onError`-фолбэком на эмодзи, если файла нет/не грузится) → 🧩 по умолчанию.
+- Список файлов для «неиспользуемых спрайтов» в Аналитике берётся не рантайм-сканированием `public/` (Vite так не умеет), а из `public/pod-mini-characters/manifest.json`, который перегенерируется скриптом `scripts/generate-sprite-manifest.mjs`, автоматически подключённым через `predev`/`prebuild` в `package.json`. Если добавляете спрайты руками — просто положите в папку, манифест обновится сам при следующем `npm run dev`/`npm run build` (или руками: `node scripts/generate-sprite-manifest.mjs`).
+
+## Что специально не сделано / оставлено на потом
+
+- Таблицы `Словарь значков`, `dialogues`, `ui`, `Colors`, `PlayerButtons`, `BallGroups`, `Decks`, `DecksShop`, `Packs`, `ShopSettings`, `RoundSettings`, `Sprints`, `ItemUpgrading`, `Reactions`, `Corridor`, `Meta` — подтверждено пользователем как нерелевантные балансу, поддержка не нужна.
+- Транзитивная композиция билдов (см. выше) — не автоматизирована.
+- Экспорт билдов/правок обратно в Google Sheets — заявленная будущая цель пользователя, пока не реализовано. При добавлении новых моделей данных держать их сериализуемыми/generic с этим в виду.
+- `CardUpgrades` не покрывает все реальные апгрейд-цепочки (пример: Черлидер/Болельщик) — это пробел в исходных данных, не в коде.
+
+## Тестирование без реального Google Sheets
+
+Реальные CSV пользователя лежат вне репозитория (присылались в чате). Для ручной проверки в браузере: положить CSV-файлы во временную `public/_test_data/` (не коммитить!), сформировать `File[]` через `fetch` + `DataTransfer` и продиспатчить `change`-событие на `input[type=file][accept=".csv"]` на странице «Источники» — так весь пайплайн (классификация → нормализация → GameStore) проверяется по-настоящему, без моков. Использовалось многократно в ходе разработки, детали — в истории чата/памяти агента.
