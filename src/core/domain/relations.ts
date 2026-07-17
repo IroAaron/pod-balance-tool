@@ -3,7 +3,6 @@ import type { Build } from "../models/Build";
 import type { MechanicRow } from "../models/Mechanic";
 import type { UpgradeChain } from "../models/UpgradeChain";
 import type { ReplaceRule } from "../models/ReplaceRule";
-import { MECHANIC_TAG_FIELDS } from "./mechanicTables";
 
 function splitList(value: string): string[] {
     return value
@@ -19,30 +18,6 @@ function groupByItemId(mechanics: MechanicRow[]): Map<string, MechanicRow[]> {
         map.get(mechanic.itemId)!.push(mechanic);
     }
     return map;
-}
-
-/**
- * Tags "relevant" to an item = its own ItemTag list, plus every tag value
- * that item's own mechanics reference as a filter (ActivatorTag/TargetTag/
- * BonusTargetTag). This is what connects e.g. a "fuel producer" (whose
- * mechanic targets tag=Fuel) to a "fuel consumer" (whose mechanic activates
- * on tag=Fuel) even though neither references the other's Id directly.
- */
-function computeTagSets(items: Item[], mechanicsByItem: Map<string, MechanicRow[]>): Map<string, Set<string>> {
-    const tagSets = new Map<string, Set<string>>();
-
-    for (const item of items) {
-        const tags = new Set(item.tags);
-        for (const mechanic of mechanicsByItem.get(item.id) ?? []) {
-            for (const field of MECHANIC_TAG_FIELDS) {
-                const value = mechanic.fields[field];
-                if (value) splitList(value).forEach((tag) => tags.add(tag));
-            }
-        }
-        tagSets.set(item.id, tags);
-    }
-
-    return tagSets;
 }
 
 /** Ids of every upgrade tier past the first — power-scaled clones of the base item. */
@@ -110,16 +85,15 @@ class UnionFind {
 }
 
 /**
- * Draft Build clusters from strong signals only: items sharing a relevant
- * tag, items whose mechanics reference another item's Id directly
- * (UseTargetIds, MechAddItem's NewItemId, etc. — detected generically by
- * scanning field values against known item Ids), items linked by a
- * ReplaceItem/ReplaceOnTrigger rule, or items that are tiers of the same
- * upgrade chain.
+ * Draft Build clusters from strong signals only — items whose mechanics reference another item's Id directly
+ * (UseTargetIds, MechAddItem's NewItemId, etc. — detected generically by scanning field values against known
+ * item Ids), items linked by a ReplaceItem/ReplaceOnTrigger rule, or items that are tiers of the same upgrade
+ * chain. Deliberately **not** shared tags — a shared tag is not a causal connection by itself and pulled too
+ * many unrelated items into one cluster in practice; every remaining signal here is rooted in an actual
+ * mechanic/structural reference between the two specific items.
  *
- * These are a starting point, not a final answer — a common tag can pull
- * unrelated items into one cluster, so the user is expected to split/merge/
- * rename drafts on the Builds page rather than accept them as-is.
+ * These are a starting point, not a final answer — the user is expected to split/merge/rename drafts on the
+ * Builds page rather than accept them as-is.
  */
 export function computeSuggestedBuilds(
     items: Item[],
@@ -130,21 +104,9 @@ export function computeSuggestedBuilds(
 ): Build[] {
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
-    const tagSets = computeTagSets(items, mechanicsByItem);
 
     const unionFind = new UnionFind();
     for (const item of items) unionFind.find(item.id);
-
-    const idsByTag = new Map<string, string[]>();
-    for (const [id, tags] of tagSets) {
-        for (const tag of tags) {
-            if (!idsByTag.has(tag)) idsByTag.set(tag, []);
-            idsByTag.get(tag)!.push(id);
-        }
-    }
-    for (const ids of idsByTag.values()) {
-        for (let i = 1; i < ids.length; i++) unionFind.union(ids[0], ids[i]);
-    }
 
     for (const item of items) {
         for (const mechanic of mechanicsByItem.get(item.id) ?? []) {
@@ -532,7 +494,6 @@ export function relatedItems(
 ): RelatedItem[] {
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
-    const tagSets = computeTagSets(items, mechanicsByItem);
     const chainMates = buildChainMates(upgradeChains);
     const targetChainMates = chainMates.get(itemId) ?? new Set<string>();
     const replaceMates = buildReplaceMates(replaceRules, knownIds);
@@ -542,7 +503,6 @@ export function relatedItems(
     const targetProduces = producedEvents.get(itemId) ?? new Set<string>();
     const targetListens = listenedEvents.get(itemId) ?? new Set<string>();
 
-    const targetTags = tagSets.get(itemId) ?? new Set<string>();
     const targetMechanics = mechanicsByItem.get(itemId) ?? [];
     const targetIdRefs = new Set(
         targetMechanics.flatMap((mechanic) =>
@@ -602,14 +562,6 @@ export function relatedItems(
             }
         }
 
-        const otherTags = tagSets.get(other.id) ?? new Set<string>();
-        const sharedTags = [...targetTags].filter((tag) => otherTags.has(tag));
-        if (sharedTags.length > 0) {
-            strength = "strong";
-            score += sharedTags.length * 5;
-            reasons.push(`общие теги: ${sharedTags.join(", ")}`);
-        }
-
         const otherFingerprints = fieldFingerprints(otherMechanics);
         const sharedFingerprints = [...targetFingerprints].filter((fp) => otherFingerprints.has(fp));
         if (sharedFingerprints.length > 0) {
@@ -636,9 +588,9 @@ export interface RelatedBuild {
 /**
  * Ranked "possibly related" builds for a build's detail page — informational
  * only, derived from item overlap plus the same strong item-level signals
- * used by relatedItems (shared tags/ids/chains/replace-rules/produced-events),
- * rolled up to build level. Does not attempt the deeper "this build's payoff
- * is fed by that other build" composition — that needs a human to notice.
+ * used by relatedItems (ids/chains/replace-rules/produced-events), rolled up
+ * to build level. Does not attempt the deeper "this build's payoff is fed by
+ * that other build" composition — that needs a human to notice.
  */
 export function relatedBuilds(
     buildId: string,

@@ -130,13 +130,4 @@ export const MECHANIC_TABLE_SIGNATURE_COLUMNS: Record<Exclude<MechanicTableName,
     MechAddTag: ["TagMech", "NewTags", "TagsCount"],
 };
 
-/**
- * Field names (across any mechanic table) that carry a tag value relevant to
- * an item — either a filter it reacts to (ActivatorTag/TargetTag/
- * BonusTargetTag) or a tag it hands out to something else (MechAddTag's
- * NewTags, e.g. "Гетто" giving Bums the Criminal tag). Either direction makes
- * the tag part of that item's own thematic footprint for clustering purposes.
- */
-export const MECHANIC_TAG_FIELDS = ["ActivatorTag", "TargetTag", "BonusTargetTag", "NewTags"];
-
 export const KNOWN_MECHANIC_TABLES = Object.keys(MECHANIC_TABLE_COLUMNS) as Exclude<MechanicTableName, "Unknown">[];
