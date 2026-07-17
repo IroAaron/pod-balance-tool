@@ -29,11 +29,17 @@ import ItemIcon from "../../components/ItemIcon";
 import { higherTierIds, relatedBuilds, type RelatedBuild } from "../../../core/domain/relations";
 import type { BuildSortKey } from "../../../core/services/BuildService";
 
+// Same three literal category names normalize.ts assigns as item.itemType for Cards/Houses/Artefacts —
+// deliberately not store.paramValues.ItemType, which also aggregates ActivatorTargetType/TargetType/
+// BonusTargetType mechanic values (e.g. "PlayerScore") and would pollute this filter with non-categories.
+const BUILD_TYPE_OPTIONS = ["Artefact", "Card", "House"];
+
 export default function BuildsPage() {
     const store = useStore();
     const navigate = useNavigate();
     const [query, setQuery] = useState("");
     const [tagFilter, setTagFilter] = useState<string | null>(null);
+    const [typeFilter, setTypeFilter] = useState<string[]>([]);
     const [sortKey, setSortKey] = useState<BuildSortKey>("name");
     const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
     const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
@@ -49,11 +55,18 @@ export default function BuildsPage() {
                 build.items.some((itemId) => store.getItem(itemId)?.tags.includes(tagFilter))
             );
         }
+        if (typeFilter.length > 0) {
+            // "Starts with" a type = the build's first item (its root, for cascade-generated builds) is of that type.
+            result = result.filter((build) => {
+                const rootType = build.items[0] ? store.getItem(build.items[0])?.itemType : undefined;
+                return rootType ? typeFilter.includes(rootType) : false;
+            });
+        }
         result = store.buildService.sort(result, sortKey);
         return result;
         // buildService/getItem are stable methods on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [store.builds, store.items, query, tagFilter, sortKey]);
+    }, [store.builds, store.items, query, tagFilter, typeFilter, sortKey]);
 
     const relatedByBuild = useMemo(() => {
         const map = new Map<string, RelatedBuild[]>();
@@ -67,6 +80,11 @@ export default function BuildsPage() {
     }, [store.builds, store.items, store.mechanics, store.upgradeChains, store.replaceRules]);
 
     const availableTags = store.paramValues.ItemTag ?? [];
+    const availableTypes = BUILD_TYPE_OPTIONS;
+
+    const toggleType = (type: string) => {
+        setTypeFilter((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]));
+    };
 
     const handleCreate = () => {
         const build = store.createBuild();
@@ -123,6 +141,32 @@ export default function BuildsPage() {
                     <MenuItem value="name">По названию</MenuItem>
                     <MenuItem value="itemCount">По кол-ву предметов</MenuItem>
                 </TextField>
+            </Stack>
+
+            <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", alignItems: "center" }}>
+                <Typography variant="body2" color="text.secondary">
+                    Тип билда:
+                </Typography>
+                {availableTypes.map((type) => (
+                    <FormControlLabel
+                        key={type}
+                        control={
+                            <Checkbox
+                                size="small"
+                                checked={typeFilter.includes(type)}
+                                onChange={() => toggleType(type)}
+                            />
+                        }
+                        label={type}
+                        sx={{ mr: 0 }}
+                    />
+                ))}
+                <Button size="small" onClick={() => setTypeFilter(availableTypes)} disabled={availableTypes.length === 0}>
+                    Выбрать все
+                </Button>
+                <Button size="small" onClick={() => setTypeFilter([])} disabled={typeFilter.length === 0}>
+                    Снять все
+                </Button>
             </Stack>
 
             <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
