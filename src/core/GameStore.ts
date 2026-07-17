@@ -9,7 +9,7 @@ import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
 import { ImportService, type ImportReport, type ImportResult } from "./services/ImportService";
 
-import { computeSuggestedBuilds, computeCascadeBuilds } from "./domain/relations";
+import { computeSuggestedBuilds, computeCascadeBuilds, higherTierIds } from "./domain/relations";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 
 import {
@@ -286,15 +286,26 @@ export class GameStore {
         this.notify();
     }
 
+    /**
+     * Items/mechanics to feed the build-generation algorithms. Excludes upgrade tiers (+/++) by default — a "+"
+     * item is just a power-scaled clone of its base, and letting it independently pull in tag/id connections
+     * tends to just duplicate the base item's draft rather than surface anything new. Mechanics are filtered
+     * alongside items (not just items) so an excluded tier's own mechanic rows can't leak back in through
+     * reverse-lookup indices (e.g. "who spawns/activates X") inside the generation algorithms.
+     */
+    private itemsForBuildGeneration(includeUpgradeTiers: boolean): { items: Item[]; mechanics: MechanicRow[] } {
+        if (includeUpgradeTiers) return { items: this.items, mechanics: this.mechanics };
+
+        const excluded = higherTierIds(this.upgradeChains);
+        const items = this.items.filter((item) => !excluded.has(item.id));
+        const mechanics = this.mechanics.filter((mechanic) => !excluded.has(mechanic.itemId));
+        return { items, mechanics };
+    }
+
     /** Runs the tag/id clustering pass and appends new draft builds (deduped against existing ones). */
-    suggestBuilds(): number {
-        const drafts = computeSuggestedBuilds(
-            this.items,
-            this.mechanics,
-            this.upgradeChains,
-            this.replaceRules,
-            this.builds
-        );
+    suggestBuilds(includeUpgradeTiers = false): number {
+        const { items, mechanics } = this.itemsForBuildGeneration(includeUpgradeTiers);
+        const drafts = computeSuggestedBuilds(items, mechanics, this.upgradeChains, this.replaceRules, this.builds);
         this.builds = [...this.builds, ...drafts];
         saveBuilds(this.builds);
         this.notify();
@@ -302,10 +313,11 @@ export class GameStore {
     }
 
     /** Runs the PlayerScore-cascade pass (Activator/Bonus/spawn chains, not tag-clustering) and appends new draft builds. */
-    suggestCascadeBuilds(): number {
+    suggestCascadeBuilds(includeUpgradeTiers = false): number {
+        const { items, mechanics } = this.itemsForBuildGeneration(includeUpgradeTiers);
         const drafts = computeCascadeBuilds(
-            this.items,
-            this.mechanics,
+            items,
+            mechanics,
             this.replaceRules,
             this.builds,
             (item) => this.itemName(item),

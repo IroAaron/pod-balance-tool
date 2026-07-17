@@ -8,7 +8,9 @@ import {
     Card,
     CardActionArea,
     CardContent,
+    Checkbox,
     Chip,
+    FormControlLabel,
     MenuItem,
     Stack,
     TextField,
@@ -27,6 +29,7 @@ export default function BuildsPage() {
     const [tagFilter, setTagFilter] = useState<string | null>(null);
     const [sortKey, setSortKey] = useState<BuildSortKey>("name");
     const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
+    const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
 
     const excludedTiers = useMemo(() => higherTierIds(store.upgradeChains), [store.upgradeChains]);
 
@@ -62,12 +65,12 @@ export default function BuildsPage() {
     };
 
     const handleSuggest = () => {
-        const count = store.suggestBuilds();
+        const count = store.suggestBuilds(includeUpgradeTiers);
         setSuggestMessage(count > 0 ? `Добавлено черновиков: ${count}` : "Новых черновиков не найдено");
     };
 
     const handleSuggestCascade = () => {
-        const count = store.suggestCascadeBuilds();
+        const count = store.suggestCascadeBuilds(includeUpgradeTiers);
         setSuggestMessage(
             count > 0 ? `Добавлено каскадных черновиков: ${count}` : "Новых каскадных черновиков не найдено"
         );
@@ -108,6 +111,17 @@ export default function BuildsPage() {
 
                 <Box sx={{ flex: 1 }} />
 
+                <FormControlLabel
+                    control={
+                        <Checkbox
+                            size="small"
+                            checked={includeUpgradeTiers}
+                            onChange={(event) => setIncludeUpgradeTiers(event.target.checked)}
+                        />
+                    }
+                    label="Учитывать прокачки (+/++)"
+                    sx={{ mr: 0 }}
+                />
                 <Button variant="outlined" onClick={handleSuggest} disabled={store.items.length === 0}>
                     Предложить билды
                 </Button>
