@@ -66,6 +66,13 @@ export default function BuildsPage() {
         setSuggestMessage(count > 0 ? `Добавлено черновиков: ${count}` : "Новых черновиков не найдено");
     };
 
+    const handleSuggestCascade = () => {
+        const count = store.suggestCascadeBuilds();
+        setSuggestMessage(
+            count > 0 ? `Добавлено каскадных черновиков: ${count}` : "Новых каскадных черновиков не найдено"
+        );
+    };
+
     return (
         <Stack spacing={3}>
             <Typography variant="h4">Билды</Typography>
@@ -103,6 +110,9 @@ export default function BuildsPage() {
 
                 <Button variant="outlined" onClick={handleSuggest} disabled={store.items.length === 0}>
                     Предложить билды
+                </Button>
+                <Button variant="outlined" onClick={handleSuggestCascade} disabled={store.items.length === 0}>
+                    Собрать билды от очков
                 </Button>
                 <Button variant="contained" onClick={handleCreate}>
                     + Создать билд

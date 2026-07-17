@@ -269,6 +269,197 @@ function computeListenedEvents(mechanicsByItem: Map<string, MechanicRow[]>): Map
     return listened;
 }
 
+const PLAYER_SCORE_TARGET_TYPE = "PlayerScore";
+
+/** Item ids referenced anywhere in a mechanic row's own fields (Activator/Target/spawn ids all live under different field names per table, so this scans every value generically). */
+function directIdRefs(row: MechanicRow, knownIds: Set<string>): string[] {
+    return Object.values(row.fields)
+        .flatMap(splitList)
+        .filter((token) => knownIds.has(token) && token !== row.itemId);
+}
+
+interface CascadeIndex {
+    /** targetId -> items whose mechanic targets it directly (UseTargetIds/TargetItemId) — i.e. who activates it. */
+    activatorsOfTarget: Map<string, Set<string>>;
+
+    /** newItemId -> items whose MechAddItem row places it on the board — i.e. who spawns it. */
+    spawnersOfTarget: Map<string, Set<string>>;
+
+    /** tag -> items carrying/producing that tag (own ItemTag or a mechanic's tag-filter/NewTags field, see computeTagSets). */
+    itemIdsByTag: Map<string, Set<string>>;
+
+    /** color -> items whose MechChangeColor row produces that color. */
+    itemIdsByProducedColor: Map<string, Set<string>>;
+
+    /** event -> items whose mechanic structurally produces that ActivatorType event (see producedActivatorType). */
+    itemIdsByProducedEvent: Map<string, Set<string>>;
+}
+
+function buildCascadeIndex(
+    mechanicsByItem: Map<string, MechanicRow[]>,
+    tagSets: Map<string, Set<string>>,
+    knownIds: Set<string>
+): CascadeIndex {
+    const activatorsOfTarget = new Map<string, Set<string>>();
+    const spawnersOfTarget = new Map<string, Set<string>>();
+    const itemIdsByProducedColor = new Map<string, Set<string>>();
+    const itemIdsByProducedEvent = new Map<string, Set<string>>();
+
+    const addTo = (map: Map<string, Set<string>>, key: string, value: string) => {
+        if (!map.has(key)) map.set(key, new Set());
+        map.get(key)!.add(value);
+    };
+
+    for (const [itemId, rows] of mechanicsByItem) {
+        for (const row of rows) {
+            for (const token of [...splitList(row.fields.UseTargetIds ?? ""), ...splitList(row.fields.TargetItemId ?? "")]) {
+                if (knownIds.has(token)) addTo(activatorsOfTarget, token, itemId);
+            }
+
+            if (row.table === "MechAddItem" && row.fields.ItemMech === "поставить") {
+                const target = row.fields.NewItemId;
+                if (target && knownIds.has(target)) addTo(spawnersOfTarget, target, itemId);
+            }
+
+            if (row.table === "MechChangeColor" && row.fields.NewColor) {
+                addTo(itemIdsByProducedColor, row.fields.NewColor, itemId);
+            }
+
+            const event = producedActivatorType(row);
+            if (event) addTo(itemIdsByProducedEvent, event, itemId);
+        }
+    }
+
+    const itemIdsByTag = new Map<string, Set<string>>();
+    for (const [id, tags] of tagSets) {
+        for (const tag of tags) addTo(itemIdsByTag, tag, id);
+    }
+
+    return { activatorsOfTarget, spawnersOfTarget, itemIdsByTag, itemIdsByProducedColor, itemIdsByProducedEvent };
+}
+
+/**
+ * Next-hop candidates for the PlayerScore cascade, starting from `itemId`:
+ * - Any direct item-id reference in itemId's own mechanic rows — covers "activator is a specific item" (UseActivatorIds)
+ *   plus any other id-shaped field (spawn targets, etc). The referenced item's own inbound/outbound connections get
+ *   picked up on a later BFS step via the same function, once it's dequeued.
+ * - When an Activator filter has no concrete id (a generic Tag/Color/Type condition), or for Bonus filters (which never
+ *   carry a concrete id in the real schema — only Tag/Color/Type), items that structurally *produce* the matching
+ *   tag/color/event are added as feeders ("смотреть кто спавнит").
+ * - Items that structurally activate or spawn itemId itself — closes the cascade "upward" for every hop, not just the
+ *   first ("смотреть кто активирует его или спавнит").
+ * - Replace-rule mates: swapping into/out of itemId is the same kind of connection as a direct id reference.
+ */
+function cascadeNeighbors(
+    itemId: string,
+    mechanicsByItem: Map<string, MechanicRow[]>,
+    replaceRules: ReplaceRule[],
+    index: CascadeIndex,
+    knownIds: Set<string>
+): Set<string> {
+    const neighbors = new Set<string>();
+
+    for (const row of mechanicsByItem.get(itemId) ?? []) {
+        for (const id of directIdRefs(row, knownIds)) neighbors.add(id);
+
+        const hasActivatorId = splitList(row.fields.UseActivatorIds ?? "").some((id) => knownIds.has(id));
+        if (!hasActivatorId) {
+            for (const tag of splitList(row.fields.ActivatorTag ?? "")) {
+                for (const id of index.itemIdsByTag.get(tag) ?? []) neighbors.add(id);
+            }
+            for (const color of splitList(row.fields.ActivatorColor ?? "")) {
+                for (const id of index.itemIdsByProducedColor.get(color) ?? []) neighbors.add(id);
+            }
+            if (row.fields.ActivatorType) {
+                for (const id of index.itemIdsByProducedEvent.get(row.fields.ActivatorType) ?? []) neighbors.add(id);
+            }
+        }
+
+        for (const tag of splitList(row.fields.BonusTargetTag ?? "")) {
+            for (const id of index.itemIdsByTag.get(tag) ?? []) neighbors.add(id);
+        }
+        for (const color of splitList(row.fields.BonusTargetColor ?? "")) {
+            for (const id of index.itemIdsByProducedColor.get(color) ?? []) neighbors.add(id);
+        }
+    }
+
+    for (const rule of replaceRules) {
+        if (rule.itemIdToReplace === itemId && knownIds.has(rule.replacementItem)) neighbors.add(rule.replacementItem);
+        if (rule.replacementItem === itemId && knownIds.has(rule.itemIdToReplace)) neighbors.add(rule.itemIdToReplace);
+    }
+
+    for (const id of index.activatorsOfTarget.get(itemId) ?? []) neighbors.add(id);
+    for (const id of index.spawnersOfTarget.get(itemId) ?? []) neighbors.add(id);
+
+    neighbors.delete(itemId);
+    return neighbors;
+}
+
+/**
+ * Draft one build per item that earns PlayerScore (a MechAddValue row with TargetType=PlayerScore), by cascading
+ * outward through Activator/Bonus/spawn/activation relationships only — deliberately NOT shared tags (that's
+ * computeSuggestedBuilds' job; this is meant to be a tighter, causally-connected chain instead of a broad
+ * tag-cluster). Expansion continues until nothing new is reached (`visited` BFS), so cycles — e.g. item A earns
+ * PlayerScore from item B, and A also spawns B — resolve naturally: once B is visited, the edge back to A is a
+ * no-op skip rather than a re-traversal, while B's other, not-yet-visited connections keep expanding normally.
+ */
+export function computeCascadeBuilds(
+    items: Item[],
+    mechanics: MechanicRow[],
+    replaceRules: ReplaceRule[],
+    existingBuilds: Build[],
+    itemName: (item: Item) => string,
+    itemIcon: (item: Item) => string | undefined
+): Build[] {
+    const knownIds = new Set(items.map((item) => item.id));
+    const mechanicsByItem = groupByItemId(mechanics);
+    const tagSets = computeTagSets(items, mechanicsByItem);
+    const index = buildCascadeIndex(mechanicsByItem, tagSets, knownIds);
+
+    const roots = items.filter((item) =>
+        (mechanicsByItem.get(item.id) ?? []).some(
+            (row) =>
+                row.table === "MechAddValue" &&
+                splitList(row.fields.TargetType ?? "").includes(PLAYER_SCORE_TARGET_TYPE)
+        )
+    );
+
+    const existingItemSets = existingBuilds.map((build) => new Set(build.items));
+    const drafts: Build[] = [];
+
+    for (const root of roots) {
+        const visited = new Set<string>([root.id]);
+        const queue = [root.id];
+
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            for (const neighbor of cascadeNeighbors(current, mechanicsByItem, replaceRules, index, knownIds)) {
+                if (visited.has(neighbor)) continue;
+                visited.add(neighbor);
+                queue.push(neighbor);
+            }
+        }
+
+        if (visited.size < 2) continue;
+
+        const clusterItems = [...visited];
+        const alreadyCovered = existingItemSets.some(
+            (existing) => existing.size === clusterItems.length && clusterItems.every((id) => existing.has(id))
+        );
+        if (alreadyCovered) continue;
+
+        drafts.push({
+            id: `cascade-${root.id}-${Math.random().toString(36).slice(2, 7)}`,
+            name: `Билд от ${itemName(root)}`,
+            icon: itemIcon(root),
+            items: clusterItems,
+            auto: true,
+        });
+    }
+
+    return drafts;
+}
+
 /** Ranked "possibly related" items for an item's detail page — informational only, never auto-clusters. */
 export function relatedItems(
     itemId: string,

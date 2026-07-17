@@ -9,7 +9,7 @@ import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
 import { ImportService, type ImportReport, type ImportResult } from "./services/ImportService";
 
-import { computeSuggestedBuilds } from "./domain/relations";
+import { computeSuggestedBuilds, computeCascadeBuilds } from "./domain/relations";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 
 import {
@@ -294,6 +294,22 @@ export class GameStore {
             this.upgradeChains,
             this.replaceRules,
             this.builds
+        );
+        this.builds = [...this.builds, ...drafts];
+        saveBuilds(this.builds);
+        this.notify();
+        return drafts.length;
+    }
+
+    /** Runs the PlayerScore-cascade pass (Activator/Bonus/spawn chains, not tag-clustering) and appends new draft builds. */
+    suggestCascadeBuilds(): number {
+        const drafts = computeCascadeBuilds(
+            this.items,
+            this.mechanics,
+            this.replaceRules,
+            this.builds,
+            (item) => this.itemName(item),
+            (item) => this.getItemIcon(item.id)
         );
         this.builds = [...this.builds, ...drafts];
         saveBuilds(this.builds);
