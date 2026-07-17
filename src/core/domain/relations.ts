@@ -271,58 +271,70 @@ function computeListenedEvents(mechanicsByItem: Map<string, MechanicRow[]>): Map
 
 const PLAYER_SCORE_TARGET_TYPE = "PlayerScore";
 
-/** Item ids referenced anywhere in a mechanic row's own fields (Activator/Target/spawn ids all live under different field names per table, so this scans every value generically). */
-function directIdRefs(row: MechanicRow, knownIds: Set<string>): string[] {
-    return Object.values(row.fields)
-        .flatMap(splitList)
-        .filter((token) => knownIds.has(token) && token !== row.itemId);
-}
-
 interface CascadeIndex {
-    /** targetId -> items whose mechanic targets it directly (UseTargetIds/TargetItemId) — i.e. who activates it. */
-    activatorsOfTarget: Map<string, Set<string>>;
+    /** targetId -> items whose mechanic applies its effect onto it directly (UseTargetIds/TargetItemId) — i.e. who acts on/modifies it. */
+    targetersOf: Map<string, Set<string>>;
 
-    /** newItemId -> items whose MechAddItem row places it on the board — i.e. who spawns it. */
-    spawnersOfTarget: Map<string, Set<string>>;
+    /** targetId -> items that place/replace it onto the board (MechAddItem "поставить", or either side of a ReplaceItem/ReplaceOnTrigger swap). */
+    spawnersOf: Map<string, Set<string>>;
 
-    /** tag -> items carrying/producing that tag (own ItemTag or a mechanic's tag-filter/NewTags field, see computeTagSets). */
+    /** tag -> items *statically* carrying that tag (item.tags only — not mechanic-derived, see itemIdsByGrantedTag for that). */
     itemIdsByTag: Map<string, Set<string>>;
+
+    /** itemType -> items of that type. */
+    itemIdsByType: Map<string, Set<string>>;
 
     /** color -> items whose MechChangeColor row produces that color. */
     itemIdsByProducedColor: Map<string, Set<string>>;
 
     /** event -> items whose mechanic structurally produces that ActivatorType event (see producedActivatorType). */
     itemIdsByProducedEvent: Map<string, Set<string>>;
+
+    /** tag -> items whose MechAddTag row grants that tag to something else. */
+    itemIdsByGrantedTag: Map<string, Set<string>>;
 }
 
 function buildCascadeIndex(
+    items: Item[],
     mechanicsByItem: Map<string, MechanicRow[]>,
-    tagSets: Map<string, Set<string>>,
+    replaceRules: ReplaceRule[],
     knownIds: Set<string>
 ): CascadeIndex {
-    const activatorsOfTarget = new Map<string, Set<string>>();
-    const spawnersOfTarget = new Map<string, Set<string>>();
+    const targetersOf = new Map<string, Set<string>>();
+    const spawnersOf = new Map<string, Set<string>>();
     const itemIdsByProducedColor = new Map<string, Set<string>>();
     const itemIdsByProducedEvent = new Map<string, Set<string>>();
+    const itemIdsByGrantedTag = new Map<string, Set<string>>();
+    const itemIdsByTag = new Map<string, Set<string>>();
+    const itemIdsByType = new Map<string, Set<string>>();
 
     const addTo = (map: Map<string, Set<string>>, key: string, value: string) => {
         if (!map.has(key)) map.set(key, new Set());
         map.get(key)!.add(value);
     };
 
+    for (const item of items) {
+        for (const tag of item.tags) addTo(itemIdsByTag, tag, item.id);
+        if (item.itemType) addTo(itemIdsByType, item.itemType, item.id);
+    }
+
     for (const [itemId, rows] of mechanicsByItem) {
         for (const row of rows) {
             for (const token of [...splitList(row.fields.UseTargetIds ?? ""), ...splitList(row.fields.TargetItemId ?? "")]) {
-                if (knownIds.has(token)) addTo(activatorsOfTarget, token, itemId);
+                if (knownIds.has(token)) addTo(targetersOf, token, itemId);
             }
 
             if (row.table === "MechAddItem" && row.fields.ItemMech === "поставить") {
                 const target = row.fields.NewItemId;
-                if (target && knownIds.has(target)) addTo(spawnersOfTarget, target, itemId);
+                if (target && knownIds.has(target)) addTo(spawnersOf, target, itemId);
             }
 
             if (row.table === "MechChangeColor" && row.fields.NewColor) {
                 addTo(itemIdsByProducedColor, row.fields.NewColor, itemId);
+            }
+
+            if (row.table === "MechAddTag") {
+                for (const tag of splitList(row.fields.NewTags ?? "")) addTo(itemIdsByGrantedTag, tag, itemId);
             }
 
             const event = producedActivatorType(row);
@@ -330,78 +342,47 @@ function buildCascadeIndex(
         }
     }
 
-    const itemIdsByTag = new Map<string, Set<string>>();
-    for (const [id, tags] of tagSets) {
-        for (const tag of tags) addTo(itemIdsByTag, tag, id);
-    }
-
-    return { activatorsOfTarget, spawnersOfTarget, itemIdsByTag, itemIdsByProducedColor, itemIdsByProducedEvent };
-}
-
-/**
- * Next-hop candidates for the PlayerScore cascade, starting from `itemId`:
- * - Any direct item-id reference in itemId's own mechanic rows — covers "activator is a specific item" (UseActivatorIds)
- *   plus any other id-shaped field (spawn targets, etc). The referenced item's own inbound/outbound connections get
- *   picked up on a later BFS step via the same function, once it's dequeued.
- * - When an Activator filter has no concrete id (a generic Tag/Color/Type condition), or for Bonus filters (which never
- *   carry a concrete id in the real schema — only Tag/Color/Type), items that structurally *produce* the matching
- *   tag/color/event are added as feeders ("смотреть кто спавнит").
- * - Items that structurally activate or spawn itemId itself — closes the cascade "upward" for every hop, not just the
- *   first ("смотреть кто активирует его или спавнит").
- * - Replace-rule mates: swapping into/out of itemId is the same kind of connection as a direct id reference.
- */
-function cascadeNeighbors(
-    itemId: string,
-    mechanicsByItem: Map<string, MechanicRow[]>,
-    replaceRules: ReplaceRule[],
-    index: CascadeIndex,
-    knownIds: Set<string>
-): Set<string> {
-    const neighbors = new Set<string>();
-
-    for (const row of mechanicsByItem.get(itemId) ?? []) {
-        for (const id of directIdRefs(row, knownIds)) neighbors.add(id);
-
-        const hasActivatorId = splitList(row.fields.UseActivatorIds ?? "").some((id) => knownIds.has(id));
-        if (!hasActivatorId) {
-            for (const tag of splitList(row.fields.ActivatorTag ?? "")) {
-                for (const id of index.itemIdsByTag.get(tag) ?? []) neighbors.add(id);
-            }
-            for (const color of splitList(row.fields.ActivatorColor ?? "")) {
-                for (const id of index.itemIdsByProducedColor.get(color) ?? []) neighbors.add(id);
-            }
-            if (row.fields.ActivatorType) {
-                for (const id of index.itemIdsByProducedEvent.get(row.fields.ActivatorType) ?? []) neighbors.add(id);
-            }
-        }
-
-        for (const tag of splitList(row.fields.BonusTargetTag ?? "")) {
-            for (const id of index.itemIdsByTag.get(tag) ?? []) neighbors.add(id);
-        }
-        for (const color of splitList(row.fields.BonusTargetColor ?? "")) {
-            for (const id of index.itemIdsByProducedColor.get(color) ?? []) neighbors.add(id);
-        }
-    }
-
     for (const rule of replaceRules) {
-        if (rule.itemIdToReplace === itemId && knownIds.has(rule.replacementItem)) neighbors.add(rule.replacementItem);
-        if (rule.replacementItem === itemId && knownIds.has(rule.itemIdToReplace)) neighbors.add(rule.itemIdToReplace);
+        if (knownIds.has(rule.itemIdToReplace) && knownIds.has(rule.replacementItem)) {
+            addTo(spawnersOf, rule.replacementItem, rule.itemIdToReplace);
+            addTo(spawnersOf, rule.itemIdToReplace, rule.replacementItem);
+        }
     }
 
-    for (const id of index.activatorsOfTarget.get(itemId) ?? []) neighbors.add(id);
-    for (const id of index.spawnersOfTarget.get(itemId) ?? []) neighbors.add(id);
+    return { targetersOf, spawnersOf, itemIdsByTag, itemIdsByType, itemIdsByProducedColor, itemIdsByProducedEvent, itemIdsByGrantedTag };
+}
 
-    neighbors.delete(itemId);
-    return neighbors;
+function collectByFilter(
+    index: CascadeIndex,
+    fields: { tag?: string; type?: string; color?: string },
+    into: Set<string>
+): void {
+    for (const tag of splitList(fields.tag ?? "")) {
+        for (const id of index.itemIdsByTag.get(tag) ?? []) into.add(id);
+    }
+    for (const type of splitList(fields.type ?? "")) {
+        for (const id of index.itemIdsByType.get(type) ?? []) into.add(id);
+    }
+    for (const color of splitList(fields.color ?? "")) {
+        for (const id of index.itemIdsByProducedColor.get(color) ?? []) into.add(id);
+    }
 }
 
 /**
- * Draft one build per item that earns PlayerScore (a MechAddValue row with TargetType=PlayerScore), by cascading
- * outward through Activator/Bonus/spawn/activation relationships only — deliberately NOT shared tags (that's
- * computeSuggestedBuilds' job; this is meant to be a tighter, causally-connected chain instead of a broad
- * tag-cluster). Expansion continues until nothing new is reached (`visited` BFS), so cycles — e.g. item A earns
- * PlayerScore from item B, and A also spawns B — resolve naturally: once B is visited, the edge back to A is a
- * no-op skip rather than a re-traversal, while B's other, not-yet-visited connections keep expanding normally.
+ * Draft one build per item that earns PlayerScore (a MechAddValue row with TargetType=PlayerScore), following a
+ * fixed, shallow structure — deliberately NOT a long recursive cascade, per the user's explicit request:
+ *   1. Root — the item whose MechAddValue row earns PlayerScore; the build exists because of it.
+ *   2. Scalers — items matching that row's Bonus filter (BonusTargetTag/BonusTargetType), i.e. what's actually
+ *      being counted to scale the root's income.
+ *   3. Activators of the root — UseActivatorIds if the row names a concrete item, else items matching the
+ *      Activator filter (tag/type membership, produced color, or structurally-produced ActivatorType event).
+ *   4. Spawners of the root — items placing it via MechAddItem, or either side of a ReplaceItem/ReplaceOnTrigger
+ *      swap involving it.
+ *   5. Spawners of the level-2 scalers, plus anything that influences the root/scalers' relevant properties:
+ *      recolorers matching the root's Bonus color, tag-granters producing a tag the root's own filters need, and
+ *      anything that directly targets the root's own id (UseTargetIds/TargetItemId — "meняет Value первого").
+ * No further recursion past level 5 — each level is computed straight from the root/level-2 identities, not from
+ * whatever got discovered at levels 3/4/5 themselves.
  */
 export function computeCascadeBuilds(
     items: Item[],
@@ -413,8 +394,7 @@ export function computeCascadeBuilds(
 ): Build[] {
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
-    const tagSets = computeTagSets(items, mechanicsByItem);
-    const index = buildCascadeIndex(mechanicsByItem, tagSets, knownIds);
+    const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
 
     const roots = items.filter((item) =>
         (mechanicsByItem.get(item.id) ?? []).some(
@@ -428,21 +408,56 @@ export function computeCascadeBuilds(
     const drafts: Build[] = [];
 
     for (const root of roots) {
-        const visited = new Set<string>([root.id]);
-        const queue = [root.id];
+        const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter(
+            (row) => row.table === "MechAddValue" && splitList(row.fields.TargetType ?? "").includes(PLAYER_SCORE_TARGET_TYPE)
+        );
 
-        while (queue.length > 0) {
-            const current = queue.shift()!;
-            for (const neighbor of cascadeNeighbors(current, mechanicsByItem, replaceRules, index, knownIds)) {
-                if (visited.has(neighbor)) continue;
-                visited.add(neighbor);
-                queue.push(neighbor);
+        const buildItems = new Set<string>([root.id]);
+
+        // Level 2 — scalers: items matching the payoff's own Bonus filter.
+        const scalers = new Set<string>();
+        for (const row of payoffRows) {
+            collectByFilter(index, { tag: row.fields.BonusTargetTag, type: row.fields.BonusTargetType }, scalers);
+        }
+        scalers.delete(root.id);
+        for (const id of scalers) buildItems.add(id);
+
+        // Level 3 — activators of the root.
+        for (const row of payoffRows) {
+            const activatorIds = splitList(row.fields.UseActivatorIds ?? "").filter((id) => knownIds.has(id));
+            if (activatorIds.length > 0) {
+                for (const id of activatorIds) buildItems.add(id);
+                continue;
             }
+            const activators = new Set<string>();
+            collectByFilter(index, { tag: row.fields.ActivatorTag, color: row.fields.ActivatorColor }, activators);
+            if (row.fields.ActivatorType) {
+                for (const id of index.itemIdsByProducedEvent.get(row.fields.ActivatorType) ?? []) activators.add(id);
+            }
+            activators.delete(root.id);
+            for (const id of activators) buildItems.add(id);
         }
 
-        if (visited.size < 2) continue;
+        // Level 4 — spawners of the root.
+        for (const id of index.spawnersOf.get(root.id) ?? []) buildItems.add(id);
 
-        const clusterItems = [...visited];
+        // Level 5 — spawners of the level-2 scalers, plus recolorers/tag-granters/targeters feeding the root/scalers.
+        for (const scalerId of scalers) {
+            for (const id of index.spawnersOf.get(scalerId) ?? []) buildItems.add(id);
+        }
+        for (const row of payoffRows) {
+            for (const color of splitList(row.fields.BonusTargetColor ?? "")) {
+                for (const id of index.itemIdsByProducedColor.get(color) ?? []) buildItems.add(id);
+            }
+            for (const tag of [...splitList(row.fields.BonusTargetTag ?? ""), ...splitList(row.fields.ActivatorTag ?? "")]) {
+                for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) buildItems.add(id);
+            }
+        }
+        for (const id of index.targetersOf.get(root.id) ?? []) buildItems.add(id);
+
+        if (buildItems.size < 2) continue;
+
+        const clusterItems = [...buildItems];
         const alreadyCovered = existingItemSets.some(
             (existing) => existing.size === clusterItems.length && clusterItems.every((id) => existing.has(id))
         );
