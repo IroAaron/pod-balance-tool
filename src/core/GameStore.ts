@@ -264,6 +264,28 @@ export class GameStore {
         this.notify();
     }
 
+    /** Manual build<->build link, kept symmetric on both sides. */
+    linkBuilds(buildIdA: string, buildIdB: string): void {
+        if (buildIdA === buildIdB) return;
+        this.builds = this.builds.map((build) => {
+            const otherId = build.id === buildIdA ? buildIdB : build.id === buildIdB ? buildIdA : null;
+            if (!otherId || (build.manualLinks ?? []).includes(otherId)) return build;
+            return { ...build, manualLinks: [...(build.manualLinks ?? []), otherId] };
+        });
+        saveBuilds(this.builds);
+        this.notify();
+    }
+
+    unlinkBuilds(buildIdA: string, buildIdB: string): void {
+        this.builds = this.builds.map((build) => {
+            const otherId = build.id === buildIdA ? buildIdB : build.id === buildIdB ? buildIdA : null;
+            if (!otherId) return build;
+            return { ...build, manualLinks: (build.manualLinks ?? []).filter((id) => id !== otherId) };
+        });
+        saveBuilds(this.builds);
+        this.notify();
+    }
+
     /** Runs the tag/id clustering pass and appends new draft builds (deduped against existing ones). */
     suggestBuilds(): number {
         const drafts = computeSuggestedBuilds(

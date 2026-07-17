@@ -432,3 +432,55 @@ export function relatedBuilds(
 
     return results.sort((a, b) => b.score - a.score);
 }
+
+export interface BuildConnection {
+    source: string;
+
+    target: string;
+
+    /** 0..1 — sharedItemCount / min(itemsA, itemsB), so a big build sharing one item with a small one reads as weak. */
+    strength: number;
+
+    sharedItemCount: number;
+
+    /** True if the user explicitly linked these builds (via GameStore.linkBuilds), regardless of item overlap. */
+    manual: boolean;
+}
+
+/**
+ * Build <-> Build edges for the graph: builds are connected if they share at
+ * least one item, or if the user manually linked them. Strength is
+ * normalized against the *smaller* of the two builds' item counts, so a
+ * 10-item build sharing just 1 item with another build reads as a weak
+ * connection rather than as strong as two 2-item builds sharing 1.
+ */
+export function computeBuildConnections(builds: Build[], upgradeChains: UpgradeChain[]): BuildConnection[] {
+    const excludedTiers = higherTierIds(upgradeChains);
+    const itemSets = new Map(
+        builds.map((build) => [build.id, new Set(build.items.filter((id) => !excludedTiers.has(id)))])
+    );
+
+    const connections: BuildConnection[] = [];
+
+    for (let i = 0; i < builds.length; i++) {
+        for (let j = i + 1; j < builds.length; j++) {
+            const buildA = builds[i];
+            const buildB = builds[j];
+            const itemsA = itemSets.get(buildA.id)!;
+            const itemsB = itemSets.get(buildB.id)!;
+
+            const sharedItemCount = [...itemsA].filter((id) => itemsB.has(id)).length;
+            const manual =
+                (buildA.manualLinks ?? []).includes(buildB.id) || (buildB.manualLinks ?? []).includes(buildA.id);
+
+            if (sharedItemCount === 0 && !manual) continue;
+
+            const minSize = Math.min(itemsA.size, itemsB.size) || 1;
+            const strength = sharedItemCount > 0 ? Math.min(sharedItemCount / minSize, 1) : 1;
+
+            connections.push({ source: buildA.id, target: buildB.id, strength, sharedItemCount, manual });
+        }
+    }
+
+    return connections;
+}

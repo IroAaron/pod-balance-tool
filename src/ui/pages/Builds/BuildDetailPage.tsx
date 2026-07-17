@@ -51,6 +51,10 @@ export default function BuildDetailPage() {
     };
 
     const availableItems = store.items.filter((item) => !build.items.includes(item.id));
+    const manualLinks = build.manualLinks ?? [];
+    const availableBuildsForLinking = store.builds.filter(
+        (other) => other.id !== build.id && !manualLinks.includes(other.id)
+    );
 
     return (
         <Stack spacing={3} sx={{ maxWidth: 900 }}>
@@ -142,6 +146,42 @@ export default function BuildDetailPage() {
                         if (item) store.addItemToBuild(build.id, item.id);
                     }}
                     renderInput={(params) => <TextField {...params} label="Добавить предмет" size="small" />}
+                    value={null}
+                    blurOnSelect
+                />
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" sx={{ mb: 2 }}>
+                    Связи с другими билдами ({manualLinks.length})
+                </Typography>
+
+                <Stack direction="row" sx={{ mb: 2, flexWrap: "wrap", gap: 1 }}>
+                    {manualLinks.map((linkedId) => {
+                        const linkedBuild = store.getBuild(linkedId);
+                        return (
+                            <Chip
+                                key={linkedId}
+                                label={linkedBuild ? `${linkedBuild.icon || "🧠"} ${linkedBuild.name || "Без названия"}` : linkedId}
+                                component={RouterLink}
+                                to={`/builds/${encodeURIComponent(linkedId)}`}
+                                clickable
+                                onDelete={() => store.unlinkBuilds(build.id, linkedId)}
+                            />
+                        );
+                    })}
+                    {manualLinks.length === 0 && (
+                        <Typography color="text.secondary">Связей ещё нет.</Typography>
+                    )}
+                </Stack>
+
+                <Autocomplete
+                    options={availableBuildsForLinking}
+                    getOptionLabel={(other) => `${other.icon || "🧠"} ${other.name || "Без названия"}`}
+                    onChange={(_event, other) => {
+                        if (other) store.linkBuilds(build.id, other.id);
+                    }}
+                    renderInput={(params) => <TextField {...params} label="Связать с билдом" size="small" />}
                     value={null}
                     blurOnSelect
                 />

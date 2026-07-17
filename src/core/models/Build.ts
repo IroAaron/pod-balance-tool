@@ -14,4 +14,7 @@ export interface Build {
     notes?: string;
 
     auto?: boolean;
+
+    /** Ids of other builds manually linked to this one (kept symmetric — see GameStore.linkBuilds). */
+    manualLinks?: string[];
 }

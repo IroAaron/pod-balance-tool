@@ -6,6 +6,7 @@ import ItemsPage from "../pages/Items/ItemsPage";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import BuildsPage from "../pages/Builds/BuildsPage";
 import BuildDetailPage from "../pages/Builds/BuildDetailPage";
+import GraphPage from "../pages/Graph/GraphPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
 
 // Keyed by :id so navigating between two detail pages of the same route
@@ -41,7 +42,7 @@ export default function AppRouter() {
             <Route path="/items/:id" element={<ItemDetailRoute />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
-            <Route path="/graph" element={<Navigate to="/builds" replace />} />
+            <Route path="/graph" element={<GraphPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="*" element={<NotFoundPage />} />
         </Routes>
