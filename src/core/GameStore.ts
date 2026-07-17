@@ -246,6 +246,16 @@ export class GameStore {
         this.notify();
     }
 
+    /** Deletes every build still marked "Черновик" (auto: true, never edited/saved by the user). Returns how many were removed. */
+    deleteAllDrafts(): number {
+        const remaining = this.builds.filter((build) => !build.auto);
+        const removed = this.builds.length - remaining.length;
+        this.builds = remaining;
+        saveBuilds(this.builds);
+        this.notify();
+        return removed;
+    }
+
     addItemToBuild(buildId: string, itemId: string): void {
         this.builds = this.builds.map((build) =>
             build.id === buildId && !build.items.includes(itemId)

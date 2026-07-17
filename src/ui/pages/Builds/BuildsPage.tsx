@@ -10,6 +10,11 @@ import {
     CardContent,
     Checkbox,
     Chip,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogContentText,
+    DialogTitle,
     FormControlLabel,
     IconButton,
     MenuItem,
@@ -33,6 +38,7 @@ export default function BuildsPage() {
     const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
     const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
     const [deleteMode, setDeleteMode] = useState(false);
+    const [confirmDeleteDrafts, setConfirmDeleteDrafts] = useState(false);
 
     const excludedTiers = useMemo(() => higherTierIds(store.upgradeChains), [store.upgradeChains]);
 
@@ -79,6 +85,12 @@ export default function BuildsPage() {
         );
     };
 
+    const handleDeleteAllDrafts = () => {
+        const count = store.deleteAllDrafts();
+        setConfirmDeleteDrafts(false);
+        setSuggestMessage(count > 0 ? `Удалено черновиков: ${count}` : "Черновиков не найдено");
+    };
+
     return (
         <Stack spacing={3}>
             <Typography variant="h4">Билды</Typography>
@@ -111,9 +123,29 @@ export default function BuildsPage() {
                     <MenuItem value="name">По названию</MenuItem>
                     <MenuItem value="itemCount">По кол-ву предметов</MenuItem>
                 </TextField>
+            </Stack>
 
-                <Box sx={{ flex: 1 }} />
+            <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+                <Button variant="outlined" onClick={handleSuggest} disabled={store.items.length === 0}>
+                    Предложить билды
+                </Button>
+                <Button variant="outlined" onClick={handleSuggestCascade} disabled={store.items.length === 0}>
+                    Собрать билды от очков
+                </Button>
+                <Button variant="contained" onClick={handleCreate}>
+                    + Создать билд
+                </Button>
+                <Button
+                    variant="outlined"
+                    color="error"
+                    onClick={() => setConfirmDeleteDrafts(true)}
+                    disabled={!store.builds.some((build) => build.auto)}
+                >
+                    Удалить все черновики
+                </Button>
+            </Stack>
 
+            <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
                 <FormControlLabel
                     control={
                         <Checkbox
@@ -136,16 +168,22 @@ export default function BuildsPage() {
                     label="Режим удаления"
                     sx={{ mr: 0 }}
                 />
-                <Button variant="outlined" onClick={handleSuggest} disabled={store.items.length === 0}>
-                    Предложить билды
-                </Button>
-                <Button variant="outlined" onClick={handleSuggestCascade} disabled={store.items.length === 0}>
-                    Собрать билды от очков
-                </Button>
-                <Button variant="contained" onClick={handleCreate}>
-                    + Создать билд
-                </Button>
             </Stack>
+
+            <Dialog open={confirmDeleteDrafts} onClose={() => setConfirmDeleteDrafts(false)}>
+                <DialogTitle>Удалить все черновики?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Будут удалены все билды с пометкой «Черновик». Действие необратимо.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmDeleteDrafts(false)}>Отмена</Button>
+                    <Button variant="contained" color="error" onClick={handleDeleteAllDrafts}>
+                        Удалить все черновики
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             {suggestMessage && (
                 <Alert severity="info" onClose={() => setSuggestMessage(null)}>
