@@ -329,7 +329,7 @@ export class GameStore {
     }
 
     /** Runs the PlayerScore-cascade pass (Activator/Bonus/spawn chains, not tag-clustering) and appends new draft builds. */
-    suggestCascadeBuilds(includeUpgradeTiers = false): number {
+    suggestCascadeBuilds(includeUpgradeTiers = false, includeMoneyValueRoots = false): number {
         const { items, mechanics } = this.itemsForBuildGeneration(includeUpgradeTiers);
         const drafts = computeCascadeBuilds(
             items,
@@ -337,7 +337,8 @@ export class GameStore {
             this.replaceRules,
             this.builds,
             (item) => this.itemName(item),
-            (item) => this.getItemIcon(item.id)
+            (item) => this.getItemIcon(item.id),
+            includeMoneyValueRoots
         );
         this.builds = [...this.builds, ...drafts];
         saveBuilds(this.builds);

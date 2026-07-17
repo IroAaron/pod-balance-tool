@@ -270,6 +270,19 @@ function computeListenedEvents(mechanicsByItem: Map<string, MechanicRow[]>): Map
 }
 
 const PLAYER_SCORE_TARGET_TYPE = "PlayerScore";
+const MAIN_VALUE_TARGET_VALUE_TYPE = "MainValue";
+const MONEY_VALUE_TARGET_VALUE_TYPE = "MoneyValue";
+
+/** A PlayerScore-earning MechAddValue row is only root-eligible if it modifies MainValue — MoneyValue rows (a rare
+ *  "starting money" stat, not a thematic payoff) only count when the user opts in via includeMoneyValueRoots. */
+function isEligiblePayoffRow(row: MechanicRow, includeMoneyValueRoots: boolean): boolean {
+    if (row.table !== "MechAddValue" || !splitList(row.fields.TargetType ?? "").includes(PLAYER_SCORE_TARGET_TYPE)) {
+        return false;
+    }
+    const valueType = row.fields.TargetValueType ?? "";
+    if (valueType === MAIN_VALUE_TARGET_VALUE_TYPE) return true;
+    return includeMoneyValueRoots && valueType === MONEY_VALUE_TARGET_VALUE_TYPE;
+}
 
 interface CascadeIndex {
     /** targetId -> items whose mechanic applies its effect onto it directly (UseTargetIds/TargetItemId) — i.e. who acts on/modifies it. */
@@ -292,6 +305,13 @@ interface CascadeIndex {
 
     /** tag -> items whose MechAddTag row grants that tag to something else. */
     itemIdsByGrantedTag: Map<string, Set<string>>;
+
+    /**
+     * tag -> items whose mechanic's own TargetTag filter (not a specific id) applies its effect to anything with
+     * that tag. Deliberately tag-only, not itemType — TargetType is almost always "Card" (the overwhelming
+     * majority of items), so matching on it would connect nearly every item to nearly every build.
+     */
+    itemIdsByTargetedTag: Map<string, Set<string>>;
 }
 
 function buildCascadeIndex(
@@ -307,6 +327,7 @@ function buildCascadeIndex(
     const itemIdsByGrantedTag = new Map<string, Set<string>>();
     const itemIdsByTag = new Map<string, Set<string>>();
     const itemIdsByType = new Map<string, Set<string>>();
+    const itemIdsByTargetedTag = new Map<string, Set<string>>();
 
     const addTo = (map: Map<string, Set<string>>, key: string, value: string) => {
         if (!map.has(key)) map.set(key, new Set());
@@ -320,8 +341,15 @@ function buildCascadeIndex(
 
     for (const [itemId, rows] of mechanicsByItem) {
         for (const row of rows) {
-            for (const token of [...splitList(row.fields.UseTargetIds ?? ""), ...splitList(row.fields.TargetItemId ?? "")]) {
-                if (knownIds.has(token)) addTo(targetersOf, token, itemId);
+            const targetIds = [...splitList(row.fields.UseTargetIds ?? ""), ...splitList(row.fields.TargetItemId ?? "")].filter(
+                (token) => knownIds.has(token)
+            );
+            for (const token of targetIds) addTo(targetersOf, token, itemId);
+
+            // No concrete target id — the row applies its effect via a Tag filter instead (e.g. "any nearby Card
+            // with tag=Sport"), which is just as real a "targets X" connection as a direct id reference.
+            if (targetIds.length === 0) {
+                for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(itemIdsByTargetedTag, tag, itemId);
             }
 
             if (row.table === "MechAddItem" && row.fields.ItemMech === "поставить") {
@@ -349,7 +377,16 @@ function buildCascadeIndex(
         }
     }
 
-    return { targetersOf, spawnersOf, itemIdsByTag, itemIdsByType, itemIdsByProducedColor, itemIdsByProducedEvent, itemIdsByGrantedTag };
+    return {
+        targetersOf,
+        spawnersOf,
+        itemIdsByTag,
+        itemIdsByType,
+        itemIdsByProducedColor,
+        itemIdsByProducedEvent,
+        itemIdsByGrantedTag,
+        itemIdsByTargetedTag,
+    };
 }
 
 function collectByFilter(
@@ -380,9 +417,17 @@ function collectByFilter(
  *      swap involving it.
  *   5. Spawners of the level-2 scalers, plus anything that influences the root/scalers' relevant properties:
  *      recolorers matching the root's Bonus color, tag-granters producing a tag the root's own filters need, and
- *      anything that directly targets the root's own id (UseTargetIds/TargetItemId — "meняет Value первого").
+ *      anything that targets the root — either directly by id (UseTargetIds/TargetItemId), or by a Tag filter
+ *      matching one of the root's own static tags (e.g. an item that boosts the Value of any nearby Card tagged
+ *      "Sport" reaches a root that happens to carry that tag, with no id reference at all — deliberately tag-only,
+ *      not itemType, since TargetType is almost always "Card" and would connect nearly everything) —
+ *      "meняет Value первого".
  * No further recursion past level 5 — each level is computed straight from the root/level-2 identities, not from
  * whatever got discovered at levels 3/4/5 themselves.
+ *
+ * A PlayerScore payoff row is only root-eligible when it modifies MainValue — a MoneyValue payoff (e.g. the
+ * starting "Силуэт" character's flat starting-money stat) is a baseline stat, not a thematic payoff, so it's
+ * excluded by default. `includeMoneyValueRoots` opts back in.
  */
 export function computeCascadeBuilds(
     items: Item[],
@@ -390,26 +435,23 @@ export function computeCascadeBuilds(
     replaceRules: ReplaceRule[],
     existingBuilds: Build[],
     itemName: (item: Item) => string,
-    itemIcon: (item: Item) => string | undefined
+    itemIcon: (item: Item) => string | undefined,
+    includeMoneyValueRoots = false
 ): Build[] {
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
     const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
 
     const roots = items.filter((item) =>
-        (mechanicsByItem.get(item.id) ?? []).some(
-            (row) =>
-                row.table === "MechAddValue" &&
-                splitList(row.fields.TargetType ?? "").includes(PLAYER_SCORE_TARGET_TYPE)
-        )
+        (mechanicsByItem.get(item.id) ?? []).some((row) => isEligiblePayoffRow(row, includeMoneyValueRoots))
     );
 
     const existingItemSets = existingBuilds.map((build) => new Set(build.items));
     const drafts: Build[] = [];
 
     for (const root of roots) {
-        const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter(
-            (row) => row.table === "MechAddValue" && splitList(row.fields.TargetType ?? "").includes(PLAYER_SCORE_TARGET_TYPE)
+        const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter((row) =>
+            isEligiblePayoffRow(row, includeMoneyValueRoots)
         );
 
         const buildItems = new Set<string>([root.id]);
@@ -454,6 +496,11 @@ export function computeCascadeBuilds(
             }
         }
         for (const id of index.targetersOf.get(root.id) ?? []) buildItems.add(id);
+        // Same idea as targetersOf, but for effects that target root via a Tag filter rather than its specific id
+        // (e.g. "modify Value of any nearby Card with tag=Sport" reaching a Sport-tagged root).
+        for (const tag of root.tags) {
+            for (const id of index.itemIdsByTargetedTag.get(tag) ?? []) buildItems.add(id);
+        }
 
         if (buildItems.size < 2) continue;
 

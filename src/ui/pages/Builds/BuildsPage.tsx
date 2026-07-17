@@ -43,6 +43,7 @@ export default function BuildsPage() {
     const [sortKey, setSortKey] = useState<BuildSortKey>("name");
     const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
     const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
+    const [includeMoneyValueRoots, setIncludeMoneyValueRoots] = useState(false);
     const [deleteMode, setDeleteMode] = useState(false);
     const [confirmDeleteDrafts, setConfirmDeleteDrafts] = useState(false);
 
@@ -97,7 +98,7 @@ export default function BuildsPage() {
     };
 
     const handleSuggestCascade = () => {
-        const count = store.suggestCascadeBuilds(includeUpgradeTiers);
+        const count = store.suggestCascadeBuilds(includeUpgradeTiers, includeMoneyValueRoots);
         setSuggestMessage(
             count > 0 ? `Добавлено каскадных черновиков: ${count}` : "Новых каскадных черновиков не найдено"
         );
@@ -199,6 +200,17 @@ export default function BuildsPage() {
                         />
                     }
                     label="Учитывать прокачки (+/++)"
+                    sx={{ mr: 0 }}
+                />
+                <FormControlLabel
+                    control={
+                        <Checkbox
+                            size="small"
+                            checked={includeMoneyValueRoots}
+                            onChange={(event) => setIncludeMoneyValueRoots(event.target.checked)}
+                        />
+                    }
+                    label="Показывать билды, с MoneyValue?"
                     sx={{ mr: 0 }}
                 />
                 <FormControlLabel
