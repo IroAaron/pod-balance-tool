@@ -112,7 +112,20 @@ export default function BuildsPage() {
 
     return (
         <Stack spacing={3}>
-            <Typography variant="h4">Билды</Typography>
+            <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                <Typography variant="h4">Билды</Typography>
+                <FormControlLabel
+                    control={
+                        <Checkbox
+                            size="small"
+                            checked={deleteMode}
+                            onChange={(event) => setDeleteMode(event.target.checked)}
+                        />
+                    }
+                    label="Режим удаления"
+                    sx={{ mr: 0 }}
+                />
+            </Stack>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flexWrap: "wrap", alignItems: { sm: "center" } }}>
                 <TextField
@@ -211,17 +224,6 @@ export default function BuildsPage() {
                         />
                     }
                     label="Показывать билды, с MoneyValue?"
-                    sx={{ mr: 0 }}
-                />
-                <FormControlLabel
-                    control={
-                        <Checkbox
-                            size="small"
-                            checked={deleteMode}
-                            onChange={(event) => setDeleteMode(event.target.checked)}
-                        />
-                    }
-                    label="Режим удаления"
                     sx={{ mr: 0 }}
                 />
             </Stack>
