@@ -306,7 +306,13 @@ export class GameStore {
     private itemsForBuildGeneration(includeUpgradeTiers: boolean): { items: Item[]; mechanics: MechanicRow[] } {
         if (includeUpgradeTiers) return { items: this.items, mechanics: this.mechanics };
 
-        const excluded = higherTierIds(this.upgradeChains);
+        const excluded = new Set(higherTierIds(this.upgradeChains));
+        for (const item of this.items) {
+            // Some tiers (e.g. Cheerleader+/Fan+) aren't registered in CardUpgrades at all, only distinguishable
+            // by their translated name ending in "+"/"++" — catch those too, not just chain membership.
+            if (/\+{1,2}$/.test(this.itemName(item).trim())) excluded.add(item.id);
+        }
+
         const items = this.items.filter((item) => !excluded.has(item.id));
         const mechanics = this.mechanics.filter((mechanic) => !excluded.has(mechanic.itemId));
         return { items, mechanics };
