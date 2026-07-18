@@ -61,6 +61,14 @@ function findColumnContaining(headers: string[], substrings: string[]): string |
     return undefined;
 }
 
+/** Parses a numeric config cell — blank/unparseable is undefined, not 0, so callers can tell "no value" from "zero". Some real rows use a comma decimal separator (e.g. "1,01"). */
+function parseOptionalNumber(value: string | undefined): number | undefined {
+    const trimmed = (value ?? "").trim();
+    if (trimmed === "") return undefined;
+    const parsed = Number(trimmed.replace(",", "."));
+    return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 function normalizeItemsTable(table: ParsedTable): Item[] {
     const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
     if (!idColumn) return [];
@@ -71,6 +79,8 @@ function normalizeItemsTable(table: ParsedTable): Item[] {
     const typeColumn = findColumn(table.headers, ["ItemType", "Type"]);
     const nameKeyColumn = findColumn(table.headers, ["NameKey", "Name"]);
     const descKeyColumn = findColumn(table.headers, ["DescKey", "DescriptionKey", "Description"]);
+    const valueMinColumn = findColumn(table.headers, ["ValueMin"]);
+    const valueMaxColumn = findColumn(table.headers, ["ValueMax"]);
     const categoryHint = ITEM_CATEGORY_HINTS[tableNameOf(table.sourceName)];
 
     return table.rows
@@ -83,6 +93,8 @@ function normalizeItemsTable(table: ParsedTable): Item[] {
                 itemType: (typeColumn ? row[typeColumn]?.trim() : "") || categoryHint,
                 nameKey: (nameKeyColumn ? row[nameKeyColumn]?.trim() : "") || id,
                 descKey: (descKeyColumn ? row[descKeyColumn]?.trim() : "") || `${id}_desc`,
+                valueMin: valueMinColumn ? parseOptionalNumber(row[valueMinColumn]) : undefined,
+                valueMax: valueMaxColumn ? parseOptionalNumber(row[valueMaxColumn]) : undefined,
                 raw: row,
             };
         });

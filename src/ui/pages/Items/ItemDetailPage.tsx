@@ -45,6 +45,12 @@ export default function ItemDetailPage() {
         mechanicsByTable.get(mechanic.table)!.push(mechanic);
     }
 
+    // The item's own row from whichever source table it came from (Cards/Houses/Artefacts/...) — id and tags are
+    // excluded since they're already shown above in their parsed form, not as raw text.
+    const rawParams = Object.entries(item.raw).filter(
+        ([key, value]) => !["itemid", "id", "tags", "itemtag"].includes(key.trim().toLowerCase()) && value !== ""
+    );
+
     return (
         <Stack spacing={3} sx={{ maxWidth: 900 }}>
             <Button component={RouterLink} to="/items" size="small" sx={{ alignSelf: "flex-start" }}>
@@ -105,6 +111,32 @@ export default function ItemDetailPage() {
                         </Stack>
                     </Box>
                 </Stack>
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" sx={{ mb: 2 }}>
+                    Параметры{item.itemType ? ` (${item.itemType})` : ""}
+                </Typography>
+                {rawParams.length === 0 ? (
+                    <Typography color="text.secondary">Параметры не найдены.</Typography>
+                ) : (
+                    <Box
+                        sx={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                            gap: 1.5,
+                        }}
+                    >
+                        {rawParams.map(([key, value]) => (
+                            <Box key={key}>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                    {key}
+                                </Typography>
+                                <Typography variant="body2">{value}</Typography>
+                            </Box>
+                        ))}
+                    </Box>
+                )}
             </Paper>
 
             <Paper sx={{ p: 3 }}>

@@ -233,17 +233,36 @@ function computeListenedEvents(mechanicsByItem: Map<string, MechanicRow[]>): Map
 
 const PLAYER_SCORE_TARGET_TYPE = "PlayerScore";
 const MAIN_VALUE_TARGET_VALUE_TYPE = "MainValue";
-const MONEY_VALUE_TARGET_VALUE_TYPE = "MoneyValue";
 
-/** A PlayerScore-earning MechAddValue row is only root-eligible if it modifies MainValue — MoneyValue rows (a rare
- *  "starting money" stat, not a thematic payoff) only count when the user opts in via includeMoneyValueRoots. */
-function isEligiblePayoffRow(row: MechanicRow, includeMoneyValueRoots: boolean): boolean {
+/**
+ * Every item needs *some* mechanic to exist in the game engine at all, so an item with no real designed payoff
+ * still gets a placeholder MainValue-earning row just to satisfy that requirement. The item's own imported
+ * ValueMin/ValueMax columns (see normalize.ts) are the structural tell: both zero (or blank/unparsed) means no
+ * real value range was ever configured for it, so the MainValue row is a placeholder, not a thematic payoff.
+ * Real examples: Бездомный/Заключенный (ValueMin=ValueMax=0), Уличный музыкант (both blank).
+ * ⚠️ Known accepted gap, explicitly requested by the user in favor of a structural-only rule over a
+ * description-text-based one: Producer (`c_chel_money_2_1`) has ValueMin=ValueMax=5 (nonzero) despite its
+ * description confirming it's just as flat as the excluded examples ("Дает ${MoneyValue}", no dynamic value
+ * mentioned) — it will still incorrectly pass this check and become a root. See relations.test.ts/project memory.
+ */
+function hasNoRealMainValueRange(item: Item): boolean {
+    const min = item.valueMin ?? 0;
+    const max = item.valueMax ?? 0;
+    return min === 0 && max === 0;
+}
+
+/**
+ * A PlayerScore-earning MechAddValue row is only root-eligible by default when it modifies MainValue AND the
+ * item has a real ValueMin/ValueMax range configured — otherwise it's either a MoneyValue stat (e.g. the
+ * starting character's flat starting-money) or a MainValue row on an item with no real value range at all (an
+ * engine-required placeholder mechanic, not a thematic payoff). includeMoneyValueRoots opts back into both.
+ */
+function isEligiblePayoffRow(item: Item, row: MechanicRow, includeMoneyValueRoots: boolean): boolean {
     if (row.table !== "MechAddValue" || !splitList(row.fields.TargetType ?? "").includes(PLAYER_SCORE_TARGET_TYPE)) {
         return false;
     }
-    const valueType = row.fields.TargetValueType ?? "";
-    if (valueType === MAIN_VALUE_TARGET_VALUE_TYPE) return true;
-    return includeMoneyValueRoots && valueType === MONEY_VALUE_TARGET_VALUE_TYPE;
+    if (includeMoneyValueRoots) return true;
+    return row.fields.TargetValueType === MAIN_VALUE_TARGET_VALUE_TYPE && !hasNoRealMainValueRange(item);
 }
 
 interface CascadeIndex {
@@ -387,9 +406,12 @@ function collectByFilter(
  * No further recursion past level 5 — each level is computed straight from the root/level-2 identities, not from
  * whatever got discovered at levels 3/4/5 themselves.
  *
- * A PlayerScore payoff row is only root-eligible when it modifies MainValue — a MoneyValue payoff (e.g. the
- * starting "Силуэт" character's flat starting-money stat) is a baseline stat, not a thematic payoff, so it's
- * excluded by default. `includeMoneyValueRoots` opts back in.
+ * A PlayerScore payoff row is only root-eligible when it modifies MainValue *and* the item has a real ValueMin/
+ * ValueMax range configured (see isEligiblePayoffRow/hasNoRealMainValueRange) — a MoneyValue payoff (e.g. the
+ * starting "Силуэт" character's flat starting-money stat) or a MainValue payoff on an item with no configured
+ * value range at all (an engine-required placeholder mechanic — every item needs *some* mechanic to exist at
+ * all — e.g. Бездомный/Заключенный/Уличный музыкант) are both baseline stats, not thematic payoffs, so both are
+ * excluded by default. `includeMoneyValueRoots` opts back into both at once.
  */
 export function computeCascadeBuilds(
     items: Item[],
@@ -405,7 +427,7 @@ export function computeCascadeBuilds(
     const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
 
     const roots = items.filter((item) =>
-        (mechanicsByItem.get(item.id) ?? []).some((row) => isEligiblePayoffRow(row, includeMoneyValueRoots))
+        (mechanicsByItem.get(item.id) ?? []).some((row) => isEligiblePayoffRow(item, row, includeMoneyValueRoots))
     );
 
     const existingItemSets = existingBuilds.map((build) => new Set(build.items));
@@ -413,7 +435,7 @@ export function computeCascadeBuilds(
 
     for (const root of roots) {
         const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter((row) =>
-            isEligiblePayoffRow(row, includeMoneyValueRoots)
+            isEligiblePayoffRow(root, row, includeMoneyValueRoots)
         );
 
         const buildItems = new Set<string>([root.id]);
