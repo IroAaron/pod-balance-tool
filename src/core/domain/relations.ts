@@ -265,32 +265,73 @@ function isEligiblePayoffRow(item: Item, row: MechanicRow, includeMoneyValueRoot
     return row.fields.TargetValueType === MAIN_VALUE_TARGET_VALUE_TYPE && !hasNoRealMainValueRange(item);
 }
 
+/**
+ * TargetColor/ActivatorColor/BonusTargetColor values that don't name a concrete color at all — they're resolved
+ * at runtime relative to whatever's already there ("Same"/"NotSame" as the cell/item they're compared against,
+ * "Random" per-spin). A recolorer's own NewColor can be one of these too. Comparing them by exact string equality
+ * (e.g. a payoff's BonusTargetColor="Same" against a recolorer's NewColor="Same") only coincidentally matches
+ * when both happen to use the same placeholder — it silently excludes recolorers using a *different* placeholder
+ * (NewColor="Random"/"NotSame"), even though they're equally unpredictable and equally relevant. When either side
+ * is one of these, there's no way to statically know which literal color results, so any recolorer is a candidate
+ * lever — same treatment ColorChange-event-based matching already gets (see producedActivatorType).
+ */
+const RELATIVE_COLOR_VALUES = new Set(["Same", "NotSame", "Random"]);
+
+/** The only real item-category values — TargetType/BonusTargetType is otherwise a board/place dimension (Road,
+ *  NotRoad, All, PlayerScore, ...), not an item category, and matching those against item.itemType would either
+ *  match nothing (correct, if accidentally) or — worse — be mistaken for a real filter. Only these three describe
+ *  an actual item.itemType, per normalize.ts's ITEM_CATEGORY_HINTS — there is structurally no fourth category. */
+const ITEM_CATEGORY_TYPE_VALUES = new Set(["Card", "House", "Artefact"]);
+
 interface CascadeIndex {
-    /** targetId -> items whose mechanic applies its effect onto it directly (UseTargetIds/TargetItemId) — i.e. who acts on/modifies it. */
+    /** targetId -> items whose MechAddValue row applies its effect onto it directly (UseTargetIds/TargetItemId) —
+     *  i.e. who *boosts* it. Deliberately MechAddValue-only: a mechanic naming this item's id in another table
+     *  (MechAddItem "удалить" killing it, MechChangeColor recoloring it, ...) is a real connection but not a
+     *  "strengthens it" one, and folding both into one bucket made a kill-by-id read the same as a value boost. */
     targetersOf: Map<string, Set<string>>;
 
-    /** targetId -> items that place/replace it onto the board (MechAddItem "поставить", or either side of a ReplaceItem/ReplaceOnTrigger swap). */
+    /** targetId -> items that place/replace it onto the board (MechAddItem "поставить", or the itemIdToReplace
+     *  side of a ReplaceItem/ReplaceOnTrigger swap that turns into it). Directional: a replace rule's
+     *  replacementItem is not a "spawner of" its itemIdToReplace — it's what that item becomes, not what
+     *  produces it (see buildReplaceMates in relatedItems for the symmetric version of this same rule, used
+     *  where direction genuinely doesn't matter). */
     spawnersOf: Map<string, Set<string>>;
 
     /** tag -> items *statically* carrying that tag (item.tags only — not mechanic-derived, see itemIdsByGrantedTag for that). */
     itemIdsByTag: Map<string, Set<string>>;
 
-    /** itemType -> items of that type. */
+    /** itemType -> items of that type (Card/House/Artefact only). */
     itemIdsByType: Map<string, Set<string>>;
 
-    /** color -> items whose MechChangeColor row produces that color. */
+    /** color -> items whose MechChangeColor row produces that literal color (including the relative placeholders
+     *  themselves as keys — resolving those needs allRecolorers instead, see RELATIVE_COLOR_VALUES). */
     itemIdsByProducedColor: Map<string, Set<string>>;
 
-    /** event -> items whose mechanic structurally produces that ActivatorType event (see producedActivatorType). */
+    /** Every item with at least one MechChangeColor row, regardless of which color it produces — the fallback
+     *  pool when a payoff's own color filter is a relative placeholder (see RELATIVE_COLOR_VALUES). */
+    allRecolorers: Set<string>;
+
+    /** event -> items whose mechanic structurally produces that ActivatorType event with no tag qualifier (see
+     *  producedActivatorType) — used when the payoff row has no ActivatorTag to narrow it with. */
     itemIdsByProducedEvent: Map<string, Set<string>>;
+
+    /** "event|tag" -> items whose mechanic structurally produces that event *specifically for something carrying
+     *  that tag* — e.g. "ItemPlaced|Crazy" is items that place a Crazy-tagged item (not just items that place
+     *  *something*). For MechAddItem "поставить" rows this looks up the placed item's own static tags; for
+     *  "удалить" rows the row's own TargetTag field already names the tag of what's removed. Lets a payoff row
+     *  combining ActivatorType+ActivatorTag (e.g. Дурка: ItemPlaced+Crazy) match only the placers of that
+     *  specific tag instead of every placer of anything (see producedActivatorType's plain event bucket above). */
+    itemIdsByProducedTaggedEvent: Map<string, Set<string>>;
 
     /** tag -> items whose MechAddTag row grants that tag to something else. */
     itemIdsByGrantedTag: Map<string, Set<string>>;
 
     /**
-     * tag -> items whose mechanic's own TargetTag filter (not a specific id) applies its effect to anything with
-     * that tag. Deliberately tag-only, not itemType — TargetType is almost always "Card" (the overwhelming
-     * majority of items), so matching on it would connect nearly every item to nearly every build.
+     * tag -> items whose MechAddValue row's own TargetTag filter (not a specific id) applies its effect to
+     * anything with that tag — i.e. actually boosts a Value/MoneyValue/etc property of whatever carries the tag.
+     * Deliberately MechAddValue-only (see targetersOf) and deliberately tag-only, not itemType — TargetType is
+     * almost always "Card" (the overwhelming majority of items), so matching on it would connect nearly every
+     * item to nearly every build.
      */
     itemIdsByTargetedTag: Map<string, Set<string>>;
 }
@@ -304,7 +345,9 @@ function buildCascadeIndex(
     const targetersOf = new Map<string, Set<string>>();
     const spawnersOf = new Map<string, Set<string>>();
     const itemIdsByProducedColor = new Map<string, Set<string>>();
+    const allRecolorers = new Set<string>();
     const itemIdsByProducedEvent = new Map<string, Set<string>>();
+    const itemIdsByProducedTaggedEvent = new Map<string, Set<string>>();
     const itemIdsByGrantedTag = new Map<string, Set<string>>();
     const itemIdsByTag = new Map<string, Set<string>>();
     const itemIdsByType = new Map<string, Set<string>>();
@@ -315,31 +358,48 @@ function buildCascadeIndex(
         map.get(key)!.add(value);
     };
 
+    const tagsById = new Map<string, string[]>();
     for (const item of items) {
+        tagsById.set(item.id, item.tags);
         for (const tag of item.tags) addTo(itemIdsByTag, tag, item.id);
         if (item.itemType) addTo(itemIdsByType, item.itemType, item.id);
     }
 
     for (const [itemId, rows] of mechanicsByItem) {
         for (const row of rows) {
-            const targetIds = [...splitList(row.fields.UseTargetIds ?? ""), ...splitList(row.fields.TargetItemId ?? "")].filter(
-                (token) => knownIds.has(token)
-            );
-            for (const token of targetIds) addTo(targetersOf, token, itemId);
+            if (row.table === "MechAddValue") {
+                const targetIds = [
+                    ...splitList(row.fields.UseTargetIds ?? ""),
+                    ...splitList(row.fields.TargetItemId ?? ""),
+                ].filter((token) => knownIds.has(token));
+                for (const token of targetIds) addTo(targetersOf, token, itemId);
 
-            // No concrete target id — the row applies its effect via a Tag filter instead (e.g. "any nearby Card
-            // with tag=Sport"), which is just as real a "targets X" connection as a direct id reference.
-            if (targetIds.length === 0) {
-                for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(itemIdsByTargetedTag, tag, itemId);
+                // No concrete target id — the row applies its effect via a Tag filter instead (e.g. "any nearby
+                // Card with tag=Sport"), which is just as real a "boosts X" connection as a direct id reference.
+                if (targetIds.length === 0) {
+                    for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(itemIdsByTargetedTag, tag, itemId);
+                }
             }
 
             if (row.table === "MechAddItem" && row.fields.ItemMech === "поставить") {
                 const target = row.fields.NewItemId;
-                if (target && knownIds.has(target)) addTo(spawnersOf, target, itemId);
+                if (target && knownIds.has(target)) {
+                    addTo(spawnersOf, target, itemId);
+                    for (const tag of tagsById.get(target) ?? []) {
+                        addTo(itemIdsByProducedTaggedEvent, `ItemPlaced|${tag}`, itemId);
+                    }
+                }
+            }
+
+            if (row.table === "MechAddItem" && row.fields.ItemMech === "удалить") {
+                for (const tag of splitList(row.fields.TargetTag ?? "")) {
+                    addTo(itemIdsByProducedTaggedEvent, `ItemRemoved|${tag}`, itemId);
+                }
             }
 
             if (row.table === "MechChangeColor" && row.fields.NewColor) {
                 addTo(itemIdsByProducedColor, row.fields.NewColor, itemId);
+                allRecolorers.add(itemId);
             }
 
             if (row.table === "MechAddTag") {
@@ -354,7 +414,6 @@ function buildCascadeIndex(
     for (const rule of replaceRules) {
         if (knownIds.has(rule.itemIdToReplace) && knownIds.has(rule.replacementItem)) {
             addTo(spawnersOf, rule.replacementItem, rule.itemIdToReplace);
-            addTo(spawnersOf, rule.itemIdToReplace, rule.replacementItem);
         }
     }
 
@@ -364,12 +423,20 @@ function buildCascadeIndex(
         itemIdsByTag,
         itemIdsByType,
         itemIdsByProducedColor,
+        allRecolorers,
         itemIdsByProducedEvent,
+        itemIdsByProducedTaggedEvent,
         itemIdsByGrantedTag,
         itemIdsByTargetedTag,
     };
 }
 
+function recolorersForColor(index: CascadeIndex, color: string): Iterable<string> {
+    return RELATIVE_COLOR_VALUES.has(color) ? index.allRecolorers : index.itemIdsByProducedColor.get(color) ?? [];
+}
+
+/** Union-of-matches filter (any populated field is independently sufficient) — used for level 3's Activator
+ *  filter, where tag/color describe alternative ways an item could plausibly be "the thing that triggered this". */
 function collectByFilter(
     index: CascadeIndex,
     fields: { tag?: string; type?: string; color?: string },
@@ -382,29 +449,68 @@ function collectByFilter(
         for (const id of index.itemIdsByType.get(type) ?? []) into.add(id);
     }
     for (const color of splitList(fields.color ?? "")) {
-        for (const id of index.itemIdsByProducedColor.get(color) ?? []) into.add(id);
+        for (const id of recolorersForColor(index, color)) into.add(id);
     }
+}
+
+/**
+ * Intersection-of-matches filter (every populated field must hold at once) — used for level 2's Bonus filter,
+ * where tag+type together describe ONE compound condition on the same counted thing (e.g. Бухгалтер: "a Card
+ * tagged Rich", not "anything tagged Rich OR any Card at all"). Type is skipped when it's not a real item
+ * category (Card/House/Artefact) — a board/place value like "Road" isn't a claim about item.itemType at all, so
+ * treating it as one would either match nothing or (worse) get read as "and also must have no itemType".
+ */
+function collectScalers(index: CascadeIndex, fields: { tag?: string; type?: string }): Set<string> {
+    const tagFilters = splitList(fields.tag ?? "");
+    const typeFilters = splitList(fields.type ?? "").filter((type) => ITEM_CATEGORY_TYPE_VALUES.has(type));
+
+    let candidates: Set<string> | undefined;
+    const intersectWith = (pool: Set<string>) => {
+        candidates = candidates ? new Set([...candidates].filter((id) => pool.has(id))) : new Set(pool);
+    };
+
+    if (tagFilters.length > 0) {
+        const pool = new Set<string>();
+        for (const tag of tagFilters) for (const id of index.itemIdsByTag.get(tag) ?? []) pool.add(id);
+        intersectWith(pool);
+    }
+    if (typeFilters.length > 0) {
+        const pool = new Set<string>();
+        for (const type of typeFilters) for (const id of index.itemIdsByType.get(type) ?? []) pool.add(id);
+        intersectWith(pool);
+    }
+
+    return candidates ?? new Set();
 }
 
 /**
  * Draft one build per item that earns PlayerScore (a MechAddValue row with TargetType=PlayerScore), following a
  * fixed, shallow structure — deliberately NOT a long recursive cascade, per the user's explicit request:
  *   1. Root — the item whose MechAddValue row earns PlayerScore; the build exists because of it.
- *   2. Scalers — items matching that row's Bonus filter (BonusTargetTag/BonusTargetType), i.e. what's actually
- *      being counted to scale the root's income.
- *   3. Activators of the root — UseActivatorIds if the row names a concrete item, else items matching the
- *      Activator filter (tag/type membership, produced color, or structurally-produced ActivatorType event).
- *   4. Spawners of the root — items placing it via MechAddItem, or either side of a ReplaceItem/ReplaceOnTrigger
- *      swap involving it.
- *   5. Spawners of the level-2 scalers, plus anything that influences the root/scalers' relevant properties:
- *      recolorers matching the root's Bonus color, tag-granters producing a tag the root's own filters need, and
- *      anything that targets the root — either directly by id (UseTargetIds/TargetItemId), or by a Tag filter
- *      matching one of the root's own static tags (e.g. an item that boosts the Value of any nearby Card tagged
- *      "Sport" reaches a root that happens to carry that tag, with no id reference at all — deliberately tag-only,
- *      not itemType, since TargetType is almost always "Card" and would connect nearly everything) —
- *      "meняет Value первого".
- * No further recursion past level 5 — each level is computed straight from the root/level-2 identities, not from
- * whatever got discovered at levels 3/4/5 themselves.
+ *   2. Scalers — items matching that row's Bonus filter, i.e. what's actually being counted to scale the root's
+ *      income. Tag and type together are ONE compound condition on the same counted thing (collectScalers) — a
+ *      row with both BonusTargetTag=Rich and BonusTargetType=Card means "a Card tagged Rich", not "anything
+ *      tagged Rich, or separately, any Card at all" (the latter reads as "nearly every item in the game").
+ *   3. Activators of the root — UseActivatorIds if the row names a concrete item; else items matching the
+ *      Activator tag/color filter (color treats "Same"/"NotSame"/"Random" as "any recolorer", see
+ *      RELATIVE_COLOR_VALUES — these aren't real colors, so exact-string-matching them against a recolorer's own
+ *      NewColor only coincidentally works when both happen to use the same placeholder); plus items structurally
+ *      producing the row's ActivatorType event — narrowed to producers of that event *for the row's own
+ *      ActivatorTag specifically* when one is set (itemIdsByProducedTaggedEvent), not every producer of that
+ *      event type regardless of tag (e.g. Дурка wants placers of a Crazy-tagged item, not every "поставить" row
+ *      in the game).
+ *   4. Spawners of the root — items placing it via MechAddItem, or the itemIdToReplace side of a
+ *      ReplaceItem/ReplaceOnTrigger rule that turns into it.
+ *   5. Spawners of the level-2 scalers and level-3 activators; recolorers matching the root's Bonus color (same
+ *      relative-placeholder handling as level 3); tag-granters producing a tag the root's own filters need; and
+ *      anything that *boosts* the root — either directly by id, or via a Tag filter matching one of the root's
+ *      own static tags (e.g. an item that adds Value to any nearby Card tagged "Sport" reaches a root that
+ *      happens to carry that tag, with no id reference at all) — but only from MechAddValue rows (targetersOf/
+ *      itemIdsByTargetedTag), since only those actually raise a Value/MoneyValue/etc property; a mechanic from
+ *      any other table that merely *names* the root's id or tag (kills it, recolors it, retags it, ...) is a
+ *      different kind of relationship and isn't folded in here as if it were a boost.
+ * No further recursion past level 5 — each level is computed straight from the root/level-2/level-3 identities,
+ * not from whatever got discovered at levels 4/5 themselves.
  *
  * A PlayerScore payoff row is only root-eligible when it modifies MainValue *and* the item has a real ValueMin/
  * ValueMax range configured (see isEligiblePayoffRow/hasNoRealMainValueRange) — a MoneyValue payoff (e.g. the
@@ -440,48 +546,64 @@ export function computeCascadeBuilds(
 
         const buildItems = new Set<string>([root.id]);
 
-        // Level 2 — scalers: items matching the payoff's own Bonus filter.
+        // Level 2 — scalers: items matching the payoff's own compound Bonus filter (tag AND type together).
         const scalers = new Set<string>();
         for (const row of payoffRows) {
-            collectByFilter(index, { tag: row.fields.BonusTargetTag, type: row.fields.BonusTargetType }, scalers);
+            for (const id of collectScalers(index, { tag: row.fields.BonusTargetTag, type: row.fields.BonusTargetType })) {
+                scalers.add(id);
+            }
         }
         scalers.delete(root.id);
         for (const id of scalers) buildItems.add(id);
 
         // Level 3 — activators of the root.
+        const activatorsAll = new Set<string>();
         for (const row of payoffRows) {
             const activatorIds = splitList(row.fields.UseActivatorIds ?? "").filter((id) => knownIds.has(id));
             if (activatorIds.length > 0) {
-                for (const id of activatorIds) buildItems.add(id);
+                for (const id of activatorIds) activatorsAll.add(id);
                 continue;
             }
             const activators = new Set<string>();
             collectByFilter(index, { tag: row.fields.ActivatorTag, color: row.fields.ActivatorColor }, activators);
             if (row.fields.ActivatorType) {
-                for (const id of index.itemIdsByProducedEvent.get(row.fields.ActivatorType) ?? []) activators.add(id);
+                const activatorTags = splitList(row.fields.ActivatorTag ?? "");
+                if (activatorTags.length > 0) {
+                    for (const tag of activatorTags) {
+                        for (const id of index.itemIdsByProducedTaggedEvent.get(`${row.fields.ActivatorType}|${tag}`) ?? []) {
+                            activators.add(id);
+                        }
+                    }
+                } else {
+                    for (const id of index.itemIdsByProducedEvent.get(row.fields.ActivatorType) ?? []) activators.add(id);
+                }
             }
             activators.delete(root.id);
-            for (const id of activators) buildItems.add(id);
+            for (const id of activators) activatorsAll.add(id);
         }
+        for (const id of activatorsAll) buildItems.add(id);
 
         // Level 4 — spawners of the root.
         for (const id of index.spawnersOf.get(root.id) ?? []) buildItems.add(id);
 
-        // Level 5 — spawners of the level-2 scalers, plus recolorers/tag-granters/targeters feeding the root/scalers.
+        // Level 5 — spawners of the level-2 scalers and level-3 activators, plus recolorers/tag-granters/boosters.
         for (const scalerId of scalers) {
             for (const id of index.spawnersOf.get(scalerId) ?? []) buildItems.add(id);
         }
+        for (const activatorId of activatorsAll) {
+            for (const id of index.spawnersOf.get(activatorId) ?? []) buildItems.add(id);
+        }
         for (const row of payoffRows) {
             for (const color of splitList(row.fields.BonusTargetColor ?? "")) {
-                for (const id of index.itemIdsByProducedColor.get(color) ?? []) buildItems.add(id);
+                for (const id of recolorersForColor(index, color)) buildItems.add(id);
             }
             for (const tag of [...splitList(row.fields.BonusTargetTag ?? ""), ...splitList(row.fields.ActivatorTag ?? "")]) {
                 for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) buildItems.add(id);
             }
         }
         for (const id of index.targetersOf.get(root.id) ?? []) buildItems.add(id);
-        // Same idea as targetersOf, but for effects that target root via a Tag filter rather than its specific id
-        // (e.g. "modify Value of any nearby Card with tag=Sport" reaching a Sport-tagged root).
+        // Same idea as targetersOf, but for effects that boost root via a Tag filter rather than its specific id
+        // (e.g. "add Value to any nearby Card with tag=Sport" reaching a Sport-tagged root).
         for (const tag of root.tags) {
             for (const id of index.itemIdsByTargetedTag.get(tag) ?? []) buildItems.add(id);
         }
