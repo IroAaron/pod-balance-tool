@@ -1,4 +1,5 @@
 import type { Item } from "../models/Item";
+import type { Build } from "../models/Build";
 
 /** Vite serves everything under public/ as static files from the site root. */
 export const SPRITE_BASE_PATH = "/pod-mini-characters/";
@@ -19,4 +20,32 @@ export function getItemSpritePath(item: Item): string | undefined {
     const spriteName = getItemSpriteFileName(item);
     if (!spriteName) return undefined;
     return `${SPRITE_BASE_PATH}${encodeURIComponent(spriteName)}`;
+}
+
+export type ResolvedBuildIcon = { kind: "sprite"; path: string; fallback: string } | { kind: "emoji"; value: string };
+
+/**
+ * Same priority `BuildIcon`/`ItemIcon` use, pulled out as a plain function so canvas-based rendering (GraphPage's
+ * force-graph nodes, which can't use React's `<img onError>` and has to manage its own Image() loading/caching)
+ * stays in sync with the DOM version instead of re-deriving its own rules that could drift apart later: manual
+ * build.icon override → root item's (build.items[0]) manual icon override → root item's real sprite → 🧩/🧠
+ * placeholder emoji.
+ */
+export function resolveBuildIcon(
+    build: Build,
+    getItem: (id: string) => Item | undefined,
+    getItemIcon: (itemId: string) => string | undefined
+): ResolvedBuildIcon {
+    if (build.icon) return { kind: "emoji", value: build.icon };
+
+    const rootItem = build.items.length > 0 ? getItem(build.items[0]) : undefined;
+    if (!rootItem) return { kind: "emoji", value: "🧠" };
+
+    const customIcon = getItemIcon(rootItem.id);
+    if (customIcon) return { kind: "emoji", value: customIcon };
+
+    const spritePath = getItemSpritePath(rootItem);
+    if (spritePath) return { kind: "sprite", path: spritePath, fallback: "🧩" };
+
+    return { kind: "emoji", value: "🧩" };
 }

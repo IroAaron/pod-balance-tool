@@ -337,7 +337,6 @@ export class GameStore {
             this.replaceRules,
             this.builds,
             (item) => this.itemName(item),
-            (item) => this.getItemIcon(item.id),
             includeMoneyValueRoots
         );
         this.builds = [...this.builds, ...drafts];

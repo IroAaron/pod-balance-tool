@@ -1,18 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Box, Checkbox, FormControlLabel, Stack, Typography } from "@mui/material";
 import ForceGraph2D from "react-force-graph-2d";
 import { useStore } from "../../hooks/useStore";
 import { computeBuildConnections } from "../../../core/domain/relations";
+import { resolveBuildIcon, type ResolvedBuildIcon } from "../../../core/domain/sprites";
 
 const NODE_RADIUS = 9;
 
 interface BuildNode {
     id: string;
 
-    icon: string;
+    icon: ResolvedBuildIcon;
 
     name: string;
+}
+
+/**
+ * Canvas can't use React's <img onError> the way ItemIcon/BuildIcon do, so node sprites need their own
+ * Image() loading + failure cache — this keeps both alive across renders (module-level would leak across
+ * unrelated GraphPage mounts sharing unrelated data, so it's created once per component instance via useRef
+ * instead). onLoaded is called once a requested sprite finishes loading (success or failure) so the caller can
+ * trigger a repaint — react-force-graph-2d's own render loop usually picks up the change on its next animation
+ * frame regardless, but forcing one guarantees the newly-loaded sprite doesn't wait for unrelated interaction.
+ */
+function getCachedSprite(
+    cache: Map<string, HTMLImageElement>,
+    failed: Set<string>,
+    path: string,
+    onLoaded: () => void
+): HTMLImageElement | undefined {
+    const cached = cache.get(path);
+    if (cached) return cached;
+    if (failed.has(path)) return undefined;
+
+    const img = new Image();
+    img.onload = onLoaded;
+    img.onerror = () => {
+        failed.add(path);
+        cache.delete(path);
+        onLoaded();
+    };
+    img.src = path;
+    cache.set(path, img);
+    return img;
 }
 
 interface BuildLink {
@@ -43,6 +74,9 @@ export default function GraphPage() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 800, height: 600 });
     const [showLabels, setShowLabels] = useState(false);
+    const spriteCacheRef = useRef(new Map<string, HTMLImageElement>());
+    const failedSpritesRef = useRef(new Set<string>());
+    const [, repaintOnSpriteLoad] = useReducer((count: number) => count + 1, 0);
 
     useEffect(() => {
         const el = containerRef.current;
@@ -67,7 +101,7 @@ export default function GraphPage() {
 
         const nodes: BuildNode[] = store.builds.map((build) => ({
             id: build.id,
-            icon: build.icon || "🧠",
+            icon: resolveBuildIcon(build, (id) => store.getItem(id), (itemId) => store.getItemIcon(itemId)),
             name: build.name || "Без названия",
         }));
 
@@ -79,6 +113,8 @@ export default function GraphPage() {
         }));
 
         return { nodes, links };
+        // getItem/getItemIcon are stable methods on the long-lived store singleton.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.builds, store.upgradeChains]);
 
     return (
@@ -155,10 +191,33 @@ export default function GraphPage() {
                                 ctx.strokeStyle = "#5B8CFF";
                                 ctx.stroke();
 
-                                ctx.font = `${NODE_RADIUS * 1.5}px sans-serif`;
-                                ctx.textAlign = "center";
-                                ctx.textBaseline = "middle";
-                                ctx.fillText(node.icon, x, y);
+                                let spriteDrawn = false;
+                                if (node.icon.kind === "sprite") {
+                                    const sprite = getCachedSprite(
+                                        spriteCacheRef.current,
+                                        failedSpritesRef.current,
+                                        node.icon.path,
+                                        repaintOnSpriteLoad
+                                    );
+                                    if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+                                        const spriteSize = NODE_RADIUS * 1.6;
+                                        ctx.save();
+                                        ctx.beginPath();
+                                        ctx.arc(x, y, NODE_RADIUS - 1, 0, 2 * Math.PI);
+                                        ctx.clip();
+                                        ctx.drawImage(sprite, x - spriteSize / 2, y - spriteSize / 2, spriteSize, spriteSize);
+                                        ctx.restore();
+                                        spriteDrawn = true;
+                                    }
+                                }
+
+                                if (!spriteDrawn) {
+                                    const label = node.icon.kind === "sprite" ? node.icon.fallback : node.icon.value;
+                                    ctx.font = `${NODE_RADIUS * 1.5}px sans-serif`;
+                                    ctx.textAlign = "center";
+                                    ctx.textBaseline = "middle";
+                                    ctx.fillText(label, x, y);
+                                }
 
                                 if (showLabels) {
                                     const fontSize = 12 / globalScale;

@@ -412,8 +412,20 @@ function buildCascadeIndex(
     }
 
     for (const rule of replaceRules) {
-        if (knownIds.has(rule.itemIdToReplace) && knownIds.has(rule.replacementItem)) {
+        if (!knownIds.has(rule.replacementItem)) continue;
+
+        if (knownIds.has(rule.itemIdToReplace)) {
             addTo(spawnersOf, rule.replacementItem, rule.itemIdToReplace);
+        }
+
+        // ReplaceItem rules need a NeededItem present nearby too, not just itemIdToReplace on its own — e.g.
+        // Бомж only becomes Рок музыкант next to Музыкальный магазин (NeededItem); Бомж by himself never causes
+        // the upgrade, so he isn't the whole story as a "spawner". Both ingredients are real prerequisites.
+        // ReplaceOnTrigger rules have no NeededItem column, so this is a no-op there (fields.NeededItem is
+        // undefined).
+        const neededItem = rule.fields.NeededItem;
+        if (neededItem && knownIds.has(neededItem)) {
+            addTo(spawnersOf, rule.replacementItem, neededItem);
         }
     }
 
@@ -525,7 +537,6 @@ export function computeCascadeBuilds(
     replaceRules: ReplaceRule[],
     existingBuilds: Build[],
     itemName: (item: Item) => string,
-    itemIcon: (item: Item) => string | undefined,
     includeMoneyValueRoots = false
 ): Build[] {
     const knownIds = new Set(items.map((item) => item.id));
@@ -619,7 +630,6 @@ export function computeCascadeBuilds(
         drafts.push({
             id: `cascade-${root.id}-${Math.random().toString(36).slice(2, 7)}`,
             name: `Билд от ${itemName(root)}`,
-            icon: itemIcon(root),
             items: clusterItems,
             auto: true,
         });

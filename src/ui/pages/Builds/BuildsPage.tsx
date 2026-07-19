@@ -26,6 +26,7 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
+import BuildIcon from "../../components/BuildIcon";
 import { higherTierIds, relatedBuilds, type RelatedBuild } from "../../../core/domain/relations";
 import type { BuildSortKey } from "../../../core/services/BuildService";
 
@@ -295,7 +296,7 @@ export default function BuildsPage() {
                             <CardActionArea component={RouterLink} to={`/builds/${encodeURIComponent(build.id)}`}>
                                 <CardContent sx={{ pb: 1 }}>
                                     <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                                        <Typography variant="h6">{build.icon || "🧠"}</Typography>
+                                        <BuildIcon build={build} size={32} />
                                         <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                                             {build.name || "Без названия"}
                                         </Typography>

@@ -3,6 +3,7 @@ import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { Autocomplete, Box, Button, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import { relatedBuilds } from "../../../core/domain/relations";
+import BuildIcon from "../../components/BuildIcon";
 
 export default function BuildDetailPage() {
     const { id } = useParams<{ id: string }>();
@@ -72,7 +73,8 @@ export default function BuildDetailPage() {
                         </Button>
                     </Stack>
 
-                    <Stack direction="row" spacing={2}>
+                    <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+                        <BuildIcon build={{ ...build, icon }} size={40} />
                         <TextField
                             label="Иконка"
                             value={icon}
@@ -81,6 +83,7 @@ export default function BuildDetailPage() {
                                 setDirty(true);
                             }}
                             size="small"
+                            placeholder="по умолчанию — спрайт корневого предмета"
                             sx={{ width: 100 }}
                         />
                         <TextField

@@ -32,15 +32,7 @@ function makeMainValuePayoff(itemId: string, fields: Record<string, string> = {}
 }
 
 function rootsOf(items: Item[], mechanics: MechanicRow[], includeMoneyValueRoots = false): Set<string> {
-    const drafts = computeCascadeBuilds(
-        items,
-        mechanics,
-        [],
-        [],
-        (item) => item.id,
-        () => undefined,
-        includeMoneyValueRoots
-    );
+    const drafts = computeCascadeBuilds(items, mechanics, [], [], (item) => item.id, includeMoneyValueRoots);
     return new Set(drafts.map((draft) => draft.items[0]));
 }
 
@@ -125,7 +117,7 @@ function buildItemsFor(
     mechanics: MechanicRow[],
     replaceRules: ReplaceRule[] = []
 ): Set<string> | undefined {
-    const drafts = computeCascadeBuilds(items, mechanics, replaceRules, [], (item) => item.id, () => undefined);
+    const drafts = computeCascadeBuilds(items, mechanics, replaceRules, [], (item) => item.id);
     const draft = drafts.find((d) => d.items[0] === rootId);
     return draft ? new Set(draft.items) : undefined;
 }
@@ -316,5 +308,33 @@ describe("computeCascadeBuilds item selection", () => {
 
         expect(built?.has(maniac.id)).toBe(true); // level 3 — structurally produces ItemRemoved
         expect(built?.has(cheapMotel.id)).toBe(true); // level 5 — spawns the level-3 activator
+    });
+
+    it("a ReplaceItem rule's NeededItem is as much a spawner as itemIdToReplace (real Рок музыкант/Музыкальный магазин shape)", () => {
+        // Бомж (itemIdToReplace) only becomes Рок музыкант (replacementItem) next to Музыкальный магазин
+        // (NeededItem) — Бомж alone never causes the upgrade, so treating only him as "the spawner" is
+        // misleading (he was already showing up in Рок музыкант's own build with no Музыкальный магазин at all,
+        // even though Музыкальный магазин's own build already correctly listed every ingredient).
+        const rockMusician = makeItem("rock_musician", { valueMin: 15, valueMax: 15, tags: ["Music"] });
+        const homeless = makeItem("homeless", { tags: ["Bum"] });
+        const musicStore = makeItem("music_store");
+        const items = [rockMusician, homeless, musicStore];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(rockMusician.id, { BonusCountingType: "CellCount", BonusTargetPlace: "Near", BonusTargetTag: "Music" }),
+        ];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "homeless-to-rock",
+                source: "ReplaceItem",
+                itemIdToReplace: homeless.id,
+                replacementItem: rockMusician.id,
+                fields: { NeededItem: musicStore.id, NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+
+        const built = buildItemsFor(rockMusician.id, items, mechanics, replaceRules);
+
+        expect(built?.has(homeless.id)).toBe(true); // itemIdToReplace — still a real prerequisite
+        expect(built?.has(musicStore.id)).toBe(true); // NeededItem — the actual actionable ingredient
     });
 });
