@@ -27,7 +27,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import BuildIcon from "../../components/BuildIcon";
-import { higherTierIds, relatedBuilds, type RelatedBuild } from "../../../core/domain/relations";
+import { higherTierIds } from "../../../core/domain/relations";
 import type { BuildSortKey } from "../../../core/services/BuildService";
 
 // Same three literal category names normalize.ts assigns as item.itemType for Cards/Houses/Artefacts —
@@ -69,17 +69,6 @@ export default function BuildsPage() {
         // buildService/getItem are stable methods on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.builds, store.items, query, tagFilter, typeFilter, sortKey]);
-
-    const relatedByBuild = useMemo(() => {
-        const map = new Map<string, RelatedBuild[]>();
-        for (const build of store.builds) {
-            map.set(
-                build.id,
-                relatedBuilds(build.id, store.builds, store.items, store.mechanics, store.upgradeChains, store.replaceRules)
-            );
-        }
-        return map;
-    }, [store.builds, store.items, store.mechanics, store.upgradeChains, store.replaceRules]);
 
     const availableTags = store.paramValues.ItemTag ?? [];
     const availableTypes = BUILD_TYPE_OPTIONS;
@@ -267,8 +256,6 @@ export default function BuildsPage() {
                         .map((itemId) => store.getItem(itemId))
                         .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-                    const related = (relatedByBuild.get(build.id) ?? []).slice(0, 6);
-
                     return (
                         <Card key={build.id} variant="outlined" sx={{ position: "relative" }}>
                             {deleteMode && (
@@ -341,35 +328,6 @@ export default function BuildsPage() {
                                         })
                                     )}
                                 </Stack>
-
-                                {related.length > 0 && (
-                                    <>
-                                        <Typography
-                                            variant="caption"
-                                            color="text.secondary"
-                                            sx={{ display: "block", mt: 1.5, mb: 0.5 }}
-                                        >
-                                            Возможно связано с
-                                        </Typography>
-                                        <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.75 }}>
-                                            {related.map((rel) => {
-                                                const relatedBuild = store.getBuild(rel.id);
-                                                if (!relatedBuild) return null;
-                                                return (
-                                                    <Tooltip key={rel.id} title={relatedBuild.name || "Без названия"}>
-                                                        <Chip
-                                                            label={relatedBuild.icon || "🧠"}
-                                                            size="small"
-                                                            component={RouterLink}
-                                                            to={`/builds/${encodeURIComponent(rel.id)}`}
-                                                            clickable
-                                                        />
-                                                    </Tooltip>
-                                                );
-                                            })}
-                                        </Stack>
-                                    </>
-                                )}
                             </CardContent>
                         </Card>
                     );
