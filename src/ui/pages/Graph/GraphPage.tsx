@@ -1,12 +1,28 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Checkbox, FormControlLabel, Stack, Typography } from "@mui/material";
+import {
+    Box,
+    Checkbox,
+    FormControl,
+    FormControlLabel,
+    ListItemText,
+    MenuItem,
+    Select,
+    type SelectChangeEvent,
+    Stack,
+    Typography,
+} from "@mui/material";
 import ForceGraph2D from "react-force-graph-2d";
 import { useStore } from "../../hooks/useStore";
 import { computeBuildConnections } from "../../../core/domain/relations";
 import { resolveBuildIcon, type ResolvedBuildIcon } from "../../../core/domain/sprites";
 
 const NODE_RADIUS = 9;
+
+/** Deliberately hardcoded, same precedent/reasoning as BuildsPage's BUILD_TYPE_OPTIONS — these three are the only
+ *  real item categories (see normalize.ts's ITEM_CATEGORY_HINTS), not sourced from store.paramValues.ItemType
+ *  (which also aggregates unrelated mechanic TargetType/BonusTargetType values). */
+const ITEM_TYPE_OPTIONS = ["Card", "House", "Artefact"];
 
 interface BuildNode {
     id: string;
@@ -74,6 +90,7 @@ export default function GraphPage() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 800, height: 600 });
     const [showLabels, setShowLabels] = useState(false);
+    const [typeFilter, setTypeFilter] = useState<string[]>(ITEM_TYPE_OPTIONS);
     const spriteCacheRef = useRef(new Map<string, HTMLImageElement>());
     const failedSpritesRef = useRef(new Set<string>());
     const [, repaintOnSpriteLoad] = useReducer((count: number) => count + 1, 0);
@@ -99,23 +116,39 @@ export default function GraphPage() {
     const graphData = useMemo(() => {
         const connections = computeBuildConnections(store.builds, store.upgradeChains);
 
-        const nodes: BuildNode[] = store.builds.map((build) => ({
+        // Same "type of the first/root item" convention as BuildsPage's own type filter — a build with no
+        // determinable root type (empty build) is never hidden by this filter, only builds with a known type
+        // that's been unchecked are.
+        const visibleBuilds = store.builds.filter((build) => {
+            const rootType = build.items[0] ? store.getItem(build.items[0])?.itemType : undefined;
+            return !rootType || typeFilter.includes(rootType);
+        });
+        const visibleIds = new Set(visibleBuilds.map((build) => build.id));
+
+        const nodes: BuildNode[] = visibleBuilds.map((build) => ({
             id: build.id,
             icon: resolveBuildIcon(build, (id) => store.getItem(id), (itemId) => store.getItemIcon(itemId)),
             name: build.name || "Без названия",
         }));
 
-        const links: BuildLink[] = connections.map((connection) => ({
-            source: connection.source,
-            target: connection.target,
-            strength: connection.strength,
-            manual: connection.manual,
-        }));
+        const links: BuildLink[] = connections
+            .filter((connection) => visibleIds.has(connection.source) && visibleIds.has(connection.target))
+            .map((connection) => ({
+                source: connection.source,
+                target: connection.target,
+                strength: connection.strength,
+                manual: connection.manual,
+            }));
 
         return { nodes, links };
         // getItem/getItemIcon are stable methods on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [store.builds, store.upgradeChains]);
+    }, [store.builds, store.upgradeChains, typeFilter]);
+
+    const handleTypeFilterChange = (event: SelectChangeEvent<string[]>) => {
+        const { value } = event.target;
+        setTypeFilter(typeof value === "string" ? value.split(",") : value);
+    };
 
     return (
         <Stack spacing={2} sx={{ height: "100%" }}>
@@ -126,6 +159,34 @@ export default function GraphPage() {
                 меньшего билда, плюс цвет — от красного к зелёному, чем сильнее связь), либо если связь добавлена
                 вручную на странице билда (оранжевая линия).
             </Typography>
+
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <Typography variant="body2" color="text.secondary">
+                    Предметы:
+                </Typography>
+                <FormControl size="small" sx={{ minWidth: 220 }}>
+                    <Select
+                        multiple
+                        displayEmpty
+                        value={typeFilter}
+                        onChange={handleTypeFilterChange}
+                        renderValue={(selected) =>
+                            selected.length === 0
+                                ? "Ничего не выбрано"
+                                : selected.length === ITEM_TYPE_OPTIONS.length
+                                  ? "Все"
+                                  : selected.join(", ")
+                        }
+                    >
+                        {ITEM_TYPE_OPTIONS.map((type) => (
+                            <MenuItem key={type} value={type}>
+                                <Checkbox size="small" checked={typeFilter.includes(type)} />
+                                <ListItemText primary={type} />
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </FormControl>
+            </Stack>
 
             <Box
                 ref={containerRef}
