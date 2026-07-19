@@ -25,6 +25,18 @@ interface BuildLink {
     manual: boolean;
 }
 
+/** Red (weak) -> green (strong) gradient for computed link strength (0..1) — thickness already encodes strength
+ *  via linkWidth, this adds a second, faster-to-read cue on top of it. Alpha still scales with strength too, kept
+ *  from the pre-gradient version, so weak links stay faint as well as red rather than a fully-opaque red line. */
+function linkStrengthColor(strength: number): string {
+    const t = Math.max(0, Math.min(1, strength));
+    const r = Math.round(229 + t * (76 - 229));
+    const g = Math.round(57 + t * (175 - 57));
+    const b = Math.round(53 + t * (80 - 53));
+    const alpha = 0.35 + t * 0.5;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export default function GraphPage() {
     const store = useStore();
     const navigate = useNavigate();
@@ -75,7 +87,8 @@ export default function GraphPage() {
 
             <Typography variant="body2" color="text.secondary">
                 Билды связаны, если у них есть общие предметы (толщина линии — насколько сильно, относительно
-                меньшего билда), либо если связь добавлена вручную на странице билда (оранжевая линия).
+                меньшего билда, плюс цвет — от красного к зелёному, чем сильнее связь), либо если связь добавлена
+                вручную на странице билда (оранжевая линия).
             </Typography>
 
             <Box
@@ -125,7 +138,7 @@ export default function GraphPage() {
                             height={size.height}
                             nodeId="id"
                             nodeLabel="name"
-                            linkColor={(link) => (link.manual ? "#ffb74d" : `rgba(255,255,255,${0.15 + link.strength * 0.6})`)}
+                            linkColor={(link) => (link.manual ? "#ffb74d" : linkStrengthColor(link.strength))}
                             linkWidth={(link) => 1 + link.strength * 4}
                             backgroundColor="rgba(0,0,0,0)"
                             onNodeClick={(node) => navigate(`/builds/${encodeURIComponent(String(node.id))}`)}

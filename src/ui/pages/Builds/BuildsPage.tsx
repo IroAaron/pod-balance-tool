@@ -311,17 +311,33 @@ export default function BuildsPage() {
                                             Предметы не добавлены.
                                         </Typography>
                                     ) : (
-                                        buildItems.map((item) => (
-                                            <Tooltip key={item.id} title={store.itemName(item)}>
-                                                <Box
-                                                    component={RouterLink}
-                                                    to={`/items/${encodeURIComponent(item.id)}`}
-                                                    sx={{ display: "block", lineHeight: 0 }}
+                                        buildItems.map((item) => {
+                                            const description = store.itemDescription(item);
+                                            return (
+                                                <Tooltip
+                                                    key={item.id}
+                                                    title={
+                                                        <>
+                                                            {store.itemName(item)}
+                                                            {description && (
+                                                                <>
+                                                                    <br />
+                                                                    {description}
+                                                                </>
+                                                            )}
+                                                        </>
+                                                    }
                                                 >
-                                                    <ItemIcon item={item} size={36} />
-                                                </Box>
-                                            </Tooltip>
-                                        ))
+                                                    <Box
+                                                        component={RouterLink}
+                                                        to={`/items/${encodeURIComponent(item.id)}`}
+                                                        sx={{ display: "block", lineHeight: 0 }}
+                                                    >
+                                                        <ItemIcon item={item} size={36} />
+                                                    </Box>
+                                                </Tooltip>
+                                            );
+                                        })
                                     )}
                                 </Stack>
 
