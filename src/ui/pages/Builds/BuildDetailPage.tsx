@@ -5,8 +5,15 @@ import { useStore } from "../../hooks/useStore";
 import { relatedBuilds } from "../../../core/domain/relations";
 import BuildIcon from "../../components/BuildIcon";
 
-export default function BuildDetailPage() {
-    const { id } = useParams<{ id: string }>();
+type Props = {
+    /** Overrides the route param — set when rendered inside DetailModal (an "internal window") instead of as a full page. */
+    id?: string;
+};
+
+export default function BuildDetailPage({ id: idProp }: Props = {}) {
+    const params = useParams<{ id: string }>();
+    const id = idProp ?? params.id;
+    const inModal = idProp !== undefined;
     const navigate = useNavigate();
     const store = useStore();
     const build = id ? store.getBuild(id) : undefined;
@@ -34,9 +41,11 @@ export default function BuildDetailPage() {
         return (
             <Stack spacing={2}>
                 <Typography variant="h5">Билд не найден</Typography>
-                <Button component={RouterLink} to="/builds">
-                    ← К списку билдов
-                </Button>
+                {!inModal && (
+                    <Button component={RouterLink} to="/builds">
+                        ← К списку билдов
+                    </Button>
+                )}
             </Stack>
         );
     }
@@ -59,9 +68,11 @@ export default function BuildDetailPage() {
 
     return (
         <Stack spacing={3} sx={{ maxWidth: 900 }}>
-            <Button component={RouterLink} to="/builds" size="small" sx={{ alignSelf: "flex-start" }}>
-                ← К списку билдов
-            </Button>
+            {!inModal && (
+                <Button component={RouterLink} to="/builds" size="small" sx={{ alignSelf: "flex-start" }}>
+                    ← К списку билдов
+                </Button>
+            )}
 
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>

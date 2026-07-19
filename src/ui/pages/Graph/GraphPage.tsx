@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
     Box,
     Checkbox,
@@ -16,6 +15,8 @@ import ForceGraph2D from "react-force-graph-2d";
 import { useStore } from "../../hooks/useStore";
 import { computeBuildConnections } from "../../../core/domain/relations";
 import { resolveBuildIcon, type ResolvedBuildIcon } from "../../../core/domain/sprites";
+import DetailModal from "../../components/DetailModal";
+import BuildDetailPage from "../Builds/BuildDetailPage";
 
 const NODE_RADIUS = 9;
 
@@ -86,11 +87,11 @@ function linkStrengthColor(strength: number): string {
 
 export default function GraphPage() {
     const store = useStore();
-    const navigate = useNavigate();
     const containerRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({ width: 800, height: 600 });
     const [showLabels, setShowLabels] = useState(false);
     const [typeFilter, setTypeFilter] = useState<string[]>(ITEM_TYPE_OPTIONS);
+    const [openBuildId, setOpenBuildId] = useState<string | null>(null);
     const spriteCacheRef = useRef(new Map<string, HTMLImageElement>());
     const failedSpritesRef = useRef(new Set<string>());
     const [, repaintOnSpriteLoad] = useReducer((count: number) => count + 1, 0);
@@ -238,7 +239,7 @@ export default function GraphPage() {
                             linkColor={(link) => (link.manual ? "#ffb74d" : linkStrengthColor(link.strength))}
                             linkWidth={(link) => 1 + link.strength * 4}
                             backgroundColor="rgba(0,0,0,0)"
-                            onNodeClick={(node) => navigate(`/builds/${encodeURIComponent(String(node.id))}`)}
+                            onNodeClick={(node) => setOpenBuildId(String(node.id))}
                             nodeCanvasObjectMode={() => "replace"}
                             nodeCanvasObject={(node, ctx, globalScale) => {
                                 const x = node.x ?? 0;
@@ -299,6 +300,10 @@ export default function GraphPage() {
                     </>
                 )}
             </Box>
+
+            <DetailModal open={openBuildId !== null} onClose={() => setOpenBuildId(null)}>
+                {openBuildId && <BuildDetailPage id={openBuildId} />}
+            </DetailModal>
         </Stack>
     );
 }

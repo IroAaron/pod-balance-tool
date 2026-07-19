@@ -6,9 +6,16 @@ import ItemIcon from "../../components/ItemIcon";
 import { relatedItems } from "../../../core/domain/relations";
 import type { MechanicRow } from "../../../core/models/Mechanic";
 
-export default function ItemDetailPage() {
-    const { id } = useParams<{ id: string }>();
+type Props = {
+    /** Overrides the route param — set when rendered inside DetailModal (an "internal window") instead of as a full page. */
+    id?: string;
+};
+
+export default function ItemDetailPage({ id: idProp }: Props = {}) {
+    const params = useParams<{ id: string }>();
+    const id = idProp ?? params.id;
     const store = useStore();
+    const inModal = idProp !== undefined;
     const item = id ? store.getItem(id) : undefined;
     const [editingIcon, setEditingIcon] = useState(false);
     const [iconDraft, setIconDraft] = useState("");
@@ -25,9 +32,11 @@ export default function ItemDetailPage() {
         return (
             <Stack spacing={2}>
                 <Typography variant="h5">Предмет не найден</Typography>
-                <Button component={RouterLink} to="/items">
-                    ← К списку предметов
-                </Button>
+                {!inModal && (
+                    <Button component={RouterLink} to="/items">
+                        ← К списку предметов
+                    </Button>
+                )}
             </Stack>
         );
     }
@@ -53,9 +62,11 @@ export default function ItemDetailPage() {
 
     return (
         <Stack spacing={3} sx={{ maxWidth: 900 }}>
-            <Button component={RouterLink} to="/items" size="small" sx={{ alignSelf: "flex-start" }}>
-                ← К списку предметов
-            </Button>
+            {!inModal && (
+                <Button component={RouterLink} to="/items" size="small" sx={{ alignSelf: "flex-start" }}>
+                    ← К списку предметов
+                </Button>
+            )}
 
             <Paper sx={{ p: 3 }}>
                 <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start" }}>

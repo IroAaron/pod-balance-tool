@@ -27,6 +27,8 @@ import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import BuildIcon from "../../components/BuildIcon";
+import DetailModal from "../../components/DetailModal";
+import ItemDetailPage from "../Items/ItemDetailPage";
 import { higherTierIds } from "../../../core/domain/relations";
 import type { BuildSortKey } from "../../../core/services/BuildService";
 
@@ -43,6 +45,7 @@ export default function BuildsPage() {
     const [typeFilter, setTypeFilter] = useState<string[]>([]);
     const [sortKey, setSortKey] = useState<BuildSortKey>("name");
     const [suggestMessage, setSuggestMessage] = useState<string | null>(null);
+    const [openItemId, setOpenItemId] = useState<string | null>(null);
     const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
     const [includeMoneyValueRoots, setIncludeMoneyValueRoots] = useState(false);
     const [deleteMode, setDeleteMode] = useState(false);
@@ -317,9 +320,8 @@ export default function BuildsPage() {
                                                     }
                                                 >
                                                     <Box
-                                                        component={RouterLink}
-                                                        to={`/items/${encodeURIComponent(item.id)}`}
-                                                        sx={{ display: "block", lineHeight: 0 }}
+                                                        onClick={() => setOpenItemId(item.id)}
+                                                        sx={{ display: "block", lineHeight: 0, cursor: "pointer" }}
                                                     >
                                                         <ItemIcon item={item} size={36} />
                                                     </Box>
@@ -339,6 +341,10 @@ export default function BuildsPage() {
                     Билдов пока нет. Создайте вручную или нажмите «Предложить билды», когда загрузите данные.
                 </Typography>
             )}
+
+            <DetailModal open={openItemId !== null} onClose={() => setOpenItemId(null)}>
+                {openItemId && <ItemDetailPage id={openItemId} />}
+            </DetailModal>
         </Stack>
     );
 }
