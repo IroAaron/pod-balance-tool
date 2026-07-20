@@ -4,6 +4,7 @@ import { Autocomplete, Box, Button, Chip, Paper, Stack, TextField, Typography } 
 import { useStore } from "../../hooks/useStore";
 import { relatedBuilds } from "../../../core/domain/relations";
 import BuildIcon from "../../components/BuildIcon";
+import BuildTree from "../../components/BuildTree";
 
 type Props = {
     /** Overrides the route param — set when rendered inside DetailModal (an "internal window") instead of as a full page. */
@@ -169,6 +170,19 @@ export default function BuildDetailPage({ id: idProp }: Props = {}) {
                     blurOnSelect
                 />
             </Paper>
+
+            {build.items.length > 0 && (
+                <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                        Дерево связей
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Ступени прямых/непрямых связей между предметами билда, от головного предмета (первого в
+                        списке) вниз.
+                    </Typography>
+                    <BuildTree build={build} />
+                </Paper>
+            )}
 
             <Paper sx={{ p: 3 }}>
                 <Typography variant="h6" sx={{ mb: 2 }}>
