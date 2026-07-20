@@ -308,13 +308,21 @@ export default function BuildTree({ build }: Props) {
                     if (!parentEl) continue;
                     const parentRect = parentEl.getBoundingClientRect();
 
+                    // "Parent" doesn't reliably mean "the one visually above" — a combo participant can end up at
+                    // an earlier tier than the combo itself (placed there via a different, more direct signal;
+                    // see computeBuildTree's post-pass), so the combo's own edge to it points *upward*. Always
+                    // connect bottom-of-the-higher-box to top-of-the-lower-box (by actual on-screen position, not
+                    // by tier/parent role) — otherwise the line/arrowhead reaches for the wrong side of a box and
+                    // ends up geometrically behind it, invisible under the node's own (now higher z-index) fill.
+                    const parentIsHigher = parentRect.top + parentRect.height / 2 <= childRect.top + childRect.height / 2;
+
                     next.push({
                         parentId,
                         childId: node.itemId,
                         x1: parentRect.left + parentRect.width / 2 - containerRect.left,
-                        y1: parentRect.bottom - containerRect.top,
+                        y1: (parentIsHigher ? parentRect.bottom : parentRect.top) - containerRect.top,
                         x2: childRect.left + childRect.width / 2 - containerRect.left,
-                        y2: childRect.top - containerRect.top,
+                        y2: (parentIsHigher ? childRect.top : childRect.bottom) - containerRect.top,
                     });
                 }
             }
