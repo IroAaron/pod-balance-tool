@@ -1,8 +1,12 @@
 import type { Item } from "../models/Item";
 import type { Build } from "../models/Build";
 
-/** Vite serves everything under public/ as static files from the site root. */
-export const SPRITE_BASE_PATH = "/pod-mini-characters/";
+/**
+ * Vite serves everything under public/ as static files from the site root — but "root" is `import.meta.env.BASE_URL`
+ * (the configured `base`, e.g. "/pod-balance-tool/" on GitHub Pages), not always literally "/". A hardcoded
+ * leading slash here 404s in production once `base` is set, even though it works fine in local dev where base is "/".
+ */
+export const SPRITE_BASE_PATH = `${import.meta.env.BASE_URL}pod-mini-characters/`;
 
 function findRawValue(raw: Record<string, string>, columnName: string): string | undefined {
     const key = Object.keys(raw).find((entry) => entry.trim().toLowerCase() === columnName.toLowerCase());
