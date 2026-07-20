@@ -13,21 +13,63 @@ type Props = {
 
 type Edge = { parentId: string; childId: string; x1: number; y1: number; x2: number; y2: number };
 
-/**
- * Orange for an ingredient feeding a combo, green for the combo's own result coming out of it — by the combo's
- * actual ingredient/result roles, not by which side the tree's BFS happened to record as "parent". That matters:
- * when a combo's result is the tree's own root (a common case — the combo is often exactly why the root exists),
- * the root is discovered *before* its ingredients and ends up as the BFS parent of the combo node, even though
- * semantically the root is the *result*, downstream of the combo, not upstream of it.
- */
-function edgeColor(edge: Edge, comboInfoById: Map<string, ComboInfo>): string {
-    const combo = comboInfoById.get(edge.parentId) ?? comboInfoById.get(edge.childId);
-    if (!combo) return "#5B8CFF";
+type Point = { x: number; y: number };
 
-    const otherId = comboInfoById.has(edge.parentId) ? edge.childId : edge.parentId;
-    if (otherId === combo.resultId) return "#66bb6a";
-    if (combo.ingredientIds.includes(otherId)) return "#ffb74d";
-    return "#5B8CFF";
+interface ComboEdgeInfo {
+    color: string;
+
+    /** Where the arrowhead's tip sits — the boundary of whichever real node it's pointing at. */
+    tip: Point;
+
+    /** Direction the arrow points, in radians (atan2 convention). */
+    angle: number;
+}
+
+/**
+ * Orange for an ingredient feeding a combo (arrow points at the combo), green for the combo's own result coming
+ * out of it (arrow points at the result) — by the combo's actual ingredient/result roles, not by which side the
+ * tree's BFS happened to record as "parent"/"child". That distinction matters for the arrow direction specifically
+ * (not just the color): when a combo's result is the tree's own root (a common case — the combo is often exactly
+ * why the root exists), the root is discovered *before* its ingredients and ends up as the BFS parent of the combo
+ * node — i.e. the line is drawn root-to-combo — even though the arrow still needs to point combo-to-root, since
+ * that's the real direction of "this combination produces the root", not the other way around.
+ */
+function comboEdgeInfo(edge: Edge, comboInfoById: Map<string, ComboInfo>): ComboEdgeInfo | null {
+    const parentCombo = comboInfoById.get(edge.parentId);
+    const childCombo = comboInfoById.get(edge.childId);
+    const combo = parentCombo ?? childCombo;
+    if (!combo) return null;
+
+    const comboIsParent = Boolean(parentCombo);
+    const comboPoint: Point = comboIsParent ? { x: edge.x1, y: edge.y1 } : { x: edge.x2, y: edge.y2 };
+    const otherPoint: Point = comboIsParent ? { x: edge.x2, y: edge.y2 } : { x: edge.x1, y: edge.y1 };
+    const otherId = comboIsParent ? edge.childId : edge.parentId;
+
+    if (otherId === combo.resultId) {
+        return { color: "#66bb6a", tip: otherPoint, angle: Math.atan2(otherPoint.y - comboPoint.y, otherPoint.x - comboPoint.x) };
+    }
+    if (combo.ingredientIds.includes(otherId)) {
+        return { color: "#ffb74d", tip: comboPoint, angle: Math.atan2(comboPoint.y - otherPoint.y, comboPoint.x - otherPoint.x) };
+    }
+    return null;
+}
+
+/** A small filled triangle, tip at `info.tip`, pointing along `info.angle` — two more points at ±spread from the
+ *  tip, `size` back along the line, is the standard construction for an SVG arrowhead. */
+function ArrowHead({ info, opacity }: { info: ComboEdgeInfo; opacity: number }) {
+    const size = 12;
+    const spread = Math.PI / 7;
+
+    const wing = (offset: number) => ({
+        x: info.tip.x - size * Math.cos(info.angle + offset),
+        y: info.tip.y - size * Math.sin(info.angle + offset),
+    });
+    const wing1 = wing(spread);
+    const wing2 = wing(-spread);
+
+    const points = [`${info.tip.x},${info.tip.y}`, `${wing1.x},${wing1.y}`, `${wing2.x},${wing2.y}`].join(" ");
+
+    return <polygon points={points} fill={info.color} opacity={opacity} style={{ transition: "opacity 0.15s" }} />;
 }
 
 function edgeKey(parentId: string, childId: string): string {
@@ -343,6 +385,8 @@ export default function BuildTree({ build }: Props) {
                     {edges.map((edge) => {
                         const key = edgeKey(edge.parentId, edge.childId);
                         const isHighlighted = !highlightedEdgeKeys || highlightedEdgeKeys.has(key);
+                        const combo = comboEdgeInfo(edge, comboInfoById);
+                        const opacity = isHighlighted ? 0.9 : 0.15;
                         return (
                             <g key={key}>
                                 <line
@@ -350,11 +394,12 @@ export default function BuildTree({ build }: Props) {
                                     y1={edge.y1}
                                     x2={edge.x2}
                                     y2={edge.y2}
-                                    stroke={edgeColor(edge, comboInfoById)}
+                                    stroke={combo?.color ?? "#5B8CFF"}
                                     strokeWidth={isHighlighted ? 2.5 : 1.5}
-                                    opacity={isHighlighted ? 0.9 : 0.15}
+                                    opacity={opacity}
                                     style={{ pointerEvents: "none", transition: "opacity 0.15s" }}
                                 />
+                                {combo && <ArrowHead info={combo} opacity={opacity} />}
                                 {/* Wider invisible line on top, just for a comfortable hover hit-area on a 1.5px line. */}
                                 <line
                                     x1={edge.x1}
