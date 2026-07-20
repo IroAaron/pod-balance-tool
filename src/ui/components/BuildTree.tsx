@@ -87,6 +87,28 @@ function TreeNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNode
     );
 }
 
+/** Placeholder for a tier with no members — keeps the step sequence visible instead of skipping straight to the
+ *  next non-empty tier. Not a real node: no link, no tooltip, no edges drawn to/from it. */
+function EmptyTierSlot() {
+    return (
+        <Box
+            sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 56,
+                height: 56,
+                borderRadius: 2,
+                border: "1px dashed",
+                borderColor: "divider",
+                color: "text.disabled",
+            }}
+        >
+            <Typography variant="caption">—</Typography>
+        </Box>
+    );
+}
+
 /**
  * Tiered top-to-bottom visualization of a build's own membership, per tier (see computeBuildTree): head item,
  * direct Card connections, direct House/Artefact connections, then increasingly indirect connections below.
@@ -102,13 +124,22 @@ export default function BuildTree({ build }: Props) {
         [build, store.items, store.mechanics, store.upgradeChains, store.replaceRules]
     );
 
+    // Every tier number up to the highest one actually reached gets a row, even if nothing landed on it (e.g. no
+    // Card-type direct connection at tier 1 but a House/Artefact one at tier 2) — an empty placeholder slot keeps
+    // the step sequence visually consistent instead of silently jumping from "Головной предмет" to "2 ступень".
     const tiers = useMemo(() => {
         const byTier = new Map<number, BuildTreeNode[]>();
+        let maxTier = 0;
         for (const node of nodes) {
             if (!byTier.has(node.tier)) byTier.set(node.tier, []);
             byTier.get(node.tier)!.push(node);
+            maxTier = Math.max(maxTier, node.tier);
         }
-        return [...byTier.entries()].sort(([a], [b]) => a - b);
+        const result: [number, BuildTreeNode[]][] = [];
+        for (let tier = 0; tier <= maxTier; tier++) {
+            result.push([tier, byTier.get(tier) ?? []]);
+        }
+        return result;
     }, [nodes]);
 
     // Bidirectional adjacency (parent<->child) derived from the tree's directed parent links — used for hover
@@ -257,19 +288,23 @@ export default function BuildTree({ build }: Props) {
                                 {tierLabel(tier)}
                             </Typography>
                             <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", justifyContent: "center" }}>
-                                {tierNodes.map((node) => (
-                                    <TreeNode
-                                        key={node.itemId}
-                                        node={node}
-                                        nodeRefs={nodeRefs}
-                                        dimmed={highlightedItemIds !== null && !highlightedItemIds.has(node.itemId)}
-                                        onHoverStart={() => {
-                                            setHoveredItemId(node.itemId);
-                                            setHoveredEdgeKey(null);
-                                        }}
-                                        onHoverEnd={() => setHoveredItemId((current) => (current === node.itemId ? null : current))}
-                                    />
-                                ))}
+                                {tierNodes.length === 0 ? (
+                                    <EmptyTierSlot />
+                                ) : (
+                                    tierNodes.map((node) => (
+                                        <TreeNode
+                                            key={node.itemId}
+                                            node={node}
+                                            nodeRefs={nodeRefs}
+                                            dimmed={highlightedItemIds !== null && !highlightedItemIds.has(node.itemId)}
+                                            onHoverStart={() => {
+                                                setHoveredItemId(node.itemId);
+                                                setHoveredEdgeKey(null);
+                                            }}
+                                            onHoverEnd={() => setHoveredItemId((current) => (current === node.itemId ? null : current))}
+                                        />
+                                    ))
+                                )}
                             </Stack>
                         </Box>
                     ))}
