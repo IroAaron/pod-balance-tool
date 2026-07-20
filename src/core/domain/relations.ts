@@ -638,6 +638,61 @@ export function computeCascadeBuilds(
     return drafts;
 }
 
+/**
+ * itemId -> ids of other items it structurally connects to via the same signals `computeCascadeBuilds` already
+ * uses to pull members into a cascade build (tag filters, relative-color-aware recolor matching, tagged events) —
+ * but computed generically for *any* mechanic row belonging to the item, not just a PlayerScore payoff row.
+ * `relatedItems`/`computeBuildTree` previously only recognized id refs/chains/replace-rules/plain produced-events
+ * as "strong" — real example that exposed the gap: Фермер (`BonusTargetTag=Farmer`) and Ферма (statically tagged
+ * `Farmer`) are exactly why Ферма ends up a member of "Билд от Фермера" via cascade's level-2 scaler matching, but
+ * the build's connection tree showed them as unrelated, since that tag-filter signal didn't exist here at all.
+ * Directional per row (owner -> match), callers should check both directions for an unordered "are these
+ * connected" question, same as the existing direct-id-ref check does.
+ */
+function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): Map<string, Set<string>> {
+    const knownIds = new Set(items.map((item) => item.id));
+    const mechanicsByItem = groupByItemId(mechanics);
+    const index = buildCascadeIndex(items, mechanicsByItem, [], knownIds);
+
+    const connections = new Map<string, Set<string>>();
+    const connect = (a: string, b: string) => {
+        if (a === b) return;
+        if (!connections.has(a)) connections.set(a, new Set());
+        connections.get(a)!.add(b);
+    };
+
+    for (const [itemId, rows] of mechanicsByItem) {
+        for (const row of rows) {
+            if (row.table === "MechAddValue") {
+                for (const tag of [
+                    ...splitList(row.fields.BonusTargetTag ?? ""),
+                    ...splitList(row.fields.ActivatorTag ?? ""),
+                    ...splitList(row.fields.TargetTag ?? ""),
+                ]) {
+                    for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
+                    for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) connect(itemId, id);
+                }
+                for (const color of [
+                    ...splitList(row.fields.ActivatorColor ?? ""),
+                    ...splitList(row.fields.BonusTargetColor ?? ""),
+                ]) {
+                    for (const id of recolorersForColor(index, color)) connect(itemId, id);
+                }
+            }
+
+            if (row.fields.ActivatorType) {
+                for (const tag of splitList(row.fields.ActivatorTag ?? "")) {
+                    for (const id of index.itemIdsByProducedTaggedEvent.get(`${row.fields.ActivatorType}|${tag}`) ?? []) {
+                        connect(itemId, id);
+                    }
+                }
+            }
+        }
+    }
+
+    return connections;
+}
+
 /** Ranked "possibly related" items for an item's detail page — informational only, never auto-clusters. */
 export function relatedItems(
     itemId: string,
@@ -656,6 +711,8 @@ export function relatedItems(
     const listenedEvents = computeListenedEvents(mechanicsByItem);
     const targetProduces = producedEvents.get(itemId) ?? new Set<string>();
     const targetListens = listenedEvents.get(itemId) ?? new Set<string>();
+    const cascadeStyleConnections = buildCascadeStyleConnections(items, mechanics);
+    const targetCascadeLinks = cascadeStyleConnections.get(itemId) ?? new Set<string>();
 
     const targetMechanics = mechanicsByItem.get(itemId) ?? [];
     const targetIdRefs = new Set(
@@ -714,6 +771,13 @@ export function relatedItems(
             if (otherFeedsTarget.length > 0) {
                 reasons.push(`реагирует на ${otherFeedsTarget.join(", ")}, которое производит другой`);
             }
+        }
+
+        const otherCascadeLinks = cascadeStyleConnections.get(other.id) ?? new Set<string>();
+        if (targetCascadeLinks.has(other.id) || otherCascadeLinks.has(itemId)) {
+            strength = "strong";
+            score += 12;
+            reasons.push("совпадает по тегу/цвету/событию в механике (как при генерации билдов)");
         }
 
         const otherFingerprints = fieldFingerprints(otherMechanics);

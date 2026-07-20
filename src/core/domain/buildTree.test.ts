@@ -104,4 +104,27 @@ describe("computeBuildTree", () => {
         expect(nodes.map((n) => n.itemId)).toEqual(["root"]);
         expect(unconnected).toEqual(["member"]);
     });
+
+    it("connects a scaler via its BonusTargetTag matching the other item's static tag (real Фермер/Ферма shape)", () => {
+        // Фермер (root) has a MechAddValue payoff with BonusTargetTag=Farmer; Ферма is statically tagged Farmer
+        // and has no mechanic rows of her own at all — this is exactly why cascade generation put her in the
+        // build (a level-2 scaler match), but before this fix the tree had no signal for it and bucketed her as
+        // unconnected. Not the same thing as the "shared tag alone" test above — there the *tag itself* just
+        // happened to be equal on both sides with no mechanic row filtering on it; here one side's own mechanic
+        // explicitly filters by that tag, a directed, causal reference.
+        const build = makeBuild(["farmer", "farm"]);
+        const items = [makeItem("farmer", { itemType: "Card" }), makeItem("farm", { itemType: "House", tags: ["Food", "Farmer"] })];
+        const mechanics: MechanicRow[] = [
+            {
+                id: "farmer-payoff",
+                table: "MechAddValue",
+                itemId: "farmer",
+                fields: { TargetType: "PlayerScore", BonusTargetType: "NotRoad", BonusTargetTag: "Farmer" },
+            },
+        ];
+
+        const { nodes, unconnected } = computeBuildTree(build, items, mechanics, [], []);
+        expect(unconnected).toEqual([]);
+        expect(nodes.find((n) => n.itemId === "farm")).toEqual({ itemId: "farm", tier: 2, parents: ["farmer"] });
+    });
 });
