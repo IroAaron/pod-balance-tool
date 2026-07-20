@@ -18,10 +18,17 @@ import {
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 
+// Пока никто ни разу не жал «Скачать», общих значений в Firestore ещё нет — подставляем боевые ссылки на
+// таблицы проекта по умолчанию, чтобы не заставлять первого зашедшего коллегу искать их вручную.
+const DEFAULT_CONFIG_URL =
+    "https://script.google.com/macros/s/AKfycbzS79EJrv1403Lue7ZASEPTA5ho35kbDh7hh3W01B0npFi_xKoauQS_6Cky5ivmt0Wx/exec";
+const DEFAULT_TRANSLATIONS_URL =
+    "https://script.google.com/macros/s/AKfycbxALyjgkQxcZYzxoYFipoCJXVrQ9UuE8vydXpWe03ctQ1fYtnrmhG_cpQRTGYeaKJwc/exec";
+
 export default function SourcesPage() {
     const store = useStore();
-    const [configUrl, setConfigUrl] = useState(store.sources.configUrl);
-    const [translationsUrl, setTranslationsUrl] = useState(store.sources.translationsUrl);
+    const [configUrl, setConfigUrl] = useState(store.sources.configUrl || DEFAULT_CONFIG_URL);
+    const [translationsUrl, setTranslationsUrl] = useState(store.sources.translationsUrl || DEFAULT_TRANSLATIONS_URL);
     const [dragOver, setDragOver] = useState(false);
     const [migrating, setMigrating] = useState(false);
     const [pendingSnapshotFile, setPendingSnapshotFile] = useState<File | null>(null);
@@ -78,6 +85,13 @@ export default function SourcesPage() {
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>
                     <Typography variant="h6">Google Sheets / Apps Script</Typography>
+
+                    <Alert severity="info">
+                        Ссылки на конфиг и переводы проекта уже подставлены ниже — просто нажмите «Скачать»,
+                        чтобы загрузить актуальные данные. Повторяйте после каждого изменения таблиц в Google
+                        Sheets.
+                    </Alert>
+
                     <Typography variant="body2" color="text.secondary">
                         Ссылка на Google Sheets скачивает одну вкладку (CSV). Ссылка на Apps Script Web App
                         должна возвращать JSON вида {"{ [имяВкладки]: [{ ...строка }] }"} — так одна ссылка
