@@ -46,7 +46,8 @@ jobs:
         run: |
           rm -rf public/icons-tags
           mkdir -p public/icons-tags
-          cp "sprite-source/roulette_interface/Icons_tags/"*.png public/icons-tags/
+          # This folder mixes .png and .svg — copy both, not just *.png.
+          find "sprite-source/roulette_interface/Icons_tags/" -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.svg" \) -exec cp {} public/icons-tags/ \;
 
       - uses: actions/setup-node@v4
         with:
