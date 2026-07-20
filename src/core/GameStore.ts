@@ -11,6 +11,7 @@ import { ImportService, type ImportReport, type ImportResult } from "./services/
 
 import { computeSuggestedBuilds, computeCascadeBuilds, higherTierIds } from "./domain/relations";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
+import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "./domain/descriptionTemplate";
 
 import {
     loadImportCache,
@@ -37,6 +38,7 @@ import {
     updateItemIconRemote,
     addCustomParamValueRemote,
     updateSourcesRemote,
+    updateDescriptionSettingsRemote,
     replaceAllBuilds,
     replaceSharedState,
     migrateIfEmpty,
@@ -77,6 +79,8 @@ export class GameStore {
     customParamValues: Record<string, string[]> = {};
 
     sources: SourceUrls = { configUrl: "", translationsUrl: "" };
+
+    descriptionSettings: DescriptionSettings = DEFAULT_DESCRIPTION_SETTINGS;
 
     /** False until the first Firestore `builds` snapshot arrives — distinguishes "still loading" from "no builds yet". */
     buildsReady = false;
@@ -131,6 +135,7 @@ export class GameStore {
             this.itemIcons = shared.itemIcons;
             this.customParamValues = shared.customParamValues;
             this.sources = shared.sources;
+            this.descriptionSettings = shared.descriptionSettings;
             this.sharedReady = true;
             this.notify();
         });
@@ -410,12 +415,21 @@ export class GameStore {
         );
     }
 
+    setDescriptionSettings(settings: DescriptionSettings): void {
+        this.descriptionSettings = settings;
+        this.notify();
+        void updateDescriptionSettingsRemote(settings).catch((error) =>
+            console.error("setDescriptionSettings → Firestore", error)
+        );
+    }
+
     exportSnapshot(): void {
         writeSnapshotFile({
             builds: this.builds,
             itemIcons: this.itemIcons,
             customParamValues: this.customParamValues,
             sources: this.sources,
+            descriptionSettings: this.descriptionSettings,
             importCache: {
                 items: this.allItems,
                 translations: this.translations,
@@ -438,6 +452,7 @@ export class GameStore {
                 itemIcons: state.itemIcons,
                 customParamValues: state.customParamValues,
                 sources: state.sources,
+                descriptionSettings: state.descriptionSettings,
             }),
         ]);
 

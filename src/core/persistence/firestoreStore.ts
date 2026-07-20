@@ -16,6 +16,7 @@ import {
 
 import type { Build } from "../models/Build";
 import type { SourceUrls } from "./localStore";
+import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
 import { db } from "./firebaseClient";
 
 const buildsCol = collection(db, "builds");
@@ -27,12 +28,15 @@ export interface SharedState {
     customParamValues: Record<string, string[]>;
 
     sources: SourceUrls;
+
+    descriptionSettings: DescriptionSettings;
 }
 
 const DEFAULT_SHARED: SharedState = {
     itemIcons: {},
     customParamValues: {},
     sources: { configUrl: "", translationsUrl: "" },
+    descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
 };
 
 export interface LegacyLocalState {
@@ -85,10 +89,21 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         (error) => console.error("subscribeShared:sources", error)
     );
 
+    const unsubDescriptionSettings = onSnapshot(
+        doc(sharedCol, "descriptionSettings"),
+        (snapshot) => {
+            state.descriptionSettings =
+                (snapshot.data() as DescriptionSettings | undefined) ?? DEFAULT_SHARED.descriptionSettings;
+            emit();
+        },
+        (error) => console.error("subscribeShared:descriptionSettings", error)
+    );
+
     return () => {
         unsubIcons();
         unsubParamValues();
         unsubSources();
+        unsubDescriptionSettings();
     };
 }
 
@@ -165,12 +180,17 @@ export function updateSourcesRemote(sources: SourceUrls): Promise<void> {
     return setDoc(doc(sharedCol, "sources"), sources);
 }
 
-/** Full overwrite of all three `shared/*` docs — used by importSnapshot, which is a full-replace operation. */
+export function updateDescriptionSettingsRemote(settings: DescriptionSettings): Promise<void> {
+    return setDoc(doc(sharedCol, "descriptionSettings"), settings);
+}
+
+/** Full overwrite of all `shared/*` docs — used by importSnapshot, which is a full-replace operation. */
 export function replaceSharedState(shared: SharedState): Promise<void> {
     const batch = writeBatch(db);
     batch.set(doc(sharedCol, "itemIcons"), shared.itemIcons);
     batch.set(doc(sharedCol, "customParamValues"), shared.customParamValues);
     batch.set(doc(sharedCol, "sources"), shared.sources);
+    batch.set(doc(sharedCol, "descriptionSettings"), shared.descriptionSettings);
     return batch.commit();
 }
 

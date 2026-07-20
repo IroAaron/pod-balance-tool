@@ -2,6 +2,18 @@ import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
 import { SPRITE_BASE_PATH, findRawValue } from "./sprites";
 
+/** Site-wide display knobs for ItemDescription, editable on the Settings page and shared via Firestore. */
+export interface DescriptionSettings {
+    /** Multiplier applied to each [img width=N] tag's own width — 1 = render exactly as authored. */
+    spriteScale: number;
+
+    /** Font size (px) for both plain and colored/shimmer description text. */
+    fontSizePx: number;
+}
+
+/** Matches today's actual look (unscaled BBCode width, ItemDetailPage's plain-Typography ~16px body text). */
+export const DEFAULT_DESCRIPTION_SETTINGS: DescriptionSettings = { spriteScale: 1, fontSizePx: 16 };
+
 /** Synced from the game repo's `roulette_interface/Icons_tags/` on every deploy — see .github/workflows/deploy.yml. */
 export const TAG_ICON_BASE_PATH = `${import.meta.env.BASE_URL}icons-tags/`;
 

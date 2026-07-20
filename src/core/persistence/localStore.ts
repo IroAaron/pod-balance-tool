@@ -1,5 +1,6 @@
 import type { Build } from "../models/Build";
 import type { NormalizedData } from "../import/normalize";
+import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
 
 const NAMESPACE = "pod-balance-tool:v1";
 
@@ -18,6 +19,8 @@ export interface PersistedState {
 
     sources: SourceUrls;
 
+    descriptionSettings: DescriptionSettings;
+
     importCache: NormalizedData | null;
 
     importCacheTimestamp: string | null;
@@ -28,6 +31,7 @@ const DEFAULT_STATE: PersistedState = {
     itemIcons: {},
     customParamValues: {},
     sources: { configUrl: "", translationsUrl: "" },
+    descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
     importCache: null,
     importCacheTimestamp: null,
 };
@@ -103,6 +107,7 @@ export async function parseSnapshotFile(file: File): Promise<PersistedState> {
         itemIcons: parsed.itemIcons ?? {},
         customParamValues: parsed.customParamValues ?? {},
         sources: parsed.sources ?? DEFAULT_STATE.sources,
+        descriptionSettings: parsed.descriptionSettings ?? DEFAULT_STATE.descriptionSettings,
         importCache: parsed.importCache ?? null,
         importCacheTimestamp: parsed.importCacheTimestamp ?? null,
     };
