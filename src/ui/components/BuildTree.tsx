@@ -1,8 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { Box, Chip, Stack, Typography } from "@mui/material";
+import { Box, Chip, Stack, Tooltip, Typography } from "@mui/material";
 import { useStore } from "../hooks/useStore";
 import ItemIcon from "./ItemIcon";
+import ItemDescription from "./ItemDescription";
 import { computeBuildTree, type BuildTreeNode } from "../../core/domain/buildTree";
 import type { Build } from "../../core/models/Build";
 
@@ -31,44 +32,58 @@ type TreeNodeProps = {
     onHoverEnd: () => void;
 };
 
-/** One tree node: item icon/name, registers itself in `nodeRefs` so the parent can measure it for edge lines. */
+/** One tree node: item icon only (name/description live in the hover tooltip), registers itself in `nodeRefs`
+ *  so the parent can measure it for edge lines. */
 function TreeNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNodeProps) {
     const store = useStore();
     const item = store.getItem(node.itemId);
+    const name = item ? store.itemName(item) : node.itemId;
+    const description = item ? store.itemDescription(item) : "";
 
     return (
-        <Box
-            ref={(el: HTMLElement | null) => {
-                if (el) nodeRefs.current.set(node.itemId, el);
-                else nodeRefs.current.delete(node.itemId);
-            }}
-            component={RouterLink}
-            to={`/items/${encodeURIComponent(node.itemId)}`}
-            onMouseEnter={onHoverStart}
-            onMouseLeave={onHoverEnd}
-            sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 0.5,
-                p: 1,
-                width: 96,
-                borderRadius: 2,
-                border: "1px solid",
-                borderColor: "divider",
-                textDecoration: "none",
-                color: "inherit",
-                bgcolor: "background.paper",
-                position: "relative",
-                opacity: dimmed ? 0.3 : 1,
-                transition: "opacity 0.15s",
-            }}
+        <Tooltip
+            title={
+                <>
+                    {name}
+                    {item && description && (
+                        <>
+                            <br />
+                            <ItemDescription item={item} description={description} />
+                        </>
+                    )}
+                </>
+            }
         >
-            {item ? <ItemIcon item={item} size={32} /> : <Typography sx={{ fontSize: 26 }}>🧩</Typography>}
-            <Typography variant="caption" sx={{ textAlign: "center", lineHeight: 1.2 }}>
-                {item ? store.itemName(item) : node.itemId}
-            </Typography>
-        </Box>
+            <Box
+                ref={(el: HTMLElement | null) => {
+                    if (el) nodeRefs.current.set(node.itemId, el);
+                    else nodeRefs.current.delete(node.itemId);
+                }}
+                component={RouterLink}
+                to={`/items/${encodeURIComponent(node.itemId)}`}
+                onMouseEnter={onHoverStart}
+                onMouseLeave={onHoverEnd}
+                sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    p: 1,
+                    width: 56,
+                    height: 56,
+                    borderRadius: 2,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    textDecoration: "none",
+                    color: "inherit",
+                    bgcolor: "background.paper",
+                    position: "relative",
+                    opacity: dimmed ? 0.3 : 1,
+                    transition: "opacity 0.15s",
+                }}
+            >
+                {item ? <ItemIcon item={item} size={32} /> : <Typography sx={{ fontSize: 26 }}>🧩</Typography>}
+            </Box>
+        </Tooltip>
     );
 }
 
