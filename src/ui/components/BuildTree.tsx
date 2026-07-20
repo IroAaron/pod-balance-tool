@@ -32,10 +32,62 @@ type TreeNodeProps = {
     onHoverEnd: () => void;
 };
 
+/** A ReplaceItem combination — its ingredients feed in, the result comes out. Round (not square, unlike a real
+ *  item node) so it reads as a mechanism rather than an item, and not a link since there's no item page for it. */
+function ComboNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNodeProps) {
+    const store = useStore();
+    const combo = node.combo!;
+
+    const nameOf = (id: string) => {
+        const item = store.getItem(id);
+        return item ? store.itemName(item) : id;
+    };
+
+    return (
+        <Tooltip
+            title={
+                <>
+                    Комбинация
+                    <br />
+                    {combo.ingredientIds.map(nameOf).join(" + ")} → {nameOf(combo.resultId)}
+                </>
+            }
+        >
+            <Box
+                ref={(el: HTMLElement | null) => {
+                    if (el) nodeRefs.current.set(node.itemId, el);
+                    else nodeRefs.current.delete(node.itemId);
+                }}
+                onMouseEnter={onHoverStart}
+                onMouseLeave={onHoverEnd}
+                sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 56,
+                    height: 56,
+                    borderRadius: "50%",
+                    border: "1px dashed",
+                    borderColor: "primary.main",
+                    bgcolor: "background.paper",
+                    opacity: dimmed ? 0.3 : 1,
+                    transition: "opacity 0.15s",
+                }}
+            >
+                <Typography sx={{ fontSize: 26 }}>⚗️</Typography>
+            </Box>
+        </Tooltip>
+    );
+}
+
 /** One tree node: item icon only (name/description live in the hover tooltip), registers itself in `nodeRefs`
  *  so the parent can measure it for edge lines. */
-function TreeNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNodeProps) {
+function TreeNode(props: TreeNodeProps) {
+    const { node, nodeRefs, dimmed, onHoverStart, onHoverEnd } = props;
     const store = useStore();
+
+    if (node.combo) return <ComboNode {...props} />;
+
     const item = store.getItem(node.itemId);
     const name = item ? store.itemName(item) : node.itemId;
     const description = item ? store.itemDescription(item) : "";

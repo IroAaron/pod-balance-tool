@@ -3,6 +3,7 @@ import { computeBuildTree } from "./buildTree";
 import type { Item } from "../models/Item";
 import type { Build } from "../models/Build";
 import type { MechanicRow } from "../models/Mechanic";
+import type { ReplaceRule } from "../models/ReplaceRule";
 
 function makeItem(id: string, overrides: Partial<Item> = {}): Item {
     return { id, tags: [], raw: {}, ...overrides };
@@ -126,5 +127,53 @@ describe("computeBuildTree", () => {
         const { nodes, unconnected } = computeBuildTree(build, items, mechanics, [], []);
         expect(unconnected).toEqual([]);
         expect(nodes.find((n) => n.itemId === "farm")).toEqual({ itemId: "farm", tier: 2, parents: ["farmer"] });
+    });
+
+    it("routes a 2-ingredient ReplaceItem combination through a synthetic combo node instead of flat pairwise edges (real Уличный музыкант+Продюсер→Рок музыкант shape)", () => {
+        const build = makeBuild(["rock_musician", "street_musician", "producer"]);
+        const items = [makeItem("rock_musician"), makeItem("street_musician"), makeItem("producer")];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "street-to-rock",
+                source: "ReplaceItem",
+                itemIdToReplace: "street_musician",
+                replacementItem: "rock_musician",
+                fields: { NeededItem: "producer", NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+
+        const { nodes, unconnected } = computeBuildTree(build, items, [], [], replaceRules);
+
+        expect(unconnected).toEqual([]);
+        const comboNode = nodes.find((n) => n.combo);
+        expect(comboNode).toBeDefined();
+        expect(comboNode!.parents).toEqual(["rock_musician"]);
+        expect(new Set(comboNode!.combo!.ingredientIds)).toEqual(new Set(["street_musician", "producer"]));
+        expect(comboNode!.combo!.resultId).toBe("rock_musician");
+
+        // No flat direct edge from root straight to either ingredient — only through the combo.
+        expect(nodes.find((n) => n.itemId === "street_musician")!.parents).toEqual([comboNode!.itemId]);
+        expect(nodes.find((n) => n.itemId === "producer")!.parents).toEqual([comboNode!.itemId]);
+    });
+
+    it("does not create a combo node for a single-ingredient replace rule (NeededItem not a build member)", () => {
+        const build = makeBuild(["rock_musician", "street_musician"]);
+        const items = [makeItem("rock_musician"), makeItem("street_musician")];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "street-to-rock",
+                source: "ReplaceItem",
+                itemIdToReplace: "street_musician",
+                replacementItem: "rock_musician",
+                // "producer" isn't a build member (not in `items` at all) — only 1 real ingredient, not a combination.
+                fields: { NeededItem: "producer", NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+
+        const { nodes, unconnected } = computeBuildTree(build, items, [], [], replaceRules);
+
+        expect(unconnected).toEqual([]);
+        expect(nodes.some((n) => n.combo)).toBe(false);
+        expect(nodes.find((n) => n.itemId === "street_musician")!.parents).toEqual(["rock_musician"]);
     });
 });
