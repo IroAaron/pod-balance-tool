@@ -39,6 +39,12 @@ export interface BuildTreeResult {
 
 const COMBO_ID_PREFIX = "combo:";
 
+/** True for a synthetic combo node's id (see BuildTreeNode.combo) — exported so UI code (edge coloring: orange
+ *  into a combo, green out of one) doesn't have to duplicate the `combo:` prefix convention. */
+export function isComboNodeId(id: string): boolean {
+    return id.startsWith(COMBO_ID_PREFIX);
+}
+
 /**
  * ReplaceItem rules where the item this build already exists to explain (the replacementItem) — or one of its
  * ingredients — is a build member, and at least 2 of {itemIdToReplace, NeededItem} are *also* build members. Real

@@ -4,7 +4,7 @@ import { Box, Chip, Stack, Tooltip, Typography } from "@mui/material";
 import { useStore } from "../hooks/useStore";
 import ItemIcon from "./ItemIcon";
 import ItemDescription from "./ItemDescription";
-import { computeBuildTree, type BuildTreeNode } from "../../core/domain/buildTree";
+import { computeBuildTree, type BuildTreeNode, type ComboInfo } from "../../core/domain/buildTree";
 import type { Build } from "../../core/models/Build";
 
 type Props = {
@@ -12,6 +12,23 @@ type Props = {
 };
 
 type Edge = { parentId: string; childId: string; x1: number; y1: number; x2: number; y2: number };
+
+/**
+ * Orange for an ingredient feeding a combo, green for the combo's own result coming out of it — by the combo's
+ * actual ingredient/result roles, not by which side the tree's BFS happened to record as "parent". That matters:
+ * when a combo's result is the tree's own root (a common case — the combo is often exactly why the root exists),
+ * the root is discovered *before* its ingredients and ends up as the BFS parent of the combo node, even though
+ * semantically the root is the *result*, downstream of the combo, not upstream of it.
+ */
+function edgeColor(edge: Edge, comboInfoById: Map<string, ComboInfo>): string {
+    const combo = comboInfoById.get(edge.parentId) ?? comboInfoById.get(edge.childId);
+    if (!combo) return "#5B8CFF";
+
+    const otherId = comboInfoById.has(edge.parentId) ? edge.childId : edge.parentId;
+    if (otherId === combo.resultId) return "#66bb6a";
+    if (combo.ingredientIds.includes(otherId)) return "#ffb74d";
+    return "#5B8CFF";
+}
 
 function edgeKey(parentId: string, childId: string): string {
     return `${parentId}--${childId}`;
@@ -176,6 +193,14 @@ export default function BuildTree({ build }: Props) {
         [build, store.items, store.mechanics, store.upgradeChains, store.replaceRules]
     );
 
+    const comboInfoById = useMemo(() => {
+        const map = new Map<string, ComboInfo>();
+        for (const node of nodes) {
+            if (node.combo) map.set(node.itemId, node.combo);
+        }
+        return map;
+    }, [nodes]);
+
     // Every tier number up to the highest one actually reached gets a row, even if nothing landed on it (e.g. no
     // Card-type direct connection at tier 1 but a House/Artefact one at tier 2) — an empty placeholder slot keeps
     // the step sequence visually consistent instead of silently jumping from "Головной предмет" to "2 ступень".
@@ -308,7 +333,7 @@ export default function BuildTree({ build }: Props) {
                                     y1={edge.y1}
                                     x2={edge.x2}
                                     y2={edge.y2}
-                                    stroke="#5B8CFF"
+                                    stroke={edgeColor(edge, comboInfoById)}
                                     strokeWidth={isHighlighted ? 2.5 : 1.5}
                                     opacity={isHighlighted ? 0.9 : 0.15}
                                     style={{ pointerEvents: "none", transition: "opacity 0.15s" }}
