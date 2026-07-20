@@ -13,16 +13,34 @@ import { computeSuggestedBuilds, computeCascadeBuilds, higherTierIds } from "./d
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 
 import {
-    loadPersistedState,
-    saveBuilds,
-    saveItemIcons,
-    saveCustomParamValues,
-    saveSources,
+    loadImportCache,
     saveImportCache,
+    readLegacyLocalState,
+    isMigratedToFirestore,
+    markMigratedToFirestore,
     exportSnapshot as writeSnapshotFile,
-    importSnapshotFile,
+    parseSnapshotFile,
     type SourceUrls,
 } from "./persistence/localStore";
+
+import {
+    subscribeBuilds,
+    subscribeShared,
+    writeBuild,
+    deleteBuildDoc,
+    writeBuildsBatch,
+    deleteBuildsBatch,
+    addItemToBuildRemote,
+    removeItemFromBuildRemote,
+    linkBuildsRemote,
+    unlinkBuildsRemote,
+    updateItemIconRemote,
+    addCustomParamValueRemote,
+    updateSourcesRemote,
+    replaceAllBuilds,
+    replaceSharedState,
+    migrateIfEmpty,
+} from "./persistence/firestoreStore";
 
 function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
     const map = new Map(existing.map((entry) => [entry.id, entry]));
@@ -51,6 +69,7 @@ export class GameStore {
 
     enumValues: Record<string, string[]> = {};
 
+    /** Synced live from Firestore's `builds` collection — see initRemoteSync(). */
     builds: Build[] = [];
 
     itemIcons: Record<string, string> = {};
@@ -58,6 +77,12 @@ export class GameStore {
     customParamValues: Record<string, string[]> = {};
 
     sources: SourceUrls = { configUrl: "", translationsUrl: "" };
+
+    /** False until the first Firestore `builds` snapshot arrives — distinguishes "still loading" from "no builds yet". */
+    buildsReady = false;
+
+    /** False until the first Firestore `shared/*` snapshot arrives. */
+    sharedReady = false;
 
     importReport: ImportReport | null = null;
 
@@ -79,21 +104,36 @@ export class GameStore {
     private listeners = new Set<() => void>();
 
     constructor() {
-        const persisted = loadPersistedState();
-        this.builds = persisted.builds;
-        this.itemIcons = persisted.itemIcons;
-        this.customParamValues = persisted.customParamValues;
-        this.sources = persisted.sources;
-        this.importedAt = persisted.importCacheTimestamp;
+        const cache = loadImportCache();
+        this.importedAt = cache.importCacheTimestamp;
 
-        if (persisted.importCache) {
-            this.allItems = persisted.importCache.items;
-            this.translations = persisted.importCache.translations;
-            this.mechanics = persisted.importCache.mechanics;
-            this.upgradeChains = persisted.importCache.upgradeChains ?? [];
-            this.replaceRules = persisted.importCache.replaceRules ?? [];
-            this.enumValues = persisted.importCache.enumValues ?? {};
+        if (cache.importCache) {
+            this.allItems = cache.importCache.items;
+            this.translations = cache.importCache.translations;
+            this.mechanics = cache.importCache.mechanics;
+            this.upgradeChains = cache.importCache.upgradeChains ?? [];
+            this.replaceRules = cache.importCache.replaceRules ?? [];
+            this.enumValues = cache.importCache.enumValues ?? {};
         }
+
+        this.initRemoteSync();
+    }
+
+    /** Subscribes to Firestore for the lifetime of the app — this store is a page-lifetime singleton, never disposed. */
+    private initRemoteSync(): void {
+        subscribeBuilds((builds) => {
+            this.builds = builds;
+            this.buildsReady = true;
+            this.notify();
+        });
+
+        subscribeShared((shared) => {
+            this.itemIcons = shared.itemIcons;
+            this.customParamValues = shared.customParamValues;
+            this.sources = shared.sources;
+            this.sharedReady = true;
+            this.notify();
+        });
     }
 
     subscribe = (listener: () => void): (() => void) => {
@@ -187,7 +227,9 @@ export class GameStore {
 
     async importFromSources(sources: SourceUrls): Promise<void> {
         this.sources = sources;
-        saveSources(sources);
+        this.notify();
+        void updateSourcesRemote(sources).catch((error) => console.error("importFromSources → Firestore", error));
+
         this.importing = true;
         this.importError = null;
         this.notify();
@@ -226,8 +268,8 @@ export class GameStore {
             items: [],
         };
         this.builds = [...this.builds, build];
-        saveBuilds(this.builds);
         this.notify();
+        void writeBuild(build).catch((error) => console.error("createBuild → Firestore", error));
         return build;
     }
 
@@ -236,24 +278,23 @@ export class GameStore {
         this.builds = exists
             ? this.builds.map((entry) => (entry.id === build.id ? build : entry))
             : [...this.builds, build];
-        saveBuilds(this.builds);
         this.notify();
+        void writeBuild(build).catch((error) => console.error("upsertBuild → Firestore", error));
     }
 
     deleteBuild(id: string): void {
         this.builds = this.builds.filter((build) => build.id !== id);
-        saveBuilds(this.builds);
         this.notify();
+        void deleteBuildDoc(id).catch((error) => console.error("deleteBuild → Firestore", error));
     }
 
     /** Deletes every build still marked "Черновик" (auto: true, never edited/saved by the user). Returns how many were removed. */
     deleteAllDrafts(): number {
-        const remaining = this.builds.filter((build) => !build.auto);
-        const removed = this.builds.length - remaining.length;
-        this.builds = remaining;
-        saveBuilds(this.builds);
+        const removedIds = this.builds.filter((build) => build.auto).map((build) => build.id);
+        this.builds = this.builds.filter((build) => !build.auto);
         this.notify();
-        return removed;
+        void deleteBuildsBatch(removedIds).catch((error) => console.error("deleteAllDrafts → Firestore", error));
+        return removedIds.length;
     }
 
     addItemToBuild(buildId: string, itemId: string): void {
@@ -262,16 +303,20 @@ export class GameStore {
                 ? { ...build, items: [...build.items, itemId] }
                 : build
         );
-        saveBuilds(this.builds);
         this.notify();
+        void addItemToBuildRemote(buildId, itemId).catch((error) =>
+            console.error("addItemToBuild → Firestore", error)
+        );
     }
 
     removeItemFromBuild(buildId: string, itemId: string): void {
         this.builds = this.builds.map((build) =>
             build.id === buildId ? { ...build, items: build.items.filter((id) => id !== itemId) } : build
         );
-        saveBuilds(this.builds);
         this.notify();
+        void removeItemFromBuildRemote(buildId, itemId).catch((error) =>
+            console.error("removeItemFromBuild → Firestore", error)
+        );
     }
 
     /** Manual build<->build link, kept symmetric on both sides. */
@@ -282,8 +327,8 @@ export class GameStore {
             if (!otherId || (build.manualLinks ?? []).includes(otherId)) return build;
             return { ...build, manualLinks: [...(build.manualLinks ?? []), otherId] };
         });
-        saveBuilds(this.builds);
         this.notify();
+        void linkBuildsRemote(buildIdA, buildIdB).catch((error) => console.error("linkBuilds → Firestore", error));
     }
 
     unlinkBuilds(buildIdA: string, buildIdB: string): void {
@@ -292,8 +337,10 @@ export class GameStore {
             if (!otherId) return build;
             return { ...build, manualLinks: (build.manualLinks ?? []).filter((id) => id !== otherId) };
         });
-        saveBuilds(this.builds);
         this.notify();
+        void unlinkBuildsRemote(buildIdA, buildIdB).catch((error) =>
+            console.error("unlinkBuilds → Firestore", error)
+        );
     }
 
     /**
@@ -323,8 +370,8 @@ export class GameStore {
         const { items, mechanics } = this.itemsForBuildGeneration(includeUpgradeTiers);
         const drafts = computeSuggestedBuilds(items, mechanics, this.upgradeChains, this.replaceRules, this.builds);
         this.builds = [...this.builds, ...drafts];
-        saveBuilds(this.builds);
         this.notify();
+        void writeBuildsBatch(drafts).catch((error) => console.error("suggestBuilds → Firestore", error));
         return drafts.length;
     }
 
@@ -340,15 +387,15 @@ export class GameStore {
             includeMoneyValueRoots
         );
         this.builds = [...this.builds, ...drafts];
-        saveBuilds(this.builds);
         this.notify();
+        void writeBuildsBatch(drafts).catch((error) => console.error("suggestCascadeBuilds → Firestore", error));
         return drafts.length;
     }
 
     setItemIcon(itemId: string, icon: string): void {
         this.itemIcons = { ...this.itemIcons, [itemId]: icon };
-        saveItemIcons(this.itemIcons);
         this.notify();
+        void updateItemIconRemote(itemId, icon).catch((error) => console.error("setItemIcon → Firestore", error));
     }
 
     addCustomParamValue(dimension: string, value: string): void {
@@ -357,8 +404,10 @@ export class GameStore {
         const existing = this.customParamValues[dimension] ?? [];
         if (existing.includes(trimmed)) return;
         this.customParamValues = { ...this.customParamValues, [dimension]: [...existing, trimmed] };
-        saveCustomParamValues(this.customParamValues);
         this.notify();
+        void addCustomParamValueRemote(dimension, trimmed).catch((error) =>
+            console.error("addCustomParamValue → Firestore", error)
+        );
     }
 
     exportSnapshot(): void {
@@ -379,15 +428,20 @@ export class GameStore {
         });
     }
 
+    /** Full replace of the shared Firestore state (builds + itemIcons + customParamValues + sources) for everyone — not a merge. */
     async importSnapshot(file: File): Promise<void> {
-        const state = await importSnapshotFile(file);
+        const state = await parseSnapshotFile(file);
 
-        this.builds = state.builds;
-        this.itemIcons = state.itemIcons;
-        this.customParamValues = state.customParamValues;
-        this.sources = state.sources;
+        await Promise.all([
+            replaceAllBuilds(state.builds),
+            replaceSharedState({
+                itemIcons: state.itemIcons,
+                customParamValues: state.customParamValues,
+                sources: state.sources,
+            }),
+        ]);
+
         this.importedAt = state.importCacheTimestamp;
-
         if (state.importCache) {
             this.allItems = state.importCache.items;
             this.translations = state.importCache.translations;
@@ -395,9 +449,30 @@ export class GameStore {
             this.upgradeChains = state.importCache.upgradeChains ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
+            saveImportCache(state.importCache);
         }
 
         this.notify();
+    }
+
+    /** True once it's safe to offer the one-time "move my local builds into Firestore" banner. */
+    canMigrateLegacyData(): boolean {
+        if (isMigratedToFirestore()) return false;
+        if (!this.buildsReady || this.builds.length > 0) return false;
+
+        const legacy = readLegacyLocalState();
+        return (
+            legacy.builds.length > 0 ||
+            Object.keys(legacy.itemIcons).length > 0 ||
+            Object.keys(legacy.customParamValues).length > 0 ||
+            Boolean(legacy.sources.configUrl || legacy.sources.translationsUrl)
+        );
+    }
+
+    async migrateLegacyData(): Promise<"migrated" | "skipped-not-empty"> {
+        const result = await migrateIfEmpty(readLegacyLocalState());
+        if (result === "migrated") markMigratedToFirestore();
+        return result;
     }
 
 }

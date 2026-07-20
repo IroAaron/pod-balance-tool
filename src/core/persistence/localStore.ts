@@ -50,36 +50,35 @@ function writeJson(name: string, value: unknown): void {
     localStorage.setItem(storageKey(name), JSON.stringify(value));
 }
 
-export function loadPersistedState(): PersistedState {
+/** The imported game config is the only thing still kept in localStorage — builds/itemIcons/customParamValues/sources live in Firestore now (see firestoreStore.ts), each browser re-fetches its own config from Google Sheets/CSV regardless. */
+export function loadImportCache(): Pick<PersistedState, "importCache" | "importCacheTimestamp"> {
     return {
-        builds: readJson("builds", DEFAULT_STATE.builds),
-        itemIcons: readJson("itemIcons", DEFAULT_STATE.itemIcons),
-        customParamValues: readJson("customParamValues", DEFAULT_STATE.customParamValues),
-        sources: readJson("sources", DEFAULT_STATE.sources),
         importCache: readJson("importCache", DEFAULT_STATE.importCache),
         importCacheTimestamp: readJson("importCacheTimestamp", DEFAULT_STATE.importCacheTimestamp),
     };
 }
 
-export function saveBuilds(builds: Build[]): void {
-    writeJson("builds", builds);
-}
-
-export function saveItemIcons(icons: Record<string, string>): void {
-    writeJson("itemIcons", icons);
-}
-
-export function saveCustomParamValues(values: Record<string, string[]>): void {
-    writeJson("customParamValues", values);
-}
-
-export function saveSources(sources: SourceUrls): void {
-    writeJson("sources", sources);
-}
-
 export function saveImportCache(data: NormalizedData | null): void {
     writeJson("importCache", data);
     writeJson("importCacheTimestamp", data ? new Date().toISOString() : null);
+}
+
+/** Reads whatever pre-Firestore local state is still sitting in this browser (from before the Firestore migration), for the one-time migration banner on SourcesPage. */
+export function readLegacyLocalState(): Pick<PersistedState, "builds" | "itemIcons" | "customParamValues" | "sources"> {
+    return {
+        builds: readJson("builds", DEFAULT_STATE.builds),
+        itemIcons: readJson("itemIcons", DEFAULT_STATE.itemIcons),
+        customParamValues: readJson("customParamValues", DEFAULT_STATE.customParamValues),
+        sources: readJson("sources", DEFAULT_STATE.sources),
+    };
+}
+
+export function isMigratedToFirestore(): boolean {
+    return readJson("migratedToFirestore", false);
+}
+
+export function markMigratedToFirestore(): void {
+    writeJson("migratedToFirestore", true);
 }
 
 export function exportSnapshot(state: PersistedState): void {
@@ -94,11 +93,12 @@ export function exportSnapshot(state: PersistedState): void {
     URL.revokeObjectURL(url);
 }
 
-export async function importSnapshotFile(file: File): Promise<PersistedState> {
+/** Pure parse, no side effects — the caller decides where the parsed state gets written (Firestore, now). */
+export async function parseSnapshotFile(file: File): Promise<PersistedState> {
     const text = await file.text();
     const parsed = JSON.parse(text) as Partial<PersistedState>;
 
-    const state: PersistedState = {
+    return {
         builds: parsed.builds ?? [],
         itemIcons: parsed.itemIcons ?? {},
         customParamValues: parsed.customParamValues ?? {},
@@ -106,12 +106,4 @@ export async function importSnapshotFile(file: File): Promise<PersistedState> {
         importCache: parsed.importCache ?? null,
         importCacheTimestamp: parsed.importCacheTimestamp ?? null,
     };
-
-    saveBuilds(state.builds);
-    saveItemIcons(state.itemIcons);
-    saveCustomParamValues(state.customParamValues);
-    saveSources(state.sources);
-    saveImportCache(state.importCache);
-
-    return state;
 }

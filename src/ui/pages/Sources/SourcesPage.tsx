@@ -5,6 +5,11 @@ import {
     Button,
     Chip,
     CircularProgress,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogContentText,
+    DialogTitle,
     Divider,
     Paper,
     Stack,
@@ -18,6 +23,8 @@ export default function SourcesPage() {
     const [configUrl, setConfigUrl] = useState(store.sources.configUrl);
     const [translationsUrl, setTranslationsUrl] = useState(store.sources.translationsUrl);
     const [dragOver, setDragOver] = useState(false);
+    const [migrating, setMigrating] = useState(false);
+    const [pendingSnapshotFile, setPendingSnapshotFile] = useState<File | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleDownload = () => {
@@ -29,9 +36,44 @@ export default function SourcesPage() {
         void store.importCsvFiles(Array.from(files));
     };
 
+    const handleMigrate = async () => {
+        setMigrating(true);
+        try {
+            await store.migrateLegacyData();
+        } finally {
+            setMigrating(false);
+        }
+    };
+
+    const confirmSnapshotImport = () => {
+        if (!pendingSnapshotFile) return;
+        void store.importSnapshot(pendingSnapshotFile);
+        setPendingSnapshotFile(null);
+    };
+
     return (
         <Stack spacing={3} sx={{ maxWidth: 900 }}>
             <Typography variant="h4">Источники</Typography>
+
+            {store.canMigrateLegacyData() && (
+                <Alert
+                    severity="info"
+                    action={
+                        <Button
+                            color="inherit"
+                            size="small"
+                            onClick={() => void handleMigrate()}
+                            disabled={migrating}
+                            startIcon={migrating ? <CircularProgress size={14} color="inherit" /> : undefined}
+                        >
+                            {migrating ? "Переносим..." : "Перенести"}
+                        </Button>
+                    }
+                >
+                    В этом браузере есть билды/иконки из старой версии сайта (хранились локально). Перенести их в
+                    общее хранилище, чтобы их видели все коллеги?
+                </Alert>
+            )}
 
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>
@@ -158,10 +200,10 @@ export default function SourcesPage() {
 
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>
-                    <Typography variant="h6">Резервная копия правок</Typography>
+                    <Typography variant="h6">Резервная копия</Typography>
                     <Typography variant="body2" color="text.secondary">
-                        Билды, иконки и кастомные значения параметров хранятся в этом браузере. Экспортируйте
-                        JSON, чтобы перенести их на другое устройство или сделать бэкап.
+                        Билды, иконки и кастомные значения параметров общие для всех и хранятся в Firestore.
+                        Экспортируйте JSON для бэкапа/отладки; импорт снапшота перезапишет общие данные для всех.
                     </Typography>
                     <Stack direction="row" spacing={2}>
                         <Button variant="outlined" onClick={() => store.exportSnapshot()}>
@@ -175,7 +217,7 @@ export default function SourcesPage() {
                                 hidden
                                 onChange={(event) => {
                                     const file = event.target.files?.[0];
-                                    if (file) void store.importSnapshot(file);
+                                    if (file) setPendingSnapshotFile(file);
                                     event.target.value = "";
                                 }}
                             />
@@ -183,6 +225,22 @@ export default function SourcesPage() {
                     </Stack>
                 </Stack>
             </Paper>
+
+            <Dialog open={pendingSnapshotFile !== null} onClose={() => setPendingSnapshotFile(null)}>
+                <DialogTitle>Импортировать снапшот?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Это перезапишет общие билды, иконки, кастомные значения параметров и источники для всех
+                        коллег данными из файла «{pendingSnapshotFile?.name}». Действие необратимо.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setPendingSnapshotFile(null)}>Отмена</Button>
+                    <Button color="error" onClick={confirmSnapshotImport}>
+                        Импортировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Stack>
     );
 }
