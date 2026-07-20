@@ -20,6 +20,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Sprites live in the private game repo, not here — pull the current folder on every deploy so
+      # balance-tool never falls behind when the game team adds/renames sprites. Sparse checkout keeps this
+      # fast (skips the rest of the Godot project). Requires a SPRITE_REPO_TOKEN secret (fine-grained PAT,
+      # KlukvaGames/preess-or-die, Contents: Read-only) — see README for setup.
+      - name: Checkout sprite source repo
+        uses: actions/checkout@v4
+        with:
+          repository: KlukvaGames/preess-or-die
+          ref: gun2
+          token: ${{ secrets.SPRITE_REPO_TOKEN }}
+          path: sprite-source
+          sparse-checkout: |
+            roulette_interface/pod-mini characters
+          sparse-checkout-cone-mode: false
+
+      - name: Sync sprites from game repo
+        run: |
+          rm -rf public/pod-mini-characters
+          mkdir -p public/pod-mini-characters
+          cp "sprite-source/roulette_interface/pod-mini characters/"*.png public/pod-mini-characters/
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
