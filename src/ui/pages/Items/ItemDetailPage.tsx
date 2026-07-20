@@ -3,6 +3,7 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import { Box, Button, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
+import ItemDescription from "../../components/ItemDescription";
 import { relatedItems } from "../../../core/domain/relations";
 import type { MechanicRow } from "../../../core/models/Mechanic";
 
@@ -112,7 +113,9 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                         </Typography>
 
                         {store.itemDescription(item) && (
-                            <Typography sx={{ mt: 2 }}>{store.itemDescription(item)}</Typography>
+                            <Typography sx={{ mt: 2 }}>
+                                <ItemDescription item={item} description={store.itemDescription(item)} />
+                            </Typography>
                         )}
 
                         <Stack direction="row" sx={{ mt: 2, flexWrap: "wrap", gap: 0.5 }}>

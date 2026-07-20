@@ -26,6 +26,7 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
+import ItemDescription from "../../components/ItemDescription";
 import BuildIcon from "../../components/BuildIcon";
 import DetailModal from "../../components/DetailModal";
 import ItemDetailPage from "../Items/ItemDetailPage";
@@ -313,7 +314,7 @@ export default function BuildsPage() {
                                                             {description && (
                                                                 <>
                                                                     <br />
-                                                                    {description}
+                                                                    <ItemDescription item={item} description={description} />
                                                                 </>
                                                             )}
                                                         </>

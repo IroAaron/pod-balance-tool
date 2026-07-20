@@ -33,6 +33,7 @@ jobs:
           path: sprite-source
           sparse-checkout: |
             roulette_interface/pod-mini characters
+            roulette_interface/Icons_tags
           sparse-checkout-cone-mode: false
 
       - name: Sync sprites from game repo
@@ -40,6 +41,12 @@ jobs:
           rm -rf public/pod-mini-characters
           mkdir -p public/pod-mini-characters
           cp "sprite-source/roulette_interface/pod-mini characters/"*.png public/pod-mini-characters/
+
+      - name: Sync tag icons from game repo
+        run: |
+          rm -rf public/icons-tags
+          mkdir -p public/icons-tags
+          cp "sprite-source/roulette_interface/Icons_tags/"*.png public/icons-tags/
 
       - uses: actions/setup-node@v4
         with:

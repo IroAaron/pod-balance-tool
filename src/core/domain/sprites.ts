@@ -8,7 +8,7 @@ import type { Build } from "../models/Build";
  */
 export const SPRITE_BASE_PATH = `${import.meta.env.BASE_URL}pod-mini-characters/`;
 
-function findRawValue(raw: Record<string, string>, columnName: string): string | undefined {
+export function findRawValue(raw: Record<string, string>, columnName: string): string | undefined {
     const key = Object.keys(raw).find((entry) => entry.trim().toLowerCase() === columnName.toLowerCase());
     const value = key ? raw[key] : undefined;
     return value?.trim() || undefined;

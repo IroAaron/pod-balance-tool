@@ -14,6 +14,7 @@ import {
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
+import ItemDescription from "../../components/ItemDescription";
 import type { ItemSortKey } from "../../../core/services/ItemService";
 import type { Item } from "../../../core/models/Item";
 
@@ -134,7 +135,7 @@ export default function ItemsPage() {
                                             overflow: "hidden",
                                         }}
                                     >
-                                        {store.itemDescription(item)}
+                                        <ItemDescription item={item} description={store.itemDescription(item)} />
                                     </Typography>
                                 )}
                                 <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
