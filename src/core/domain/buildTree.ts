@@ -97,13 +97,20 @@ function computeReplaceCombos(build: Build, replaceRules: ReplaceRule[]): ComboI
  * to pull in from the wider item pool.
  *
  * ReplaceItem *combinations* (2+ ingredients producing a result, all 3 build members — see computeReplaceCombos)
- * are a special case: instead of three flat pairwise edges (ingredient↔ingredient, each ingredient↔result, which
- * is what relatedItems()'s replace-rule signal alone would otherwise draw), they render through one synthetic
- * "combo" node — ingredients and result each connect only to the combo node, not directly to each other. The
- * combo node is discovered like any other node, from *whichever* participant (an ingredient, or the result) the
- * BFS reaches first — often the result, when it's the tree's own root, since replace-mate is otherwise a strong
- * signal straight from the root. That's deliberate: it lets "root ← combo ← ingredients" and "ingredients → combo
- * → deeper result" both fall out of the same rule, without hardcoding which side is "upstream".
+ * are a special case: instead of flat pairwise edges from relatedItems()'s replace-rule signal alone (ingredient↔
+ * ingredient, each ingredient↔result), the *replace-rule* contribution specifically routes through one synthetic
+ * "combo" node instead — ingredients and result each also connect to the combo node. Any OTHER, independent
+ * connection between the same two items (a tag/color/event match, a different replace rule, a shared upgrade
+ * chain, ...) is untouched and still drawn as its own direct edge alongside the combo one — a combo participant
+ * is not exclusively explained by the combo. Real example: Уличный музыкант feeds the combo that produces Рок
+ * музыкант, but his own "Music" tag *also* independently matches Рок музыкант's BonusTargetTag — both connections
+ * show, not just whichever one the combo would otherwise supersede.
+ *
+ * The combo node itself is discovered like any other node, from *whichever* participant (an ingredient, or the
+ * result) the BFS reaches first — often the result, when it's the tree's own root, since replace-mate is
+ * otherwise a strong signal straight from the root. That's deliberate: it lets "root ← combo ← ingredients" and
+ * "ingredients → combo → deeper result" both fall out of the same rule, without hardcoding which side is
+ * "upstream".
  */
 export function computeBuildTree(
     build: Build,
@@ -118,18 +125,9 @@ export function computeBuildTree(
     const rootId = build.items[0];
     const memberIds = new Set(build.items);
 
-    const directConnections = new Map<string, Set<string>>();
-    for (const id of build.items) {
-        const strongIds = new Set(
-            relatedItems(id, items, mechanics, upgradeChains, replaceRules)
-                .filter((rel) => rel.strength === "strong" && memberIds.has(rel.id))
-                .map((rel) => rel.id)
-        );
-        directConnections.set(id, strongIds);
-    }
-
     const combos = computeReplaceCombos(build, replaceRules);
     const comboById = new Map(combos.map((combo) => [combo.ruleId, combo]));
+    const comboRuleIds = new Set(combos.map((combo) => combo.ruleId));
     const combosByParticipant = new Map<string, ComboInfo[]>();
     for (const combo of combos) {
         for (const participantId of [...combo.ingredientIds, combo.resultId]) {
@@ -138,18 +136,19 @@ export function computeBuildTree(
         }
     }
 
-    // Combo participants connect only through their synthetic combo node now, not as flat pairwise edges.
-    const removePair = (a: string, b: string) => {
-        directConnections.get(a)?.delete(b);
-        directConnections.get(b)?.delete(a);
-    };
-    for (const combo of combos) {
-        const participants = [...combo.ingredientIds, combo.resultId];
-        for (let i = 0; i < participants.length; i++) {
-            for (let j = i + 1; j < participants.length; j++) {
-                removePair(participants[i], participants[j]);
-            }
-        }
+    // Only the replace rules that formed a combo are excluded from relatedItems() here — every other signal it
+    // reports (including a different, non-combo replace rule) stays fully intact, so a combo participant's own
+    // independent connections aren't silently dropped along with the flat combo-rule edge.
+    const nonComboReplaceRules = replaceRules.filter((rule) => !comboRuleIds.has(rule.id));
+
+    const directConnections = new Map<string, Set<string>>();
+    for (const id of build.items) {
+        const strongIds = new Set(
+            relatedItems(id, items, mechanics, upgradeChains, nonComboReplaceRules)
+                .filter((rel) => rel.strength === "strong" && memberIds.has(rel.id))
+                .map((rel) => rel.id)
+        );
+        directConnections.set(id, strongIds);
     }
 
     const nodes: BuildTreeNode[] = [{ itemId: rootId, tier: 0, parents: [] }];
@@ -224,6 +223,25 @@ export function computeBuildTree(
 
             frontier = ids;
             nextTier += 1;
+        }
+    }
+
+    // A combo participant reachable some other way gets placed via that path first (the BFS above skips
+    // rediscovering anything already in placedTier) — so the combo never got a chance to add itself as a parent.
+    // That connection still needs to show, as an *additional* parent, without moving the participant to a
+    // different tier (its tier stays "distance via whichever path got there first").
+    const nodeById = new Map(nodes.map((node) => [node.itemId, node]));
+    for (const combo of combos) {
+        const comboNode = nodeById.get(`${COMBO_ID_PREFIX}${combo.ruleId}`);
+        if (!comboNode) continue; // the combo itself was never reachable at all
+
+        for (const participantId of [...combo.ingredientIds, combo.resultId]) {
+            const participantNode = nodeById.get(participantId);
+            if (!participantNode) continue;
+
+            const alreadyLinked =
+                comboNode.parents.includes(participantId) || participantNode.parents.includes(comboNode.itemId);
+            if (!alreadyLinked) participantNode.parents.push(comboNode.itemId);
         }
     }
 

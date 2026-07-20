@@ -156,6 +156,45 @@ describe("computeBuildTree", () => {
         expect(nodes.find((n) => n.itemId === "producer")!.parents).toEqual([comboNode!.itemId]);
     });
 
+    it("keeps an ingredient's OTHER independent connection alongside its combo edge (real Уличный музыкант shape — Music-tag scaler of Рок музыкант, AND a combo ingredient with Продюсер)", () => {
+        // Уличный музыкант feeds the Продюсер combo that produces Рок музыкант — but his own "Music" tag also
+        // independently matches Рок музыкант's own BonusTargetTag=Music (a level-2-scaler-style connection, same
+        // signal as the Фермер/Ферма case above). Both should show: one edge to the combo, one straight to root.
+        const build = makeBuild(["rock_musician", "street_musician", "producer"]);
+        const items = [
+            makeItem("rock_musician", { itemType: "Card" }),
+            makeItem("street_musician", { itemType: "Card", tags: ["Music"] }),
+            makeItem("producer", { itemType: "Card" }),
+        ];
+        const mechanics: MechanicRow[] = [
+            {
+                id: "rock-musician-payoff",
+                table: "MechAddValue",
+                itemId: "rock_musician",
+                fields: { TargetType: "PlayerScore", BonusCountingType: "CellCount", BonusTargetTag: "Music" },
+            },
+        ];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "street-to-rock",
+                source: "ReplaceItem",
+                itemIdToReplace: "street_musician",
+                replacementItem: "rock_musician",
+                fields: { NeededItem: "producer", NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+
+        const { nodes, unconnected } = computeBuildTree(build, items, mechanics, [], replaceRules);
+
+        expect(unconnected).toEqual([]);
+        const comboNode = nodes.find((n) => n.combo)!;
+        const streetMusicianNode = nodes.find((n) => n.itemId === "street_musician")!;
+
+        expect(new Set(streetMusicianNode.parents)).toEqual(new Set(["rock_musician", comboNode.itemId]));
+        // Продюсер has no other connection of his own — still only reachable through the combo.
+        expect(nodes.find((n) => n.itemId === "producer")!.parents).toEqual([comboNode.itemId]);
+    });
+
     it("does not create a combo node for a single-ingredient replace rule (NeededItem not a build member)", () => {
         const build = makeBuild(["rock_musician", "street_musician"]);
         const items = [makeItem("rock_musician"), makeItem("street_musician")];
