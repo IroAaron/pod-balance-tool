@@ -106,6 +106,10 @@ export default function GraphPage() {
     const [openBuildId, setOpenBuildId] = useState<string | null>(null);
     const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
     const [hoveredLinkKey, setHoveredLinkKey] = useState<string | null>(null);
+    // react-force-graph-2d fires onNodeHover/onLinkHover as two independent callbacks per hit-test frame — a
+    // synchronous ref (not state, which only settles after render) is what lets onLinkHover reliably check "is a
+    // node hovered right now" regardless of which callback the library happens to invoke first that frame.
+    const hoveredNodeRef = useRef<string | null>(null);
     const spriteCacheRef = useRef(new Map<string, HTMLImageElement>());
     const failedSpritesRef = useRef(new Set<string>());
     const [, repaintOnSpriteLoad] = useReducer((count: number) => count + 1, 0);
@@ -299,12 +303,17 @@ export default function GraphPage() {
                             backgroundColor="rgba(0,0,0,0)"
                             onNodeClick={(node) => setOpenBuildId(String(node.id))}
                             onNodeHover={(node) => {
-                                setHoveredNodeId(node ? String(node.id) : null);
+                                const id = node ? String(node.id) : null;
+                                hoveredNodeRef.current = id;
+                                setHoveredNodeId(id);
                                 if (node) setHoveredLinkKey(null);
                             }}
                             onLinkHover={(link) => {
+                                // A node under the cursor always wins — ignore this frame's link hit entirely
+                                // rather than let it briefly clobber the node highlight when both geometrically
+                                // overlap (an edge's endpoint sits right at its connected node).
+                                if (hoveredNodeRef.current) return;
                                 setHoveredLinkKey(link ? linkKey(link) : null);
-                                if (link) setHoveredNodeId(null);
                             }}
                             nodeCanvasObjectMode={() => "replace"}
                             nodeCanvasObject={(node, ctx, globalScale) => {

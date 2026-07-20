@@ -318,10 +318,27 @@ export default function BuildTree({ build }: Props) {
 
     return (
         <Box>
-            <Box ref={containerRef} sx={{ position: "relative" }}>
+            {/* zIndex here (not just position:relative) matters: it makes this box its own stacking context, so
+                the edges SVG's negative z-index below stays contained to "behind the node boxes in here" instead
+                of escaping to the nearest ancestor stacking context and rendering behind unrelated page content
+                (e.g. a Paper/Card background), which is what made the edges disappear entirely without it. */}
+            <Box ref={containerRef} sx={{ position: "relative", zIndex: 0 }}>
                 <Box
                     component="svg"
-                    sx={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+                    sx={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents: "none",
+                        // Negative z-index, not just declaration order: a position:absolute element with
+                        // z-index:auto/0 paints AFTER (on top of) non-positioned in-flow content regardless of
+                        // DOM order (CSS2.1 painting order) — without this, the invisible wide hit-stroke used
+                        // for edge hover (below) would sit visually above the node boxes wherever an edge's
+                        // endpoint touches one, stealing hover from the node it's connected to.
+                        zIndex: -1,
+                    }}
                 >
                     {edges.map((edge) => {
                         const key = edgeKey(edge.parentId, edge.childId);
