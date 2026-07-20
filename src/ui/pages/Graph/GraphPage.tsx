@@ -73,6 +73,18 @@ interface BuildLink {
     manual: boolean;
 }
 
+/** react-force-graph mutates link.source/target from a plain id string into the actual node object once the
+ *  simulation starts — this normalizes either shape back to a plain id, for hover-highlight bookkeeping. */
+function linkEndpointId(endpoint: unknown): string {
+    if (typeof endpoint === "string") return endpoint;
+    if (endpoint && typeof endpoint === "object" && "id" in endpoint) return String((endpoint as { id: unknown }).id);
+    return String(endpoint);
+}
+
+function linkKey(link: { source: unknown; target: unknown }): string {
+    return `${linkEndpointId(link.source)}--${linkEndpointId(link.target)}`;
+}
+
 /** Red (weak) -> green (strong) gradient for computed link strength (0..1) — thickness already encodes strength
  *  via linkWidth, this adds a second, faster-to-read cue on top of it. Alpha still scales with strength too, kept
  *  from the pre-gradient version, so weak links stay faint as well as red rather than a fully-opaque red line. */
@@ -92,6 +104,8 @@ export default function GraphPage() {
     const [showLabels, setShowLabels] = useState(false);
     const [typeFilter, setTypeFilter] = useState<string[]>(ITEM_TYPE_OPTIONS);
     const [openBuildId, setOpenBuildId] = useState<string | null>(null);
+    const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+    const [hoveredLinkKey, setHoveredLinkKey] = useState<string | null>(null);
     const spriteCacheRef = useRef(new Map<string, HTMLImageElement>());
     const failedSpritesRef = useRef(new Set<string>());
     const [, repaintOnSpriteLoad] = useReducer((count: number) => count + 1, 0);
@@ -145,6 +159,42 @@ export default function GraphPage() {
         // getItem/getItemIcon are stable methods on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.builds, store.upgradeChains, typeFilter]);
+
+    // Hovering a node highlights it, every link touching it, and every build on the other end of those links.
+    // Hovering a link highlights just that link and its two endpoint builds. `null` means "nothing hovered" —
+    // rendering treats that as "show everything at full opacity", not "highlight nothing".
+    const highlightedNodeIds = useMemo(() => {
+        if (hoveredNodeId) {
+            const ids = new Set<string>([hoveredNodeId]);
+            for (const link of graphData.links) {
+                const source = linkEndpointId(link.source);
+                const target = linkEndpointId(link.target);
+                if (source === hoveredNodeId) ids.add(target);
+                if (target === hoveredNodeId) ids.add(source);
+            }
+            return ids;
+        }
+        if (hoveredLinkKey) {
+            const link = graphData.links.find((entry) => linkKey(entry) === hoveredLinkKey);
+            return link ? new Set([linkEndpointId(link.source), linkEndpointId(link.target)]) : null;
+        }
+        return null;
+    }, [hoveredNodeId, hoveredLinkKey, graphData.links]);
+
+    const highlightedLinkKeys = useMemo(() => {
+        if (hoveredNodeId) {
+            return new Set(
+                graphData.links
+                    .filter(
+                        (link) =>
+                            linkEndpointId(link.source) === hoveredNodeId || linkEndpointId(link.target) === hoveredNodeId
+                    )
+                    .map(linkKey)
+            );
+        }
+        if (hoveredLinkKey) return new Set([hoveredLinkKey]);
+        return null;
+    }, [hoveredNodeId, hoveredLinkKey, graphData.links]);
 
     const handleTypeFilterChange = (event: SelectChangeEvent<string[]>) => {
         const { value } = event.target;
@@ -236,14 +286,34 @@ export default function GraphPage() {
                             height={size.height}
                             nodeId="id"
                             nodeLabel="name"
-                            linkColor={(link) => (link.manual ? "#ffb74d" : linkStrengthColor(link.strength))}
-                            linkWidth={(link) => 1 + link.strength * 4}
+                            linkColor={(link) => {
+                                const baseColor = link.manual ? "#ffb74d" : linkStrengthColor(link.strength);
+                                if (!highlightedLinkKeys) return baseColor;
+                                return highlightedLinkKeys.has(linkKey(link)) ? baseColor : "rgba(120,120,120,0.06)";
+                            }}
+                            linkWidth={(link) => {
+                                const base = 1 + link.strength * 4;
+                                if (!highlightedLinkKeys) return base;
+                                return highlightedLinkKeys.has(linkKey(link)) ? base + 1.5 : base;
+                            }}
                             backgroundColor="rgba(0,0,0,0)"
                             onNodeClick={(node) => setOpenBuildId(String(node.id))}
+                            onNodeHover={(node) => {
+                                setHoveredNodeId(node ? String(node.id) : null);
+                                if (node) setHoveredLinkKey(null);
+                            }}
+                            onLinkHover={(link) => {
+                                setHoveredLinkKey(link ? linkKey(link) : null);
+                                if (link) setHoveredNodeId(null);
+                            }}
                             nodeCanvasObjectMode={() => "replace"}
                             nodeCanvasObject={(node, ctx, globalScale) => {
                                 const x = node.x ?? 0;
                                 const y = node.y ?? 0;
+                                const isDimmed = highlightedNodeIds !== null && !highlightedNodeIds.has(String(node.id));
+
+                                ctx.save();
+                                if (isDimmed) ctx.globalAlpha = 0.2;
 
                                 ctx.beginPath();
                                 ctx.arc(x, y, NODE_RADIUS, 0, 2 * Math.PI);
@@ -289,6 +359,8 @@ export default function GraphPage() {
                                     ctx.fillStyle = "#c7ccd4";
                                     ctx.fillText(node.name, x, y + NODE_RADIUS + 3 / globalScale);
                                 }
+
+                                ctx.restore();
                             }}
                             nodePointerAreaPaint={(node, color, ctx) => {
                                 ctx.fillStyle = color;
