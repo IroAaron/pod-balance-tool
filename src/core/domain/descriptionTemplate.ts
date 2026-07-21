@@ -110,9 +110,9 @@ function substitutePlaceholders(text: string, item: Item, firstMechanic: Mechani
 
 export type DescriptionPart =
     | { kind: "text"; value: string }
-    | { kind: "icon"; src: string; width: number; alt: string }
+    | { kind: "icon"; src: string; width: number; alt: string; note?: string }
     | { kind: "colored-text"; value: string; colors: string[] }
-    | { kind: "emoji"; value: string };
+    | { kind: "emoji"; value: string; note?: string };
 
 const DEFAULT_ICON_WIDTH = 24;
 
@@ -196,10 +196,14 @@ function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): Des
             if (index > lastIndex) pieces.push({ kind: "text", value: part.value.slice(lastIndex, index) });
 
             const entry = byPhraseLower.get(match[0].toLowerCase())!;
+            // `note` doubles as "this came from the glossary" — ItemDescription only shows a tooltip when it's
+            // set, which a plain (non-glossary) [img] icon part never has. Falls back to the matched phrase
+            // itself when the entry has no note of its own, so hovering is never a dead no-op.
+            const note = entry.note?.trim() || entry.phrase;
             pieces.push(
                 entry.icon
-                    ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.phrase }
-                    : { kind: "emoji", value: entry.emoji! }
+                    ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.phrase, note }
+                    : { kind: "emoji", value: entry.emoji!, note }
             );
 
             lastIndex = index + match[0].length;

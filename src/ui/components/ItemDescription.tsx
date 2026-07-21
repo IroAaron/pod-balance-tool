@@ -1,4 +1,4 @@
-import { Box } from "@mui/material";
+import { Box, Tooltip } from "@mui/material";
 import { keyframes } from "@emotion/react";
 import { useStore } from "../hooks/useStore";
 import type { Item } from "../../core/models/Item";
@@ -51,6 +51,17 @@ export default function ItemDescription({ item, description, settingsOverride }:
                 }
 
                 if (part.kind === "emoji") {
+                    // `note` is only ever set on a glossary-sourced part (see applyGlossary) — a tooltip here
+                    // surfaces which glossary entry/phrase it came from.
+                    if (part.note) {
+                        return (
+                            <Tooltip key={index} title={part.note}>
+                                <Box component="span" sx={{ fontSize: settings.fontSizePx }}>
+                                    {part.value}
+                                </Box>
+                            </Tooltip>
+                        );
+                    }
                     return (
                         <Box key={index} component="span" sx={{ fontSize: settings.fontSizePx }}>
                             {part.value}
@@ -60,6 +71,25 @@ export default function ItemDescription({ item, description, settingsOverride }:
 
                 if (part.kind === "icon") {
                     const width = Math.round(part.width * settings.spriteScale);
+                    const imgStyle = { objectFit: "contain" as const, verticalAlign: "middle" as const, margin: "0 2px" };
+                    const onImgError = (event: React.SyntheticEvent<HTMLImageElement>) => {
+                        event.currentTarget.style.display = "none";
+                    };
+
+                    if (part.note) {
+                        return (
+                            <Tooltip key={index} title={part.note}>
+                                <img
+                                    src={part.src}
+                                    alt={part.alt}
+                                    width={width}
+                                    height={width}
+                                    style={imgStyle}
+                                    onError={onImgError}
+                                />
+                            </Tooltip>
+                        );
+                    }
                     return (
                         <img
                             key={index}
@@ -67,10 +97,8 @@ export default function ItemDescription({ item, description, settingsOverride }:
                             alt={part.alt}
                             width={width}
                             height={width}
-                            style={{ objectFit: "contain", verticalAlign: "middle", margin: "0 2px" }}
-                            onError={(event) => {
-                                event.currentTarget.style.display = "none";
-                            }}
+                            style={imgStyle}
+                            onError={onImgError}
                         />
                     );
                 }
