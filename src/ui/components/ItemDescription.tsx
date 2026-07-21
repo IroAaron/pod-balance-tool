@@ -19,6 +19,15 @@ const shimmer = keyframes`
 `;
 
 /**
+ * A glossary-note tooltip sits right next to (often nested inside, e.g. BuildsPage's item-icon Tooltip) the
+ * default gray MUI tooltip used everywhere else — same color would read as one blob. Muted blue-grey, not the
+ * app's saturated primary blue, so it stays easy on the eyes at a glance instead of popping like an alert.
+ */
+const GLOSSARY_TOOLTIP_SLOT_PROPS = {
+    tooltip: { sx: { bgcolor: "#37474f", color: "#eceff1" } },
+} as const;
+
+/**
  * Renders an item's description per the site-wide description mode (Settings page): "text" shows the raw
  * translations-table string completely untouched (no {ValueOrRange}/[img]/[color] handling at all); "text-icons"
  * (the default, and the only mode that ever existed before) resolves those; "icons-emoji" does the same plus
@@ -55,7 +64,7 @@ export default function ItemDescription({ item, description, settingsOverride }:
                     // surfaces which glossary entry/phrase it came from.
                     if (part.note) {
                         return (
-                            <Tooltip key={index} title={part.note}>
+                            <Tooltip key={index} title={part.note} slotProps={GLOSSARY_TOOLTIP_SLOT_PROPS}>
                                 <Box component="span" sx={{ fontSize: settings.fontSizePx }}>
                                     {part.value}
                                 </Box>
@@ -78,7 +87,7 @@ export default function ItemDescription({ item, description, settingsOverride }:
 
                     if (part.note) {
                         return (
-                            <Tooltip key={index} title={part.note}>
+                            <Tooltip key={index} title={part.note} slotProps={GLOSSARY_TOOLTIP_SLOT_PROPS}>
                                 <img
                                     src={part.src}
                                     alt={part.alt}
