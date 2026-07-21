@@ -1,6 +1,16 @@
 import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
+import type { GlossaryEntry } from "../models/GlossaryEntry";
 import { SPRITE_BASE_PATH, findRawValue } from "./sprites";
+
+/**
+ * "text" — the raw string from the translations table, completely unprocessed (no {placeholder}/[img]/[color]
+ * handling at all — see ItemDescription.tsx, which bypasses parseItemDescription entirely for this mode).
+ * "text-icons" — today's only-ever behavior: [img]/[color=#...] BBCode and {placeholder}s resolved, nothing else.
+ * "icons-emoji" — text-icons, plus known glossary phrases (see GlossaryEntry) swapped for their icon/emoji;
+ * unmatched text stays as plain text, this is additive, not a full replace of the description.
+ */
+export type DescriptionMode = "text" | "text-icons" | "icons-emoji";
 
 /** Site-wide display knobs for ItemDescription, editable on the Settings page and shared via Firestore. */
 export interface DescriptionSettings {
@@ -9,10 +19,16 @@ export interface DescriptionSettings {
 
     /** Font size (px) for both plain and colored/shimmer description text. */
     fontSizePx: number;
+
+    descriptionMode: DescriptionMode;
 }
 
 /** Matches today's actual look (unscaled BBCode width, ItemDetailPage's plain-Typography ~16px body text). */
-export const DEFAULT_DESCRIPTION_SETTINGS: DescriptionSettings = { spriteScale: 1, fontSizePx: 16 };
+export const DEFAULT_DESCRIPTION_SETTINGS: DescriptionSettings = {
+    spriteScale: 1,
+    fontSizePx: 16,
+    descriptionMode: "text-icons",
+};
 
 /** Synced from the game repo's `roulette_interface/Icons_tags/` on every deploy — see .github/workflows/deploy.yml. */
 export const TAG_ICON_BASE_PATH = `${import.meta.env.BASE_URL}icons-tags/`;
@@ -95,7 +111,8 @@ function substitutePlaceholders(text: string, item: Item, firstMechanic: Mechani
 export type DescriptionPart =
     | { kind: "text"; value: string }
     | { kind: "icon"; src: string; width: number; alt: string }
-    | { kind: "colored-text"; value: string; colors: string[] };
+    | { kind: "colored-text"; value: string; colors: string[] }
+    | { kind: "emoji"; value: string };
 
 const DEFAULT_ICON_WIDTH = 24;
 
@@ -144,13 +161,69 @@ function parseColorAndImageTags(text: string, item: Item): DescriptionPart[] {
     return parts;
 }
 
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** src for a glossary entry's icon, resolved the same way [img] tags in a description already are — a path
+ *  relative to `public/` (e.g. "icons-tags/foo.svg"), not a res:// BBCode tag. Exported so GlossaryPage's own
+ *  live icon preview resolves identically to how the description renderer will actually show it. */
+export function glossaryIconSrc(icon: string): string {
+    return `${import.meta.env.BASE_URL}${icon.replace(/^\/+/, "")}`;
+}
+
+/**
+ * Swaps known glossary phrases inside a description's plain-text parts for their icon/emoji — icon/color/img
+ * parts already produced by parseColorAndImageTags are left untouched, only original text is scanned. Matching
+ * is case-insensitive substring, longest phrase first (same principle as TOKEN_RE above), so a more specific
+ * phrase wins over a shorter one it happens to contain. An entry with neither icon nor emoji set is a no-op.
+ */
+function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): DescriptionPart[] {
+    const usable = glossary.filter((entry) => entry.phrase.trim() && (entry.icon || entry.emoji));
+    if (usable.length === 0) return parts;
+
+    const sorted = [...usable].sort((a, b) => b.phrase.length - a.phrase.length);
+    const byPhraseLower = new Map(sorted.map((entry) => [entry.phrase.toLowerCase(), entry]));
+    const matchRe = new RegExp(sorted.map((entry) => escapeRegExp(entry.phrase)).join("|"), "gi");
+
+    return parts.flatMap((part): DescriptionPart[] => {
+        if (part.kind !== "text") return [part];
+
+        const pieces: DescriptionPart[] = [];
+        let lastIndex = 0;
+        for (const match of part.value.matchAll(matchRe)) {
+            const index = match.index ?? 0;
+            if (index > lastIndex) pieces.push({ kind: "text", value: part.value.slice(lastIndex, index) });
+
+            const entry = byPhraseLower.get(match[0].toLowerCase())!;
+            pieces.push(
+                entry.icon
+                    ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.phrase }
+                    : { kind: "emoji", value: entry.emoji! }
+            );
+
+            lastIndex = index + match[0].length;
+        }
+        if (lastIndex < part.value.length) pieces.push({ kind: "text", value: part.value.slice(lastIndex) });
+
+        return pieces;
+    });
+}
+
 /**
  * Resolves {ValueOrRange}/{ValueOrRange2}/raw-column/mechanic-field placeholders, then splits [img] and
  * [color=#...] BBCode into renderable parts. `mechanics` is the full loaded list — only this item's own rows
- * are used (first one, per the user).
+ * are used (first one, per the user). `glossary` is only meaningful for the "icons-emoji" mode — pass `[]` (the
+ * default) to skip that pass entirely, which is what the "text-icons" mode does.
  */
-export function parseItemDescription(item: Item, rawDescription: string, mechanics: MechanicRow[]): DescriptionPart[] {
+export function parseItemDescription(
+    item: Item,
+    rawDescription: string,
+    mechanics: MechanicRow[],
+    glossary: GlossaryEntry[] = []
+): DescriptionPart[] {
     const firstMechanic = mechanics.find((mechanic) => mechanic.itemId === item.id);
     const substituted = substitutePlaceholders(rawDescription, item, firstMechanic);
-    return parseColorAndImageTags(substituted, item);
+    const parts = parseColorAndImageTags(substituted, item);
+    return glossary.length > 0 ? applyGlossary(parts, glossary) : parts;
 }

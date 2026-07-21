@@ -147,3 +147,72 @@ describe("parseItemDescription", () => {
         ]);
     });
 });
+
+describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
+    it("leaves text untouched when no glossary is passed (default [])", () => {
+        expect(parseItemDescription(makeItem(), "Активирует ячейку.", [])).toEqual([
+            { kind: "text", value: "Активирует ячейку." },
+        ]);
+    });
+
+    it("replaces a matched phrase with its icon and leaves the rest of the text as-is", () => {
+        const glossary = [{ id: "g1", phrase: "Активирует", icon: "icons-tags/activate.svg" }];
+        expect(parseItemDescription(makeItem(), "Активирует соседнюю ячейку.", [], glossary)).toEqual([
+            { kind: "icon", src: `${TAG_ICON_BASE_PATH}activate.svg`, width: 24, alt: "Активирует" },
+            { kind: "text", value: " соседнюю ячейку." },
+        ]);
+    });
+
+    it("falls back to emoji when the entry has no icon", () => {
+        const glossary = [{ id: "g1", phrase: "Активирует", emoji: "⚡" }];
+        expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
+            { kind: "emoji", value: "⚡" },
+            { kind: "text", value: " ячейку." },
+        ]);
+    });
+
+    it("prefers icon over emoji when an entry has both", () => {
+        const glossary = [{ id: "g1", phrase: "Активирует", icon: "icons-tags/activate.svg", emoji: "⚡" }];
+        expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
+            { kind: "icon", src: `${TAG_ICON_BASE_PATH}activate.svg`, width: 24, alt: "Активирует" },
+            { kind: "text", value: " ячейку." },
+        ]);
+    });
+
+    it("matches case-insensitively", () => {
+        const glossary = [{ id: "g1", phrase: "активирует", emoji: "⚡" }];
+        expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
+            { kind: "emoji", value: "⚡" },
+            { kind: "text", value: " ячейку." },
+        ]);
+    });
+
+    it("prefers the longer of two overlapping phrases (real 'свой цвет' vs 'цвет' shape)", () => {
+        const glossary = [
+            { id: "g1", phrase: "цвет", emoji: "🎨" },
+            { id: "g2", phrase: "свой цвет", emoji: "🟢" },
+        ];
+        expect(parseItemDescription(makeItem(), "Перекрашивает в свой цвет.", [], glossary)).toEqual([
+            { kind: "text", value: "Перекрашивает в " },
+            { kind: "emoji", value: "🟢" },
+            { kind: "text", value: "." },
+        ]);
+    });
+
+    it("ignores an entry with neither icon nor emoji set", () => {
+        const glossary = [{ id: "g1", phrase: "Активирует" }];
+        expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
+            { kind: "text", value: "Активирует ячейку." },
+        ]);
+    });
+
+    it("does not touch an already-resolved icon/colored-text part, only original text", () => {
+        const item = makeItem({ raw: { PossibleColors: "Red" } });
+        const glossary = [{ id: "g1", phrase: "цвета", emoji: "🎨" }];
+        const raw = "[color=#{ColorHex}]своего цвета[/color] активирует.";
+        expect(parseItemDescription(item, raw, [], glossary)).toEqual([
+            { kind: "colored-text", value: "своего цвета", colors: ["#ff8080"] },
+            { kind: "text", value: " активирует." },
+        ]);
+    });
+});

@@ -4,6 +4,7 @@ import type { Translation } from "./models/Translation";
 import type { MechanicRow } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
 import type { ReplaceRule } from "./models/ReplaceRule";
+import type { GlossaryEntry } from "./models/GlossaryEntry";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
@@ -39,6 +40,8 @@ import {
     addCustomParamValueRemote,
     updateSourcesRemote,
     updateDescriptionSettingsRemote,
+    subscribeGlossary,
+    replaceGlossaryRemote,
     replaceAllBuilds,
     replaceSharedState,
     migrateIfEmpty,
@@ -82,11 +85,18 @@ export class GameStore {
 
     descriptionSettings: DescriptionSettings = DEFAULT_DESCRIPTION_SETTINGS;
 
+    /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
+     *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
+    glossary: GlossaryEntry[] = [];
+
     /** False until the first Firestore `builds` snapshot arrives — distinguishes "still loading" from "no builds yet". */
     buildsReady = false;
 
     /** False until the first Firestore `shared/*` snapshot arrives. */
     sharedReady = false;
+
+    /** False until the first Firestore `shared/glossary` snapshot arrives. */
+    glossaryReady = false;
 
     importReport: ImportReport | null = null;
 
@@ -159,6 +169,12 @@ export class GameStore {
             this.sources = shared.sources;
             this.descriptionSettings = shared.descriptionSettings;
             this.sharedReady = true;
+            this.notify();
+        });
+
+        subscribeGlossary((entries) => {
+            this.glossary = entries;
+            this.glossaryReady = true;
             this.notify();
         });
     }
@@ -440,6 +456,14 @@ export class GameStore {
         void updateDescriptionSettingsRemote(settings).catch((error) =>
             console.error("setDescriptionSettings → Firestore", error)
         );
+    }
+
+    /** Full replace, called after every add/edit/delete on the Glossary page — the whole list is small and
+     *  hand-curated, so there's no point-update path like itemIcons has. */
+    setGlossary(entries: GlossaryEntry[]): void {
+        this.glossary = entries;
+        this.notify();
+        void replaceGlossaryRemote(entries).catch((error) => console.error("setGlossary → Firestore", error));
     }
 
     exportSnapshot(): void {

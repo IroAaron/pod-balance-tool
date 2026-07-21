@@ -6,6 +6,7 @@ import ItemsPage from "../pages/Items/ItemsPage";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import BuildsPage from "../pages/Builds/BuildsPage";
 import BuildDetailPage from "../pages/Builds/BuildDetailPage";
+import GlossaryPage from "../pages/Glossary/GlossaryPage";
 import GraphPage from "../pages/Graph/GraphPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
 import SettingsPage from "../pages/Settings/SettingsPage";
@@ -43,6 +44,7 @@ export default function AppRouter() {
             <Route path="/items/:id" element={<ItemDetailRoute />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
+            <Route path="/glossary" element={<GlossaryPage />} />
             <Route path="/graph" element={<GraphPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />

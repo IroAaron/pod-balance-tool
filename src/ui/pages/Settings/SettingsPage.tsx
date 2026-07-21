@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Box, Button, Paper, Slider, Stack, Typography } from "@mui/material";
+import { Box, Button, MenuItem, Paper, Slider, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import ItemDescription from "../../components/ItemDescription";
-import { DEFAULT_DESCRIPTION_SETTINGS } from "../../../core/domain/descriptionTemplate";
+import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionMode } from "../../../core/domain/descriptionTemplate";
 import type { Item } from "../../../core/models/Item";
 
 const PREVIEW_ITEM: Item = {
@@ -17,18 +17,26 @@ const PREVIEW_TEXT =
     "Дает +{ValueOrRange2} к ценности случайной ячейке [color=#{ColorHex}]своего цвета[/color] при активации " +
     "[img width=32]res://roulette_interface/Icons_tags/ui_icon_activation.svg[/img].";
 
+const DESCRIPTION_MODE_LABELS: Record<DescriptionMode, string> = {
+    text: "Текст",
+    "text-icons": "Текст + иконки",
+    "icons-emoji": "Иконки + Эмоджи",
+};
+
 export default function SettingsPage() {
     const store = useStore();
     const [spriteScale, setSpriteScale] = useState(store.descriptionSettings.spriteScale);
     const [fontSizePx, setFontSizePx] = useState(store.descriptionSettings.fontSizePx);
+    const [descriptionMode, setDescriptionMode] = useState(store.descriptionSettings.descriptionMode);
 
-    const commit = (next: { spriteScale: number; fontSizePx: number }) => {
+    const commit = (next: { spriteScale: number; fontSizePx: number; descriptionMode: DescriptionMode }) => {
         store.setDescriptionSettings(next);
     };
 
     const handleReset = () => {
         setSpriteScale(DEFAULT_DESCRIPTION_SETTINGS.spriteScale);
         setFontSizePx(DEFAULT_DESCRIPTION_SETTINGS.fontSizePx);
+        setDescriptionMode(DEFAULT_DESCRIPTION_SETTINGS.descriptionMode);
         commit(DEFAULT_DESCRIPTION_SETTINGS);
     };
 
@@ -43,6 +51,34 @@ export default function SettingsPage() {
                         Общие для всех — сохраняются сразу и применяются везде, где показывается описание предмета.
                     </Typography>
 
+                    <TextField
+                        select
+                        label="Описание предметов"
+                        value={descriptionMode}
+                        onChange={(event) => {
+                            const next = event.target.value as DescriptionMode;
+                            setDescriptionMode(next);
+                            commit({ spriteScale, fontSizePx, descriptionMode: next });
+                        }}
+                        size="small"
+                        sx={{ maxWidth: 280 }}
+                        helperText={
+                            descriptionMode === "text"
+                                ? "Как есть, из таблицы переводов — без [img]/[color]/{...} и без глоссария."
+                                : descriptionMode === "text-icons"
+                                  ? "Сегодняшнее поведение: [img]/[color=#...] и {...} становятся иконками/цветным текстом."
+                                  : "Как «Текст + иконки», плюс известные глоссарию фразы заменяются на иконку/эмодзи."
+                        }
+                    >
+                        {(Object.entries(DESCRIPTION_MODE_LABELS) as [DescriptionMode, string][]).map(
+                            ([value, label]) => (
+                                <MenuItem key={value} value={value}>
+                                    {label}
+                                </MenuItem>
+                            )
+                        )}
+                    </TextField>
+
                     <Box>
                         <Typography gutterBottom>Размер спрайтов в описании: {Math.round(spriteScale * 100)}%</Typography>
                         <Slider
@@ -51,7 +87,9 @@ export default function SettingsPage() {
                             max={3}
                             step={0.05}
                             onChange={(_event, value) => setSpriteScale(value as number)}
-                            onChangeCommitted={(_event, value) => commit({ spriteScale: value as number, fontSizePx })}
+                            onChangeCommitted={(_event, value) =>
+                                commit({ spriteScale: value as number, fontSizePx, descriptionMode })
+                            }
                             valueLabelDisplay="auto"
                             valueLabelFormat={(value) => `${Math.round(value * 100)}%`}
                         />
@@ -69,7 +107,9 @@ export default function SettingsPage() {
                             max={32}
                             step={1}
                             onChange={(_event, value) => setFontSizePx(value as number)}
-                            onChangeCommitted={(_event, value) => commit({ spriteScale, fontSizePx: value as number })}
+                            onChangeCommitted={(_event, value) =>
+                                commit({ spriteScale, fontSizePx: value as number, descriptionMode })
+                            }
                             valueLabelDisplay="auto"
                         />
                     </Box>
@@ -89,7 +129,7 @@ export default function SettingsPage() {
                         <ItemDescription
                             item={PREVIEW_ITEM}
                             description={PREVIEW_TEXT}
-                            settingsOverride={{ spriteScale, fontSizePx }}
+                            settingsOverride={{ spriteScale, fontSizePx, descriptionMode }}
                         />
                     </Typography>
                 </Stack>

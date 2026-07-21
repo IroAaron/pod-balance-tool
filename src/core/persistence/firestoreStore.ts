@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 
 import type { Build } from "../models/Build";
+import type { GlossaryEntry } from "../models/GlossaryEntry";
 import type { SourceUrls } from "./localStore";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
 import { db } from "./firebaseClient";
@@ -105,6 +106,25 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         unsubSources();
         unsubDescriptionSettings();
     };
+}
+
+/**
+ * Its own independent subscription rather than folded into subscribeShared — that function already bundles 4
+ * docs into one combined callback, and the glossary is edited/read from a dedicated page, not alongside the
+ * other shared settings, so keeping it separate avoids growing that composite further.
+ */
+export function subscribeGlossary(onChange: (entries: GlossaryEntry[]) => void): () => void {
+    return onSnapshot(
+        doc(sharedCol, "glossary"),
+        (snapshot) => onChange((snapshot.data()?.entries as GlossaryEntry[] | undefined) ?? []),
+        (error) => console.error("subscribeGlossary", error)
+    );
+}
+
+/** Full overwrite, like updateSourcesRemote/updateDescriptionSettingsRemote — the glossary is small and
+ *  hand-curated, so there's no need for the itemIcons-style per-key point-update dance. */
+export function replaceGlossaryRemote(entries: GlossaryEntry[]): Promise<void> {
+    return setDoc(doc(sharedCol, "glossary"), { entries });
 }
 
 export function writeBuild(build: Build): Promise<void> {
