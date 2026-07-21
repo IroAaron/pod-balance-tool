@@ -13,7 +13,19 @@ type Props = {
     build: Build;
 };
 
-type Edge = { parentId: string; childId: string; x1: number; y1: number; x2: number; y2: number };
+type Edge = {
+    parentId: string;
+    childId: string;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+
+    /** Quadratic-bezier control point. Sits exactly on the (x1,y1)-(x2,y2) chord's midpoint — i.e. renders as a
+     *  straight line — unless the edge needed to bow: see computeControlPoint. */
+    cx: number;
+    cy: number;
+};
 
 type Point = { x: number; y: number };
 
@@ -47,11 +59,16 @@ function comboEdgeInfo(edge: Edge, comboInfoById: Map<string, ComboInfo>): Combo
     const otherPoint: Point = comboIsParent ? { x: edge.x2, y: edge.y2 } : { x: edge.x1, y: edge.y1 };
     const otherId = comboIsParent ? edge.childId : edge.parentId;
 
+    // Tangent direction at a bezier endpoint, measured from the shared control point rather than the other
+    // endpoint — for a straight (unbowed) edge the control point sits on the chord, so this reduces to exactly
+    // the old point-to-point angle; for a bowed edge it correctly follows the curve instead of cutting the corner.
+    const angleFromControl = (point: Point) => Math.atan2(point.y - edge.cy, point.x - edge.cx);
+
     if (otherId === combo.resultId) {
-        return { color: "#66bb6a", tip: otherPoint, angle: Math.atan2(otherPoint.y - comboPoint.y, otherPoint.x - comboPoint.x) };
+        return { color: "#66bb6a", tip: otherPoint, angle: angleFromControl(otherPoint) };
     }
     if (combo.ingredientIds.includes(otherId)) {
-        return { color: "#ffb74d", tip: comboPoint, angle: Math.atan2(comboPoint.y - otherPoint.y, comboPoint.x - otherPoint.x) };
+        return { color: "#ffb74d", tip: comboPoint, angle: angleFromControl(comboPoint) };
     }
     return null;
 }
@@ -76,6 +93,116 @@ function ArrowHead({ info, opacity }: { info: ComboEdgeInfo; opacity: number }) 
 
 function edgeKey(parentId: string, childId: string): string {
     return `${parentId}--${childId}`;
+}
+
+/** Below this |y2-y1|, an edge connects two nodes in (effectively) the same tier row rather than adjacent rows —
+ *  happens for a combo's "additional parent" link (see computeBuildTree) when it lands on the same tier as the
+ *  participant it's linking to. A straight line here would run right along the row instead of connecting two
+ *  boxes vertically, so it always gets bowed off the row instead of measured for obstruction. */
+const SAME_TIER_Y_THRESHOLD = 24;
+
+/** How far a same-tier edge bows off the row. Small and fixed — there's no obstruction to clear, just enough
+ *  curve to read as "not part of the row" and to keep two same-tier edges from sitting on the same line. */
+const SAME_TIER_BOW = 22;
+
+/** Margin added around a node's own half-width when checking whether a straight edge would cut through it. */
+const OBSTRUCTION_MARGIN = 10;
+
+/** Ceiling on a computed obstruction-clearing bow — guards against a huge/unstable value when the obstruction
+ *  sits very close to one of the edge's own endpoints (where the bezier's deviation-per-bow-unit is tiny). */
+const MAX_OBSTRUCTION_BOW = 160;
+
+/** A same-tier edge is never more than this far off-center before its own position (not the fallback counter)
+ *  decides which way it bows; an obstruction edge uses the same tolerance against the diagram's horizontal
+ *  center. Small — mainly there so genuinely-centered edges don't flip sign on sub-pixel layout noise. */
+const CENTER_EPSILON = 4;
+
+/**
+ * Picks which side of the chord to bow the control point to, so the whole diagram reads as bowing outward from
+ * its own center — mirror-symmetric — rather than each edge picking a side at random:
+ *   - if the edge's own position is clearly off-center along the relevant axis (its tier's row for a same-tier
+ *     edge, the diagram's horizontal middle for an obstruction edge), it bows further *away* from center;
+ *   - only when it's genuinely centered (no positional signal to go on — the single-item-per-tier case that
+ *     motivated this whole feature) does it fall back to alternating with the next edge that's just as centered,
+ *     so two edges through the same spot still end up mirrored either side instead of both picking the same way.
+ * `desiredDir` is the "positive" reference axis (down for a same-tier bow, right for an obstruction bow) —
+ * `dot(perp, ±desiredDir)` then finds whichever sign of *this edge's own* perpendicular actually points that way,
+ * since perp's sign flips depending on which of the edge's two endpoints happens to be x1/x2 vs y1/y2.
+ */
+function chooseBowSign(
+    offsetFromCenter: number,
+    perp: Point,
+    desiredDir: Point,
+    fallbackCounter: { value: number }
+): 1 | -1 {
+    let awayFromCenter: boolean;
+    if (Math.abs(offsetFromCenter) > CENTER_EPSILON) {
+        awayFromCenter = offsetFromCenter > 0;
+    } else {
+        awayFromCenter = fallbackCounter.value % 2 === 0;
+        fallbackCounter.value += 1;
+    }
+    const desired = awayFromCenter ? desiredDir : { x: -desiredDir.x, y: -desiredDir.y };
+    return perp.x * desired.x + perp.y * desired.y >= 0 ? 1 : -1;
+}
+
+/**
+ * Computes each edge's bezier control point. Defaults to the (x1,y1)-(x2,y2) chord's own midpoint, which renders
+ * as a plain straight line — bowed off that midpoint only when needed:
+ *   - the edge connects two same-tier nodes (see SAME_TIER_Y_THRESHOLD), or
+ *   - the straight chord would cut through some OTHER node's box that isn't this edge's own parent/child. This
+ *     happens whenever a tier has exactly one node, so every node in the tree ends up centered on the same x —
+ *     a longer edge skipping past an intervening tier then draws straight through that tier's node (and through
+ *     the shorter edges touching it), which is exactly the "arrows fully overlap" case this exists to fix.
+ * The bow amount for the obstruction case is solved from the actual quadratic-bezier deviation at the
+ * obstruction's own position along the curve (not a flat constant) so it reliably clears the box regardless of
+ * how far along the edge that obstruction sits.
+ */
+function computeControlPoint(
+    edge: Pick<Edge, "parentId" | "childId" | "x1" | "y1" | "x2" | "y2">,
+    nodeBoxes: Map<string, { cx: number; cy: number; halfW: number }>,
+    center: Point,
+    fallbackCounters: { horizontal: { value: number }; vertical: { value: number } }
+): Point {
+    const midX = (edge.x1 + edge.x2) / 2;
+    const midY = (edge.y1 + edge.y2) / 2;
+    const dx = edge.x2 - edge.x1;
+    const dy = edge.y2 - edge.y1;
+    const length = Math.hypot(dx, dy) || 1;
+    // Unit vector perpendicular to the (dx,dy) chord — for a near-horizontal chord this is near-vertical (bows
+    // the row edge up/down) and for a near-vertical chord it's near-horizontal (bows an obstructed edge sideways).
+    const perpX = -dy / length;
+    const perpY = dx / length;
+
+    if (Math.abs(dy) < SAME_TIER_Y_THRESHOLD) {
+        // Bows away from the diagram's vertical center: a same-tier edge in the top half arcs further up, one in
+        // the bottom half arcs further down — reads as radiating outward instead of an arbitrary per-edge choice.
+        const sign = chooseBowSign(midY - center.y, { x: perpX, y: perpY }, { x: 0, y: 1 }, fallbackCounters.horizontal);
+        return { x: midX + perpX * SAME_TIER_BOW * sign, y: midY + perpY * SAME_TIER_BOW * sign };
+    }
+
+    const minY = Math.min(edge.y1, edge.y2);
+    const maxY = Math.max(edge.y1, edge.y2);
+    let neededBow = 0;
+    for (const [id, box] of nodeBoxes) {
+        if (id === edge.parentId || id === edge.childId) continue;
+        if (box.cy <= minY + OBSTRUCTION_MARGIN || box.cy >= maxY - OBSTRUCTION_MARGIN) continue;
+
+        const t = (box.cy - edge.y1) / dy;
+        const lineX = edge.x1 + t * dx;
+        const clearanceNeeded = box.halfW + OBSTRUCTION_MARGIN;
+        if (Math.abs(lineX - box.cx) >= clearanceNeeded) continue;
+
+        // Quadratic-bezier deviation from the straight chord at parameter t is 2*t*(1-t) times the control
+        // point's own offset — solve backwards for the offset that puts the curve exactly clearanceNeeded away.
+        const factor = Math.max(2 * t * (1 - t), 0.08);
+        neededBow = Math.max(neededBow, Math.min(clearanceNeeded / factor, MAX_OBSTRUCTION_BOW));
+    }
+
+    if (neededBow === 0) return { x: midX, y: midY };
+    // Bows away from the diagram's horizontal center, same idea as the same-tier case but on the other axis.
+    const sign = chooseBowSign(midX - center.x, { x: perpX, y: perpY }, { x: 1, y: 0 }, fallbackCounters.vertical);
+    return { x: midX + perpX * neededBow * sign, y: midY + perpY * neededBow * sign };
 }
 
 function tierLabel(tier: number): string {
@@ -306,7 +433,20 @@ export default function BuildTree({ build }: Props) {
 
         const computeEdges = () => {
             const containerRect = container.getBoundingClientRect();
-            const next: Edge[] = [];
+
+            // Every placed node's box in container-relative coordinates — used both as edge endpoints below and,
+            // in computeControlPoint, to detect a straight edge cutting through some unrelated node.
+            const nodeBoxes = new Map<string, { cx: number; cy: number; halfW: number }>();
+            for (const [id, el] of nodeRefs.current) {
+                const rect = el.getBoundingClientRect();
+                nodeBoxes.set(id, {
+                    cx: rect.left + rect.width / 2 - containerRect.left,
+                    cy: rect.top + rect.height / 2 - containerRect.top,
+                    halfW: rect.width / 2,
+                });
+            }
+
+            const raw: Omit<Edge, "cx" | "cy">[] = [];
 
             for (const node of nodes) {
                 const childEl = nodeRefs.current.get(node.itemId);
@@ -326,7 +466,7 @@ export default function BuildTree({ build }: Props) {
                     // ends up geometrically behind it, invisible under the node's own (now higher z-index) fill.
                     const parentIsHigher = parentRect.top + parentRect.height / 2 <= childRect.top + childRect.height / 2;
 
-                    next.push({
+                    raw.push({
                         parentId,
                         childId: node.itemId,
                         x1: parentRect.left + parentRect.width / 2 - containerRect.left,
@@ -336,6 +476,15 @@ export default function BuildTree({ build }: Props) {
                     });
                 }
             }
+
+            const center: Point = { x: containerRect.width / 2, y: containerRect.height / 2 };
+            // Fresh per recompute, shared across the edges below so two edges that both land on the ambiguous
+            // (genuinely-centered) fallback still alternate sides against each other, not just against themselves.
+            const fallbackCounters = { horizontal: { value: 0 }, vertical: { value: 0 } };
+            const next: Edge[] = raw.map((edge) => {
+                const control = computeControlPoint(edge, nodeBoxes, center, fallbackCounters);
+                return { ...edge, cx: control.x, cy: control.y };
+            });
 
             setEdges(next);
         };
@@ -405,25 +554,25 @@ export default function BuildTree({ build }: Props) {
                         const isHighlighted = !highlightedEdgeKeys || highlightedEdgeKeys.has(key);
                         const combo = comboEdgeInfo(edge, comboInfoById);
                         const opacity = isHighlighted ? 0.9 : 0.15;
+                        // A quadratic bezier through the control point — degenerates to a plain straight segment
+                        // when the control point sits on the chord's own midpoint (the common case; see
+                        // computeControlPoint), and bows around same-tier/obstructed edges otherwise.
+                        const path = `M ${edge.x1} ${edge.y1} Q ${edge.cx} ${edge.cy} ${edge.x2} ${edge.y2}`;
                         return (
                             <g key={key}>
-                                <line
-                                    x1={edge.x1}
-                                    y1={edge.y1}
-                                    x2={edge.x2}
-                                    y2={edge.y2}
+                                <path
+                                    d={path}
+                                    fill="none"
                                     stroke={combo?.color ?? "#5B8CFF"}
                                     strokeWidth={isHighlighted ? 2.5 : 1.5}
                                     opacity={opacity}
                                     style={{ pointerEvents: "none", transition: "opacity 0.15s" }}
                                 />
                                 {combo && <ArrowHead info={combo} opacity={opacity} />}
-                                {/* Wider invisible line on top, just for a comfortable hover hit-area on a 1.5px line. */}
-                                <line
-                                    x1={edge.x1}
-                                    y1={edge.y1}
-                                    x2={edge.x2}
-                                    y2={edge.y2}
+                                {/* Wider invisible path on top, just for a comfortable hover hit-area on a 1.5px line. */}
+                                <path
+                                    d={path}
+                                    fill="none"
                                     stroke="transparent"
                                     strokeWidth={14}
                                     style={{ pointerEvents: "stroke", cursor: "pointer" }}
