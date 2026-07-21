@@ -21,11 +21,13 @@ const shimmer = keyframes`
 /**
  * A glossary-note tooltip sits right next to (often nested inside, e.g. BuildsPage's item-icon Tooltip) the
  * default gray MUI tooltip used everywhere else — same color would read as one blob. Muted blue-grey, not the
- * app's saturated primary blue, so it stays easy on the eyes at a glance instead of popping like an alert.
+ * app's saturated primary blue, so it stays easy on the eyes at a glance instead of popping like an alert. Font
+ * size is its own setting (tooltipFontSizePx), not tied to fontSizePx — a tooltip reads fine noticeably smaller
+ * than the description text it's annotating.
  */
-const GLOSSARY_TOOLTIP_SLOT_PROPS = {
-    tooltip: { sx: { bgcolor: "#37474f", color: "#eceff1" } },
-} as const;
+function glossaryTooltipSlotProps(tooltipFontSizePx: number) {
+    return { tooltip: { sx: { bgcolor: "#37474f", color: "#eceff1", fontSize: tooltipFontSizePx } } } as const;
+}
 
 /**
  * Renders an item's description per the site-wide description mode (Settings page): "text" shows the raw
@@ -47,6 +49,7 @@ export default function ItemDescription({ item, description, settingsOverride }:
 
     const glossary = settings.descriptionMode === "icons-emoji" ? store.glossary : [];
     const parts = parseItemDescription(item, description, store.mechanics, glossary);
+    const tooltipSlotProps = glossaryTooltipSlotProps(settings.tooltipFontSizePx);
 
     return (
         <>
@@ -64,7 +67,7 @@ export default function ItemDescription({ item, description, settingsOverride }:
                     // surfaces which glossary entry/phrase it came from.
                     if (part.note) {
                         return (
-                            <Tooltip key={index} title={part.note} slotProps={GLOSSARY_TOOLTIP_SLOT_PROPS}>
+                            <Tooltip key={index} title={part.note} slotProps={tooltipSlotProps}>
                                 <Box component="span" sx={{ fontSize: settings.fontSizePx }}>
                                     {part.value}
                                 </Box>
@@ -87,7 +90,7 @@ export default function ItemDescription({ item, description, settingsOverride }:
 
                     if (part.note) {
                         return (
-                            <Tooltip key={index} title={part.note} slotProps={GLOSSARY_TOOLTIP_SLOT_PROPS}>
+                            <Tooltip key={index} title={part.note} slotProps={tooltipSlotProps}>
                                 <img
                                     src={part.src}
                                     alt={part.alt}

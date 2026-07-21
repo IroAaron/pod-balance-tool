@@ -21,6 +21,9 @@ export interface DescriptionSettings {
     fontSizePx: number;
 
     descriptionMode: DescriptionMode;
+
+    /** Font size (px) of the glossary-note tooltip shown on an "icons-emoji" icon/emoji — see ItemDescription. */
+    tooltipFontSizePx: number;
 }
 
 /** Matches today's actual look (unscaled BBCode width, ItemDetailPage's plain-Typography ~16px body text). */
@@ -28,6 +31,7 @@ export const DEFAULT_DESCRIPTION_SETTINGS: DescriptionSettings = {
     spriteScale: 1,
     fontSizePx: 16,
     descriptionMode: "text-icons",
+    tooltipFontSizePx: 14,
 };
 
 /** Synced from the game repo's `roulette_interface/Icons_tags/` on every deploy — see .github/workflows/deploy.yml. */

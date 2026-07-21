@@ -28,8 +28,14 @@ export default function SettingsPage() {
     const [spriteScale, setSpriteScale] = useState(store.descriptionSettings.spriteScale);
     const [fontSizePx, setFontSizePx] = useState(store.descriptionSettings.fontSizePx);
     const [descriptionMode, setDescriptionMode] = useState(store.descriptionSettings.descriptionMode);
+    const [tooltipFontSizePx, setTooltipFontSizePx] = useState(store.descriptionSettings.tooltipFontSizePx);
 
-    const commit = (next: { spriteScale: number; fontSizePx: number; descriptionMode: DescriptionMode }) => {
+    const commit = (next: {
+        spriteScale: number;
+        fontSizePx: number;
+        descriptionMode: DescriptionMode;
+        tooltipFontSizePx: number;
+    }) => {
         store.setDescriptionSettings(next);
     };
 
@@ -37,6 +43,7 @@ export default function SettingsPage() {
         setSpriteScale(DEFAULT_DESCRIPTION_SETTINGS.spriteScale);
         setFontSizePx(DEFAULT_DESCRIPTION_SETTINGS.fontSizePx);
         setDescriptionMode(DEFAULT_DESCRIPTION_SETTINGS.descriptionMode);
+        setTooltipFontSizePx(DEFAULT_DESCRIPTION_SETTINGS.tooltipFontSizePx);
         commit(DEFAULT_DESCRIPTION_SETTINGS);
     };
 
@@ -58,7 +65,7 @@ export default function SettingsPage() {
                         onChange={(event) => {
                             const next = event.target.value as DescriptionMode;
                             setDescriptionMode(next);
-                            commit({ spriteScale, fontSizePx, descriptionMode: next });
+                            commit({ spriteScale, fontSizePx, descriptionMode: next, tooltipFontSizePx });
                         }}
                         size="small"
                         sx={{ maxWidth: 280 }}
@@ -88,7 +95,7 @@ export default function SettingsPage() {
                             step={0.05}
                             onChange={(_event, value) => setSpriteScale(value as number)}
                             onChangeCommitted={(_event, value) =>
-                                commit({ spriteScale: value as number, fontSizePx, descriptionMode })
+                                commit({ spriteScale: value as number, fontSizePx, descriptionMode, tooltipFontSizePx })
                             }
                             valueLabelDisplay="auto"
                             valueLabelFormat={(value) => `${Math.round(value * 100)}%`}
@@ -108,10 +115,29 @@ export default function SettingsPage() {
                             step={1}
                             onChange={(_event, value) => setFontSizePx(value as number)}
                             onChangeCommitted={(_event, value) =>
-                                commit({ spriteScale, fontSizePx: value as number, descriptionMode })
+                                commit({ spriteScale, fontSizePx: value as number, descriptionMode, tooltipFontSizePx })
                             }
                             valueLabelDisplay="auto"
                         />
+                    </Box>
+
+                    <Box>
+                        <Typography gutterBottom>Размер текста тултипов: {tooltipFontSizePx}px</Typography>
+                        <Slider
+                            value={tooltipFontSizePx}
+                            min={8}
+                            max={24}
+                            step={1}
+                            onChange={(_event, value) => setTooltipFontSizePx(value as number)}
+                            onChangeCommitted={(_event, value) =>
+                                commit({ spriteScale, fontSizePx, descriptionMode, tooltipFontSizePx: value as number })
+                            }
+                            valueLabelDisplay="auto"
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                            Размер текста в тултипе с заметкой из глоссария (наведение на иконку/эмодзи в режиме
+                            «Иконки + Эмоджи»).
+                        </Typography>
                     </Box>
 
                     <Box>
@@ -129,7 +155,7 @@ export default function SettingsPage() {
                         <ItemDescription
                             item={PREVIEW_ITEM}
                             description={PREVIEW_TEXT}
-                            settingsOverride={{ spriteScale, fontSizePx, descriptionMode }}
+                            settingsOverride={{ spriteScale, fontSizePx, descriptionMode, tooltipFontSizePx }}
                         />
                     </Typography>
                 </Stack>
