@@ -4,6 +4,8 @@ import { Box, Chip, Stack, Tooltip, Typography } from "@mui/material";
 import { useStore } from "../hooks/useStore";
 import ItemIcon from "./ItemIcon";
 import ItemDescription from "./ItemDescription";
+import DetailModal from "./DetailModal";
+import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import { computeBuildTree, type BuildTreeNode, type ComboInfo } from "../../core/domain/buildTree";
 import type { Build } from "../../core/models/Build";
 
@@ -89,6 +91,7 @@ type TreeNodeProps = {
     dimmed: boolean;
     onHoverStart: () => void;
     onHoverEnd: () => void;
+    onOpen: (itemId: string) => void;
 };
 
 /** A ReplaceItem combination — its ingredients feed in, the result comes out. Round (not square, unlike a real
@@ -142,7 +145,7 @@ function ComboNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNod
 /** One tree node: item icon only (name/description live in the hover tooltip), registers itself in `nodeRefs`
  *  so the parent can measure it for edge lines. */
 function TreeNode(props: TreeNodeProps) {
-    const { node, nodeRefs, dimmed, onHoverStart, onHoverEnd } = props;
+    const { node, nodeRefs, dimmed, onHoverStart, onHoverEnd, onOpen } = props;
     const store = useStore();
 
     if (node.combo) return <ComboNode {...props} />;
@@ -172,6 +175,12 @@ function TreeNode(props: TreeNodeProps) {
                 }}
                 component={RouterLink}
                 to={`/items/${encodeURIComponent(node.itemId)}`}
+                onClick={(event) => {
+                    // Opens the item as an overlay on top of this build page instead of navigating away —
+                    // same "внутреннее окно" pattern GraphPage uses for build nodes (see DetailModal).
+                    event.preventDefault();
+                    onOpen(node.itemId);
+                }}
                 onMouseEnter={onHoverStart}
                 onMouseLeave={onHoverEnd}
                 sx={{
@@ -283,6 +292,7 @@ export default function BuildTree({ build }: Props) {
     const [edges, setEdges] = useState<Edge[]>([]);
     const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
     const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
+    const [openItemId, setOpenItemId] = useState<string | null>(null);
 
     // store.items/mechanics/etc. are getters that return a fresh array on every access, so `nodes` is a new
     // array reference every render even when its contents are identical — depending the effect on `nodes`
@@ -449,6 +459,7 @@ export default function BuildTree({ build }: Props) {
                                                 setHoveredEdgeKey(null);
                                             }}
                                             onHoverEnd={() => setHoveredItemId((current) => (current === node.itemId ? null : current))}
+                                            onOpen={setOpenItemId}
                                         />
                                     ))
                                 )}
@@ -471,6 +482,10 @@ export default function BuildTree({ build }: Props) {
                                     key={id}
                                     component={RouterLink}
                                     to={`/items/${encodeURIComponent(id)}`}
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        setOpenItemId(id);
+                                    }}
                                     clickable
                                     label={item ? store.itemName(item) : id}
                                     size="small"
@@ -481,6 +496,10 @@ export default function BuildTree({ build }: Props) {
                     </Stack>
                 </Box>
             )}
+
+            <DetailModal open={openItemId !== null} onClose={() => setOpenItemId(null)}>
+                {openItemId && <ItemDetailPage id={openItemId} />}
+            </DetailModal>
         </Box>
     );
 }
