@@ -99,6 +99,18 @@ export class GameStore {
     /** Bumped on every mutation; read by useStore() via useSyncExternalStore. */
     version = 0;
 
+    /**
+     * Derived from allItems/translations by rebuildDerivedCaches(), called only where those two arrays are
+     * reassigned (constructor, applyImportResult, importSnapshot) — NOT recomputed on every access, unlike the
+     * old `items` getter which re-filtered allItems against translations (an O(items × translations) linear scan
+     * via .some()) on every single call. That getter was called by getItem()/itemsForBuildGeneration() etc. from
+     * inside render-path loops (once per rendered item icon, once per build member, ...), so its cost multiplied
+     * into multi-second UI freezes on the Builds page and item detail cards. See project memory: perf investigation.
+     */
+    private _items: Item[] = [];
+    private _itemsById: Map<string, Item> = new Map();
+    private _translationsByKey: Map<string, Translation> = new Map();
+
     readonly itemService = new ItemService();
 
     readonly buildService = new BuildService();
@@ -120,7 +132,17 @@ export class GameStore {
             this.enumValues = cache.importCache.enumValues ?? {};
         }
 
+        this.rebuildDerivedCaches();
         this.initRemoteSync();
+    }
+
+    /** Recomputes items/itemsById/translationsByKey from allItems/translations — call after reassigning either. */
+    private rebuildDerivedCaches(): void {
+        this._translationsByKey = new Map(this.translations.map((translation) => [translation.key, translation]));
+        this._items = this.allItems.filter(
+            (item) => item.nameKey !== undefined && this._translationsByKey.has(item.nameKey)
+        );
+        this._itemsById = new Map(this._items.map((item) => [item.id, item]));
     }
 
     /** Subscribes to Firestore for the lifetime of the app — this store is a page-lifetime singleton, never disposed. */
@@ -161,15 +183,11 @@ export class GameStore {
 
     /** Config items without a matching translation are treated as unfinished/removed content — hidden everywhere. */
     get items(): Item[] {
-        return this.allItems.filter((item) => this.hasTranslation(item));
-    }
-
-    private hasTranslation(item: Item): boolean {
-        return this.translations.some((translation) => translation.key === item.nameKey);
+        return this._items;
     }
 
     getItem(id: string): Item | undefined {
-        return this.items.find((item) => item.id === id);
+        return this._itemsById.get(id);
     }
 
     getBuild(id: string): Build | undefined {
@@ -190,7 +208,7 @@ export class GameStore {
 
     getTranslation(key: string | undefined): string | undefined {
         if (!key) return undefined;
-        return this.translations.find((translation) => translation.key === key)?.value;
+        return this._translationsByKey.get(key)?.value;
     }
 
     itemName(item: Item): string {
@@ -218,6 +236,7 @@ export class GameStore {
             this.enumValues = result.data.enumValues;
         }
 
+        this.rebuildDerivedCaches();
         this.importReport = result.report;
         this.importedAt = new Date().toISOString();
         saveImportCache({
@@ -465,6 +484,7 @@ export class GameStore {
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);
+            this.rebuildDerivedCaches();
         }
 
         this.notify();

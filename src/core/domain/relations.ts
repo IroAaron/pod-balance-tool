@@ -693,6 +693,80 @@ function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): 
     return connections;
 }
 
+/**
+ * Everything relatedItems() needs that depends only on (items, mechanics, upgradeChains, replaceRules) — not on
+ * which itemId is being queried. Rebuilding these from scratch (grouping mechanics by item, the cascade index,
+ * per-item id-ref/fingerprint sets, ...) is the expensive part; a single relatedItems() call only ever consumes a
+ * few Map lookups' worth of it. Callers like computeBuildTree/relatedBuilds invoke relatedItems() once per build
+ * member (10-20+ times per page), so recomputing this per call turned a single click into several seconds of
+ * blocked main thread. Cached by reference identity of the four inputs — safe because GameStore only ever hands
+ * out a new array reference for one of them when the underlying data actually changes (see GameStore.items).
+ */
+interface SharedRelationIndex {
+    knownIds: Set<string>;
+    chainMates: Map<string, Set<string>>;
+    replaceMates: Map<string, Set<string>>;
+    producedEvents: Map<string, Set<string>>;
+    listenedEvents: Map<string, Set<string>>;
+    cascadeStyleConnections: Map<string, Set<string>>;
+    /** itemId -> raw (unfiltered) id-shaped tokens across all of its own mechanic rows' field values. */
+    rawIdRefsByItem: Map<string, Set<string>>;
+    fingerprintsByItem: Map<string, Set<string>>;
+    excludedTiers: Set<string>;
+}
+
+let cachedRelationIndex: {
+    items: Item[];
+    mechanics: MechanicRow[];
+    upgradeChains: UpgradeChain[];
+    replaceRules: ReplaceRule[];
+    index: SharedRelationIndex;
+} | null = null;
+
+function getSharedRelationIndex(
+    items: Item[],
+    mechanics: MechanicRow[],
+    upgradeChains: UpgradeChain[],
+    replaceRules: ReplaceRule[]
+): SharedRelationIndex {
+    const cached = cachedRelationIndex;
+    if (
+        cached &&
+        cached.items === items &&
+        cached.mechanics === mechanics &&
+        cached.upgradeChains === upgradeChains &&
+        cached.replaceRules === replaceRules
+    ) {
+        return cached.index;
+    }
+
+    const knownIds = new Set(items.map((item) => item.id));
+    const mechanicsByItem = groupByItemId(mechanics);
+
+    const rawIdRefsByItem = new Map<string, Set<string>>();
+    const fingerprintsByItem = new Map<string, Set<string>>();
+    for (const item of items) {
+        const rows = mechanicsByItem.get(item.id) ?? [];
+        rawIdRefsByItem.set(item.id, new Set(rows.flatMap((row) => Object.values(row.fields).flatMap(splitList))));
+        fingerprintsByItem.set(item.id, fieldFingerprints(rows));
+    }
+
+    const index: SharedRelationIndex = {
+        knownIds,
+        chainMates: buildChainMates(upgradeChains),
+        replaceMates: buildReplaceMates(replaceRules, knownIds),
+        producedEvents: computeProducedEvents(mechanicsByItem),
+        listenedEvents: computeListenedEvents(mechanicsByItem),
+        cascadeStyleConnections: buildCascadeStyleConnections(items, mechanics),
+        rawIdRefsByItem,
+        fingerprintsByItem,
+        excludedTiers: higherTierIds(upgradeChains),
+    };
+
+    cachedRelationIndex = { items, mechanics, upgradeChains, replaceRules, index };
+    return index;
+}
+
 /** Ranked "possibly related" items for an item's detail page — informational only, never auto-clusters. */
 export function relatedItems(
     itemId: string,
@@ -701,29 +775,28 @@ export function relatedItems(
     upgradeChains: UpgradeChain[],
     replaceRules: ReplaceRule[]
 ): RelatedItem[] {
-    const knownIds = new Set(items.map((item) => item.id));
-    const mechanicsByItem = groupByItemId(mechanics);
-    const chainMates = buildChainMates(upgradeChains);
+    const {
+        knownIds,
+        chainMates,
+        replaceMates,
+        producedEvents,
+        listenedEvents,
+        cascadeStyleConnections,
+        rawIdRefsByItem,
+        fingerprintsByItem,
+        excludedTiers,
+    } = getSharedRelationIndex(items, mechanics, upgradeChains, replaceRules);
+
     const targetChainMates = chainMates.get(itemId) ?? new Set<string>();
-    const replaceMates = buildReplaceMates(replaceRules, knownIds);
     const targetReplaceMates = replaceMates.get(itemId) ?? new Set<string>();
-    const producedEvents = computeProducedEvents(mechanicsByItem);
-    const listenedEvents = computeListenedEvents(mechanicsByItem);
     const targetProduces = producedEvents.get(itemId) ?? new Set<string>();
     const targetListens = listenedEvents.get(itemId) ?? new Set<string>();
-    const cascadeStyleConnections = buildCascadeStyleConnections(items, mechanics);
     const targetCascadeLinks = cascadeStyleConnections.get(itemId) ?? new Set<string>();
 
-    const targetMechanics = mechanicsByItem.get(itemId) ?? [];
     const targetIdRefs = new Set(
-        targetMechanics.flatMap((mechanic) =>
-            Object.values(mechanic.fields)
-                .flatMap(splitList)
-                .filter((token) => knownIds.has(token) && token !== itemId)
-        )
+        [...(rawIdRefsByItem.get(itemId) ?? [])].filter((token) => knownIds.has(token) && token !== itemId)
     );
-    const targetFingerprints = fieldFingerprints(targetMechanics);
-    const excludedTiers = higherTierIds(upgradeChains);
+    const targetFingerprints = fingerprintsByItem.get(itemId) ?? new Set<string>();
 
     const results: RelatedItem[] = [];
 
@@ -735,10 +808,7 @@ export function relatedItems(
         let strength: "strong" | "weak" = "weak";
         let score = 0;
 
-        const otherMechanics = mechanicsByItem.get(other.id) ?? [];
-        const otherIdRefs = new Set(
-            otherMechanics.flatMap((mechanic) => Object.values(mechanic.fields).flatMap(splitList))
-        );
+        const otherIdRefs = rawIdRefsByItem.get(other.id) ?? new Set<string>();
 
         if (targetIdRefs.has(other.id) || otherIdRefs.has(itemId)) {
             strength = "strong";
@@ -780,7 +850,7 @@ export function relatedItems(
             reasons.push("совпадает по тегу/цвету/событию в механике (как при генерации билдов)");
         }
 
-        const otherFingerprints = fieldFingerprints(otherMechanics);
+        const otherFingerprints = fingerprintsByItem.get(other.id) ?? new Set<string>();
         const sharedFingerprints = [...targetFingerprints].filter((fp) => otherFingerprints.has(fp));
         if (sharedFingerprints.length > 0) {
             score += sharedFingerprints.length;
