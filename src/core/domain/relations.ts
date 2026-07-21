@@ -194,6 +194,13 @@ function fieldFingerprints(mechanics: MechanicRow[]): Set<string> {
  * it triggers, regardless of what its own ActivatorType/filters are. This is
  * what connects a "recolors things" item to an item that listens for
  * ActivatorType=ColorChange, even with no shared tag between them.
+ *
+ * Same idea for a MechAddValue row that raises TargetType=LoopComplitedCounter — real example: Гонщик
+ * (`c_chel_plus_loop_1`) increments that counter on every BallPass, and completing it is exactly what the engine
+ * fires ActivatorType=LoopCompleted for (what Стадион/Дальнобойщик payoff rows listen for). Without this, nothing
+ * ever showed up as a "producer" of LoopCompleted, so cascade-build generation couldn't pull Гонщик into a
+ * LoopCompleted-payoff build, and a lone LoopCompleted root with no other structural connection (Дальнобойщик)
+ * never reached the 2-item minimum to become a build at all.
  */
 function producedActivatorType(mechanic: MechanicRow): string | undefined {
     if (mechanic.table === "MechChangeColor") return "ColorChange";
@@ -201,6 +208,9 @@ function producedActivatorType(mechanic: MechanicRow): string | undefined {
         const itemMech = mechanic.fields.ItemMech;
         if (itemMech === "удалить") return "ItemRemoved";
         if (itemMech === "поставить") return "ItemPlaced";
+    }
+    if (mechanic.table === "MechAddValue" && mechanic.fields.TargetType === "LoopComplitedCounter") {
+        return "LoopCompleted";
     }
     return undefined;
 }

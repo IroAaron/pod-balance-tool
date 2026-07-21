@@ -337,4 +337,39 @@ describe("computeCascadeBuilds item selection", () => {
         expect(built?.has(homeless.id)).toBe(true); // itemIdToReplace — still a real prerequisite
         expect(built?.has(musicStore.id)).toBe(true); // NeededItem — the actual actionable ingredient
     });
+
+    it("a MechAddValue row raising LoopComplitedCounter structurally produces ActivatorType=LoopCompleted (real Стадион/Дальнобойщик/Гонщик shape)", () => {
+        // Гонщик (c_chel_plus_loop_1) has no PlayerScore payoff of his own — he raises TargetType=LoopComplitedCounter
+        // on every BallPass, which is what the engine fires ActivatorType=LoopCompleted for. Before this fix,
+        // nothing was recognized as "producing" LoopCompleted, so Гонщик never showed up in Стадион's build, and
+        // Дальнобойщик — a lone LoopCompleted root with no other structural connection — never reached the 2-item
+        // minimum to become a build at all.
+        const stadium = makeItem("stadium", { valueMin: 10, valueMax: 10, tags: ["Sport"] });
+        const trucker = makeItem("trucker", { valueMin: 15, valueMax: 15 });
+        const racer = makeItem("racer", { tags: ["Sport"] });
+        const items = [stadium, trucker, racer];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(stadium.id, { ActivatorType: "LoopCompleted" }),
+            makeMainValuePayoff(trucker.id, { ActivatorType: "LoopCompleted" }),
+            {
+                id: "racer-loop-counter",
+                table: "MechAddValue",
+                itemId: racer.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTargetType: "Road",
+                    ActivatorPlace: "MyPosition",
+                    TargetType: "LoopComplitedCounter",
+                    TargetCount: "1",
+                },
+            },
+        ];
+
+        const stadiumBuild = buildItemsFor(stadium.id, items, mechanics);
+        const truckerBuild = buildItemsFor(trucker.id, items, mechanics);
+
+        expect(stadiumBuild?.has(racer.id)).toBe(true);
+        expect(truckerBuild).toBeDefined(); // previously skipped entirely — root alone never reached size >= 2
+        expect(truckerBuild?.has(racer.id)).toBe(true);
+    });
 });
