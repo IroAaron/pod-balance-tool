@@ -156,7 +156,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("replaces a matched phrase with its icon and leaves the rest of the text as-is", () => {
-        const glossary = [{ id: "g1", phrase: "Активирует", icon: "roulette_interface/icons-tags/activate.svg" }];
+        const glossary = [{ id: "g1", phrases: ["Активирует"], icon: "roulette_interface/icons-tags/activate.svg" }];
         expect(parseItemDescription(makeItem(), "Активирует соседнюю ячейку.", [], glossary)).toEqual([
             {
                 kind: "icon",
@@ -170,7 +170,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("falls back to emoji when the entry has no icon", () => {
-        const glossary = [{ id: "g1", phrase: "Активирует", emoji: "⚡" }];
+        const glossary = [{ id: "g1", phrases: ["Активирует"], emoji: "⚡" }];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
             { kind: "emoji", value: "⚡", note: "Активирует" },
             { kind: "text", value: " ячейку." },
@@ -179,7 +179,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
 
     it("prefers icon over emoji when an entry has both", () => {
         const glossary = [
-            { id: "g1", phrase: "Активирует", icon: "roulette_interface/icons-tags/activate.svg", emoji: "⚡" },
+            { id: "g1", phrases: ["Активирует"], icon: "roulette_interface/icons-tags/activate.svg", emoji: "⚡" },
         ];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
             {
@@ -194,7 +194,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("matches case-insensitively", () => {
-        const glossary = [{ id: "g1", phrase: "активирует", emoji: "⚡" }];
+        const glossary = [{ id: "g1", phrases: ["активирует"], emoji: "⚡" }];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
             { kind: "emoji", value: "⚡", note: "активирует" },
             { kind: "text", value: " ячейку." },
@@ -203,8 +203,8 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
 
     it("prefers the longer of two overlapping phrases (real 'свой цвет' vs 'цвет' shape)", () => {
         const glossary = [
-            { id: "g1", phrase: "цвет", emoji: "🎨" },
-            { id: "g2", phrase: "свой цвет", emoji: "🟢" },
+            { id: "g1", phrases: ["цвет"], emoji: "🎨" },
+            { id: "g2", phrases: ["свой цвет"], emoji: "🟢" },
         ];
         expect(parseItemDescription(makeItem(), "Перекрашивает в свой цвет.", [], glossary)).toEqual([
             { kind: "text", value: "Перекрашивает в " },
@@ -214,7 +214,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("uses the entry's own note over falling back to the phrase, when set", () => {
-        const glossary = [{ id: "g1", phrase: "Активирует", emoji: "⚡", note: "Активация — MechActivate" }];
+        const glossary = [{ id: "g1", phrases: ["Активирует"], emoji: "⚡", note: "Активация — MechActivate" }];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
             { kind: "emoji", value: "⚡", note: "Активация — MechActivate" },
             { kind: "text", value: " ячейку." },
@@ -222,7 +222,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("falls back to the phrase for the note when the entry's note is blank/whitespace", () => {
-        const glossary = [{ id: "g1", phrase: "Активирует", emoji: "⚡", note: "   " }];
+        const glossary = [{ id: "g1", phrases: ["Активирует"], emoji: "⚡", note: "   " }];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
             { kind: "emoji", value: "⚡", note: "Активирует" },
             { kind: "text", value: " ячейку." },
@@ -233,7 +233,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
         // Real shape: a description already spells out an icon via [img] (not a phrase match at all) — if a
         // glossary entry documents that exact icon, hovering it should show the note too.
         const glossary = [
-            { id: "g1", phrase: "монета", icon: "roulette_interface/icons-tags/coin.png", note: "Монетка — бонус" },
+            { id: "g1", phrases: ["монета"], icon: "roulette_interface/icons-tags/coin.png", note: "Монетка — бонус" },
         ];
         const raw = "Дает [img width=16]res://roulette_interface/Icons_tags/coin.png[/img] очков.";
         expect(parseItemDescription(makeItem(), raw, [], glossary)).toEqual([
@@ -244,7 +244,7 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("ignores an entry with neither icon nor emoji set", () => {
-        const glossary = [{ id: "g1", phrase: "Активирует" }];
+        const glossary = [{ id: "g1", phrases: ["Активирует"] }];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
             { kind: "text", value: "Активирует ячейку." },
         ]);
@@ -252,11 +252,21 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
 
     it("does not touch an already-resolved icon/colored-text part, only original text", () => {
         const item = makeItem({ raw: { PossibleColors: "Red" } });
-        const glossary = [{ id: "g1", phrase: "цвета", emoji: "🎨" }];
+        const glossary = [{ id: "g1", phrases: ["цвета"], emoji: "🎨" }];
         const raw = "[color=#{ColorHex}]своего цвета[/color] активирует.";
         expect(parseItemDescription(item, raw, [], glossary)).toEqual([
             { kind: "colored-text", value: "своего цвета", colors: ["#ff8080"] },
             { kind: "text", value: " активирует." },
+        ]);
+    });
+
+    it("matches any of an entry's several phrases, all sharing the one icon/emoji", () => {
+        const glossary = [{ id: "g1", phrases: ["активирует", "активация"], emoji: "⚡" }];
+        expect(parseItemDescription(makeItem(), "Активация ячейки, затем активирует соседнюю.", [], glossary)).toEqual([
+            { kind: "emoji", value: "⚡", note: "активация" },
+            { kind: "text", value: " ячейки, затем " },
+            { kind: "emoji", value: "⚡", note: "активирует" },
+            { kind: "text", value: " соседнюю." },
         ]);
     });
 });

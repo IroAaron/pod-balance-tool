@@ -7,7 +7,16 @@ import { glossaryIconSrc } from "../../../core/domain/descriptionTemplate";
 import type { GlossaryEntry } from "../../../core/models/GlossaryEntry";
 
 function makeEmptyEntry(): GlossaryEntry {
-    return { id: `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, phrase: "" };
+    return { id: `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, phrases: [] };
+}
+
+/** One phrase per line in the "Фразы" textarea — blank lines dropped, so trailing/stray newlines while typing
+ *  don't turn into empty-string phrases that would match every position in every description. */
+function parsePhrasesText(text: string): string[] {
+    return text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
 }
 
 /**
@@ -99,7 +108,7 @@ type RowProps = {
  * AND on every background sync tick from anywhere else in the app.
  */
 const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onInsertAfter }: RowProps) {
-    const [phrase, setPhrase] = useState(entry.phrase);
+    const [phrasesText, setPhrasesText] = useState(entry.phrases.join("\n"));
     const [icon, setIcon] = useState(entry.icon ?? "");
     const [emoji, setEmoji] = useState(entry.emoji ?? "");
     const [note, setNote] = useState(entry.note ?? "");
@@ -109,7 +118,7 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
     // stripUndefined in firestoreStore.ts, kept as a second line of defense regardless of this one).
     const commit = () =>
         onCommit(entry.id, {
-            phrase,
+            phrases: parsePhrasesText(phrasesText),
             ...(icon ? { icon } : {}),
             ...(emoji ? { emoji } : {}),
             ...(note ? { note } : {}),
@@ -123,15 +132,21 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
                         display: "grid",
                         gridTemplateColumns: "220px 230px 150px 1fr 40px",
                         gap: 2,
-                        alignItems: "center",
+                        // "start" (not "center") since the phrases field can grow to several lines while the
+                        // rest of the row's fields stay single-line — top-aligning avoids everything else
+                        // drifting vertically to re-center against a taller neighbor.
+                        alignItems: "start",
                     }}
                 >
                     <TextField
-                        label="Фраза"
-                        value={phrase}
-                        onChange={(event) => setPhrase(event.target.value)}
+                        label="Фразы (по одной на строку)"
+                        value={phrasesText}
+                        onChange={(event) => setPhrasesText(event.target.value)}
                         onBlur={commit}
                         size="small"
+                        multiline
+                        minRows={1}
+                        maxRows={6}
                         fullWidth
                     />
 
@@ -243,7 +258,7 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
     const filtered = normalizedQuery
         ? entries.filter(
               (entry) =>
-                  entry.phrase.toLowerCase().includes(normalizedQuery) ||
+                  entry.phrases.some((phrase) => phrase.toLowerCase().includes(normalizedQuery)) ||
                   (entry.note ?? "").toLowerCase().includes(normalizedQuery)
           )
         : entries;

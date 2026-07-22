@@ -15,7 +15,7 @@ import {
 } from "firebase/firestore";
 
 import type { Build } from "../models/Build";
-import type { GlossaryEntry } from "../models/GlossaryEntry";
+import { normalizeGlossaryEntry, type GlossaryEntry } from "../models/GlossaryEntry";
 import type { SourceUrls } from "./localStore";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
 import { db } from "./firebaseClient";
@@ -116,7 +116,10 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
 export function subscribeGlossary(onChange: (entries: GlossaryEntry[]) => void): () => void {
     return onSnapshot(
         doc(sharedCol, "glossary"),
-        (snapshot) => onChange((snapshot.data()?.entries as GlossaryEntry[] | undefined) ?? []),
+        (snapshot) => {
+            const raw = (snapshot.data()?.entries as Parameters<typeof normalizeGlossaryEntry>[0][] | undefined) ?? [];
+            onChange(raw.map(normalizeGlossaryEntry));
+        },
         (error) => console.error("subscribeGlossary", error)
     );
 }

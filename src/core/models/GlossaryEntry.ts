@@ -8,8 +8,9 @@
 export interface GlossaryEntry {
     id: string;
 
-    /** Matched case-insensitively as a substring against item description text. */
-    phrase: string;
+    /** One or more phrases, each matched case-insensitively as a substring against item description text — lets
+     *  a single entry (one icon/emoji) cover every wording variant instead of needing a separate record each. */
+    phrases: string[];
 
     /** Relative path under public/ (e.g. "roulette_interface/icons-tags/foo.svg") — wins over emoji when both are set. */
     icon?: string;
@@ -19,4 +20,19 @@ export interface GlossaryEntry {
 
     /** Free-form organizational note (e.g. "MechAddItem / удалить") — never used for matching. */
     note?: string;
+}
+
+/** A raw object as it might come back from Firestore — either today's shape, or the legacy single-`phrase`
+ *  shape from before entries supported multiple phrases. Only used at the read boundary (subscribeGlossary). */
+type RawGlossaryEntry = Partial<GlossaryEntry> & { phrase?: string };
+
+export function normalizeGlossaryEntry(raw: RawGlossaryEntry): GlossaryEntry {
+    const phrases = Array.isArray(raw.phrases) ? raw.phrases : raw.phrase ? [raw.phrase] : [];
+    return {
+        id: raw.id ?? "",
+        phrases,
+        icon: raw.icon,
+        emoji: raw.emoji,
+        note: raw.note,
+    };
 }

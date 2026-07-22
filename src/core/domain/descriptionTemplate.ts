@@ -177,27 +177,36 @@ export function glossaryIconSrc(icon: string): string {
     return `${import.meta.env.BASE_URL}${icon.replace(/^\/+/, "")}`;
 }
 
+type PhraseMatch = { phrase: string; entry: GlossaryEntry };
+
 /**
  * Swaps known glossary phrases inside a description's plain-text parts for their icon/emoji, AND annotates any
  * icon already embedded directly via a real `[img]` tag (resolved by parseColorAndImageTags, so it was never a
  * text substitution at all) with the same note when that icon's path matches a glossary entry's own `icon` —
  * e.g. a description that already spells out `[img]...ui_icon_activation.svg[/img]` gets the "Активация" note
  * on hover too, not just phrase-substituted occurrences. Matching for the phrase-substitution part is
- * case-insensitive substring, longest phrase first (same principle as TOKEN_RE above), so a more specific phrase
- * wins over a shorter one it happens to contain. An entry with neither icon nor emoji set is a no-op.
+ * case-insensitive substring, longest phrase first across every phrase of every entry (same principle as
+ * TOKEN_RE above), so a more specific phrase wins over a shorter one it happens to contain — including two
+ * phrases that belong to the *same* entry. An entry with neither icon nor emoji set is a no-op.
  */
 function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): DescriptionPart[] {
-    const usable = glossary.filter((entry) => entry.phrase.trim() && (entry.icon || entry.emoji));
+    const usable: PhraseMatch[] = [];
+    for (const entry of glossary) {
+        if (!entry.icon && !entry.emoji) continue;
+        for (const phrase of entry.phrases) {
+            if (phrase.trim()) usable.push({ phrase, entry });
+        }
+    }
     if (usable.length === 0) return parts;
 
     const sorted = [...usable].sort((a, b) => b.phrase.length - a.phrase.length);
-    const byPhraseLower = new Map(sorted.map((entry) => [entry.phrase.toLowerCase(), entry]));
-    const matchRe = new RegExp(sorted.map((entry) => escapeRegExp(entry.phrase)).join("|"), "gi");
+    const byPhraseLower = new Map(sorted.map((match) => [match.phrase.toLowerCase(), match]));
+    const matchRe = new RegExp(sorted.map((match) => escapeRegExp(match.phrase)).join("|"), "gi");
 
     const noteByIconSrc = new Map<string, string>();
-    for (const entry of usable) {
+    for (const entry of usable.map((match) => match.entry)) {
         if (!entry.icon) continue;
-        noteByIconSrc.set(glossaryIconSrc(entry.icon), entry.note?.trim() || entry.phrase);
+        noteByIconSrc.set(glossaryIconSrc(entry.icon), entry.note?.trim() || entry.phrases[0]);
     }
 
     return parts.flatMap((part): DescriptionPart[] => {
@@ -213,14 +222,15 @@ function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): Des
             const index = match.index ?? 0;
             if (index > lastIndex) pieces.push({ kind: "text", value: part.value.slice(lastIndex, index) });
 
-            const entry = byPhraseLower.get(match[0].toLowerCase())!;
+            const { phrase, entry } = byPhraseLower.get(match[0].toLowerCase())!;
             // `note` doubles as "this came from the glossary" — ItemDescription only shows a tooltip when it's
-            // set, which a plain (non-glossary) [img] icon part never has. Falls back to the matched phrase
-            // itself when the entry has no note of its own, so hovering is never a dead no-op.
-            const note = entry.note?.trim() || entry.phrase;
+            // set, which a plain (non-glossary) [img] icon part never has. Falls back to the configured phrase
+            // (not the matched text's own casing) when the entry has no note of its own, matching the entry's
+            // canonical spelling regardless of how the source text happened to capitalize it.
+            const note = entry.note?.trim() || phrase;
             pieces.push(
                 entry.icon
-                    ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.phrase, note }
+                    ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: phrase, note }
                     : { kind: "emoji", value: entry.emoji!, note }
             );
 
