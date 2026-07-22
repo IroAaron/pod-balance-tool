@@ -20,6 +20,12 @@ export interface GlossaryEntry {
 
     /** Free-form organizational note (e.g. "MechAddItem / удалить") — never used for matching. */
     note?: string;
+
+    /** Whether this entry is allowed to participate in glossary-driven description matching at all — see the
+     *  "Текст + Включенные записи" (only enabled entries apply) vs "Все записи" (every entry applies regardless
+     *  of this flag) description modes in descriptionTemplate.ts/SettingsPage.tsx. Absent/undefined means
+     *  enabled, so entries written before this field existed keep matching unchanged. */
+    enabled?: boolean;
 }
 
 /** A raw object as it might come back from Firestore — either today's shape, or the legacy single-`phrase`
@@ -34,5 +40,6 @@ export function normalizeGlossaryEntry(raw: RawGlossaryEntry): GlossaryEntry {
         icon: raw.icon,
         emoji: raw.emoji,
         note: raw.note,
+        enabled: raw.enabled,
     };
 }

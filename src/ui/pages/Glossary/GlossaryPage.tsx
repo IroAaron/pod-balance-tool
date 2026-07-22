@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useState } from "react";
-import { Box, Button, IconButton, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Box, Button, Checkbox, IconButton, Paper, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
@@ -112,17 +112,28 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
     const [icon, setIcon] = useState(entry.icon ?? "");
     const [emoji, setEmoji] = useState(entry.emoji ?? "");
     const [note, setNote] = useState(entry.note ?? "");
+    const [enabled, setEnabled] = useState(entry.enabled ?? true);
 
     // Omits (not just falsy-sets) icon/emoji/note when blank — an explicit `undefined` value on a plain object
     // key is a real, different thing from the key being absent, and Firestore's setDoc rejects the former (see
-    // stripUndefined in firestoreStore.ts, kept as a second line of defense regardless of this one).
-    const commit = () =>
-        onCommit(entry.id, {
-            phrases: parsePhrasesText(phrasesText),
-            ...(icon ? { icon } : {}),
-            ...(emoji ? { emoji } : {}),
-            ...(note ? { note } : {}),
-        });
+    // stripUndefined in firestoreStore.ts, kept as a second line of defense regardless of this one). Takes an
+    // explicit `enabledOverride` since the checkbox commits immediately on click (its own onChange runs before
+    // setEnabled's re-render lands), rather than reading the not-yet-updated `enabled` state variable.
+    const buildFields = (enabledOverride: boolean): Omit<GlossaryEntry, "id"> => ({
+        phrases: parsePhrasesText(phrasesText),
+        ...(icon ? { icon } : {}),
+        ...(emoji ? { emoji } : {}),
+        ...(note ? { note } : {}),
+        enabled: enabledOverride,
+    });
+
+    const commit = () => onCommit(entry.id, buildFields(enabled));
+
+    const handleEnabledChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const next = event.target.checked;
+        setEnabled(next);
+        onCommit(entry.id, buildFields(next));
+    };
 
     return (
         <Fragment>
@@ -130,7 +141,7 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
                 <Box
                     sx={{
                         display: "grid",
-                        gridTemplateColumns: "220px 230px 150px 1fr 40px",
+                        gridTemplateColumns: "40px 220px 230px 150px 1fr 40px",
                         gap: 2,
                         // "start" (not "center") since the phrases field can grow to several lines while the
                         // rest of the row's fields stay single-line — top-aligning avoids everything else
@@ -138,6 +149,16 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
                         alignItems: "start",
                     }}
                 >
+                    <Tooltip title="Запись подключается к описаниям предметов, когда включено">
+                        <Checkbox
+                            checked={enabled}
+                            onChange={handleEnabledChange}
+                            size="small"
+                            sx={{ p: 0.5 }}
+                            aria-label="Запись используется в описаниях"
+                        />
+                    </Tooltip>
+
                     <TextField
                         label="Фразы (по одной на строку)"
                         value={phrasesText}
