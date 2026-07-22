@@ -138,7 +138,7 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
             <Typography variant="body2" color="text.secondary">
                 Фразы из описаний предметов, которые режим «Иконки + Эмоджи» (Настройки → Описания предметов)
                 заменяет на иконку или эмодзи — совпадение ищется по подстроке, без учёта регистра. Картинка — путь
-                относительно public/ (напр. «icons-tags/ui_icon_activation.svg»), берётся из папок, которые
+                относительно public/ (напр. «roulette_interface/icons-tags/ui_icon_activation.svg»), берётся из папок, которые
                 синхронизируются с репозиторием игры. Если заданы и картинка, и эмодзи — показывается картинка.
             </Typography>
 
@@ -193,7 +193,7 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
                                         }
                                         onBlur={handleBlur}
                                         size="small"
-                                        placeholder="icons-tags/foo.svg"
+                                        placeholder="roulette_interface/icons-tags/foo.svg"
                                         fullWidth
                                     />
                                     <IconPreview icon={entry.icon} />

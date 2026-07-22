@@ -6,7 +6,7 @@ import type { Build } from "../models/Build";
  * (the configured `base`, e.g. "/pod-balance-tool/" on GitHub Pages), not always literally "/". A hardcoded
  * leading slash here 404s in production once `base` is set, even though it works fine in local dev where base is "/".
  */
-export const SPRITE_BASE_PATH = `${import.meta.env.BASE_URL}pod-mini-characters/`;
+export const SPRITE_BASE_PATH = `${import.meta.env.BASE_URL}roulette_interface/pod-mini-characters/`;
 
 export function findRawValue(raw: Record<string, string>, columnName: string): string | undefined {
     const key = Object.keys(raw).find((entry) => entry.trim().toLowerCase() === columnName.toLowerCase());

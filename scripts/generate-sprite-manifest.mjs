@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const spriteDir = path.join(__dirname, "..", "public", "pod-mini-characters");
+const spriteDir = path.join(__dirname, "..", "public", "roulette_interface", "pod-mini-characters");
 const manifestPath = path.join(spriteDir, "manifest.json");
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);

@@ -156,9 +156,15 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("replaces a matched phrase with its icon and leaves the rest of the text as-is", () => {
-        const glossary = [{ id: "g1", phrase: "Активирует", icon: "icons-tags/activate.svg" }];
+        const glossary = [{ id: "g1", phrase: "Активирует", icon: "roulette_interface/icons-tags/activate.svg" }];
         expect(parseItemDescription(makeItem(), "Активирует соседнюю ячейку.", [], glossary)).toEqual([
-            { kind: "icon", src: `${TAG_ICON_BASE_PATH}activate.svg`, width: 24, alt: "Активирует", note: "Активирует" },
+            {
+                kind: "icon",
+                src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/activate.svg`,
+                width: 24,
+                alt: "Активирует",
+                note: "Активирует",
+            },
             { kind: "text", value: " соседнюю ячейку." },
         ]);
     });
@@ -172,9 +178,17 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
     });
 
     it("prefers icon over emoji when an entry has both", () => {
-        const glossary = [{ id: "g1", phrase: "Активирует", icon: "icons-tags/activate.svg", emoji: "⚡" }];
+        const glossary = [
+            { id: "g1", phrase: "Активирует", icon: "roulette_interface/icons-tags/activate.svg", emoji: "⚡" },
+        ];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
-            { kind: "icon", src: `${TAG_ICON_BASE_PATH}activate.svg`, width: 24, alt: "Активирует", note: "Активирует" },
+            {
+                kind: "icon",
+                src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/activate.svg`,
+                width: 24,
+                alt: "Активирует",
+                note: "Активирует",
+            },
             { kind: "text", value: " ячейку." },
         ]);
     });

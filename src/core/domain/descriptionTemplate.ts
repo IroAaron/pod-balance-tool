@@ -35,12 +35,13 @@ export const DEFAULT_DESCRIPTION_SETTINGS: DescriptionSettings = {
 };
 
 /** Synced from the game repo's `roulette_interface/Icons_tags/` on every deploy — see .github/workflows/deploy.yml. */
-export const TAG_ICON_BASE_PATH = `${import.meta.env.BASE_URL}icons-tags/`;
+export const TAG_ICON_BASE_PATH = `${import.meta.env.BASE_URL}roulette_interface/icons-tags/`;
 
 /**
  * Descriptions embed images as Godot resource paths (`res://roulette_interface/<folder>/<file>.png`), matching
- * whatever the game's own BBCode renderer expects. Only these two folders are synced into `public/` — an
- * unrecognized prefix falls through to the raw BBCode tag in parseItemDescription rather than a broken <img>.
+ * whatever the game's own BBCode renderer expects. Only these two folders are synced into `public/roulette_interface/`
+ * (renamed hyphen-case on the way in, see scripts/sync-sprites.mjs / deploy.yml) — an unrecognized prefix falls
+ * through to the raw BBCode tag in parseItemDescription rather than a broken <img>.
  */
 const RES_PATH_PREFIXES: Array<{ prefix: string; base: string }> = [
     { prefix: "res://roulette_interface/pod-mini characters/", base: SPRITE_BASE_PATH },
@@ -170,8 +171,8 @@ function escapeRegExp(value: string): string {
 }
 
 /** src for a glossary entry's icon, resolved the same way [img] tags in a description already are — a path
- *  relative to `public/` (e.g. "icons-tags/foo.svg"), not a res:// BBCode tag. Exported so GlossaryPage's own
- *  live icon preview resolves identically to how the description renderer will actually show it. */
+ *  relative to `public/` (e.g. "roulette_interface/icons-tags/foo.svg"), not a res:// BBCode tag. Exported so
+ *  GlossaryPage's own live icon preview resolves identically to how the description renderer will actually show it. */
 export function glossaryIconSrc(icon: string): string {
     return `${import.meta.env.BASE_URL}${icon.replace(/^\/+/, "")}`;
 }

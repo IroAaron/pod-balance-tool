@@ -77,18 +77,17 @@ export async function syncSprites() {
         await rm(mirrorTarget, { recursive: true, force: true });
         await cp(sourceRoot, mirrorTarget, { recursive: true });
 
-        // Also flatten the two subfolders the app's existing sprite/icon resolution already expects — see
-        // src/core/domain/sprites.ts (SPRITE_BASE_PATH) and descriptionTemplate.ts (TAG_ICON_BASE_PATH). Left
-        // as-is deliberately so this button is a drop-in replacement for the old "copy files in by hand" step,
-        // not a rework of how the app resolves sprite/icon paths.
+        // Also flatten (rename hyphen-case, drop the space) the two subfolders the app's existing sprite/icon
+        // resolution expects — see src/core/domain/sprites.ts (SPRITE_BASE_PATH) and descriptionTemplate.ts
+        // (TAG_ICON_BASE_PATH) — as siblings of the raw mirror above, both under public/roulette_interface/.
         const spriteCount = await copyMatching(
             path.join(sourceRoot, "pod-mini characters"),
-            path.join(publicDir, "pod-mini-characters"),
+            path.join(mirrorTarget, "pod-mini-characters"),
             new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"])
         );
         const iconCount = await copyMatching(
             path.join(sourceRoot, "Icons_tags"),
-            path.join(publicDir, "icons-tags"),
+            path.join(mirrorTarget, "icons-tags"),
             new Set([".png", ".svg"])
         );
 

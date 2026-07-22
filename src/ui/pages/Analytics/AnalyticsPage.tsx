@@ -41,7 +41,7 @@ export default function AnalyticsPage() {
             <Stack spacing={0.5}>
                 <Typography variant="h6">Неиспользуемые спрайты</Typography>
                 <Typography variant="body2" color="text.secondary">
-                    Файлы из public/pod-mini-characters, на которые не ссылается ни один загруженный предмет
+                    Файлы из public/roulette_interface/pod-mini-characters, на которые не ссылается ни один загруженный предмет
                     (колонка CardSpriteNameMini).
                 </Typography>
             </Stack>

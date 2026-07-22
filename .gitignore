@@ -14,10 +14,11 @@ dist-ssr
 public/_test_data
 
 # Synced locally from the game repo by the Sources page's "Подгрузить спрайты" button (scripts/sync-sprites.mjs)
-# — bulk game assets, not meant to be committed. public/pod-mini-characters is NOT here: those sprites are
-# intentionally checked in.
-public/roulette_interface
-public/icons-tags
+# — bulk game assets, not meant to be committed, EXCEPT public/roulette_interface/pod-mini-characters/, which is
+# intentionally checked in (same as before this all lived under public/roulette_interface/) — the "!" negation
+# below only works because this ignores the directory's *contents* (trailing /*), not the directory itself.
+public/roulette_interface/*
+!public/roulette_interface/pod-mini-characters
 
 # Editor directories and files
 .vscode/*

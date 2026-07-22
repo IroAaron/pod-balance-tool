@@ -11,7 +11,7 @@ export interface GlossaryEntry {
     /** Matched case-insensitively as a substring against item description text. */
     phrase: string;
 
-    /** Relative path under public/ (e.g. "icons-tags/foo.svg") — wins over emoji when both are set. */
+    /** Relative path under public/ (e.g. "roulette_interface/icons-tags/foo.svg") — wins over emoji when both are set. */
     icon?: string;
 
     /** Free-typed emoji/text, used when icon is unset. */
