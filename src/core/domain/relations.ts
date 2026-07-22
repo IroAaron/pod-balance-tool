@@ -25,6 +25,24 @@ export function higherTierIds(upgradeChains: UpgradeChain[]): Set<string> {
     return new Set(upgradeChains.flatMap((chain) => chain.itemIds.slice(1)));
 }
 
+/**
+ * Ids of every upgrade tier, by either signal: registered CardUpgrades chain membership (higherTierIds), or a
+ * translated display name ending in "+"/"++" — some tiers (e.g. Cheerleader+/Fan+) were never registered in
+ * CardUpgrades at all and are only distinguishable by name. Shared by GameStore's build-generation exclusion and
+ * the Items page's "Отображать прокачку?" filter, so both use the same definition of "is a tier".
+ */
+export function computeUpgradeTierIds(
+    items: Item[],
+    upgradeChains: UpgradeChain[],
+    resolveName: (item: Item) => string
+): Set<string> {
+    const tierIds = higherTierIds(upgradeChains);
+    for (const item of items) {
+        if (/\+{1,2}$/.test(resolveName(item).trim())) tierIds.add(item.id);
+    }
+    return tierIds;
+}
+
 /** Maps each item id to the set of other item ids sharing its upgrade chain. */
 function buildChainMates(upgradeChains: UpgradeChain[]): Map<string, Set<string>> {
     const mates = new Map<string, Set<string>>();

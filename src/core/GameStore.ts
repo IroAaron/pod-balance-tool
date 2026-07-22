@@ -11,7 +11,7 @@ import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
 import { ImportService, type ImportReport, type ImportResult } from "./services/ImportService";
 
-import { computeSuggestedBuilds, computeCascadeBuilds, higherTierIds } from "./domain/relations";
+import { computeSuggestedBuilds, computeCascadeBuilds, computeUpgradeTierIds } from "./domain/relations";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "./domain/descriptionTemplate";
 import { buildExportDescriptionText } from "./domain/exportText";
@@ -509,13 +509,7 @@ export class GameStore {
     private itemsForBuildGeneration(includeUpgradeTiers: boolean): { items: Item[]; mechanics: MechanicRow[] } {
         if (includeUpgradeTiers) return { items: this.items, mechanics: this.mechanics };
 
-        const excluded = new Set(higherTierIds(this.upgradeChains));
-        for (const item of this.items) {
-            // Some tiers (e.g. Cheerleader+/Fan+) aren't registered in CardUpgrades at all, only distinguishable
-            // by their translated name ending in "+"/"++" — catch those too, not just chain membership.
-            if (/\+{1,2}$/.test(this.itemName(item).trim())) excluded.add(item.id);
-        }
-
+        const excluded = computeUpgradeTierIds(this.items, this.upgradeChains, (item) => this.itemName(item));
         const items = this.items.filter((item) => !excluded.has(item.id));
         const mechanics = this.mechanics.filter((mechanic) => !excluded.has(mechanic.itemId));
         return { items, mechanics };

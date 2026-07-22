@@ -6,7 +6,9 @@ import {
     Card,
     CardActionArea,
     CardContent,
+    Checkbox,
     Chip,
+    FormControlLabel,
     MenuItem,
     Stack,
     TextField,
@@ -15,6 +17,7 @@ import {
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
+import { computeUpgradeTierIds } from "../../../core/domain/relations";
 import type { ItemSortKey } from "../../../core/services/ItemService";
 import type { Item } from "../../../core/models/Item";
 
@@ -24,6 +27,7 @@ export default function ItemsPage() {
     const [tags, setTags] = useState<string[]>([]);
     const [itemType, setItemType] = useState("");
     const [sortKey, setSortKey] = useState<ItemSortKey>("name");
+    const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
 
     // itemName reads live translations at call time, so this stable wrapper stays correct.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -32,13 +36,30 @@ export default function ItemsPage() {
     const resolveBuildCount = useCallback((item: Item) => store.buildsForItem(item.id).length, []);
 
     const filtered = useMemo(() => {
-        let result = store.itemService.filter(store.items, { tags, itemType: itemType || undefined });
+        let result = store.items;
+        if (!includeUpgradeTiers) {
+            const tierIds = computeUpgradeTierIds(store.items, store.upgradeChains, resolveName);
+            result = result.filter((item) => !tierIds.has(item.id));
+        }
+        result = store.itemService.filter(result, { tags, itemType: itemType || undefined });
         result = store.itemService.search(result, query, resolveName);
         result = store.itemService.sort(result, sortKey, resolveName, resolveBuildCount);
         return result;
         // itemService is a stable method on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [store.items, store.translations, store.builds, query, tags, itemType, sortKey, resolveName, resolveBuildCount]);
+    }, [
+        store.items,
+        store.translations,
+        store.builds,
+        store.upgradeChains,
+        query,
+        tags,
+        itemType,
+        sortKey,
+        includeUpgradeTiers,
+        resolveName,
+        resolveBuildCount,
+    ]);
 
     const availableTags = store.paramValues.ItemTag ?? [];
     const availableTypes = store.paramValues.ItemType ?? [];
@@ -96,6 +117,16 @@ export default function ItemsPage() {
                     <MenuItem value="itemType">По типу</MenuItem>
                     <MenuItem value="buildCount">По присутствию в билдах</MenuItem>
                 </TextField>
+
+                <FormControlLabel
+                    control={
+                        <Checkbox
+                            checked={includeUpgradeTiers}
+                            onChange={(event) => setIncludeUpgradeTiers(event.target.checked)}
+                        />
+                    }
+                    label="Отображать прокачку?"
+                />
             </Stack>
 
             <Typography variant="body2" color="text.secondary">
