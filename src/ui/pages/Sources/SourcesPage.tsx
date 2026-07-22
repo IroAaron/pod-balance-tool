@@ -38,8 +38,12 @@ export default function SourcesPage() {
     const [spriteSyncResult, setSpriteSyncResult] = useState<SpriteSyncResult | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleDownload = () => {
-        void store.importFromSources({ configUrl, translationsUrl });
+    const handleDownloadConfig = () => {
+        void store.importConfig(configUrl);
+    };
+
+    const handleDownloadTranslations = () => {
+        void store.importTranslations(translationsUrl);
     };
 
     const handleSyncSprites = async () => {
@@ -107,9 +111,9 @@ export default function SourcesPage() {
                     <Typography variant="h6">Google Sheets / Apps Script</Typography>
 
                     <Alert severity="info">
-                        Ссылки на конфиг и переводы проекта уже подставлены ниже — просто нажмите «Скачать»,
-                        чтобы загрузить актуальные данные. Повторяйте после каждого изменения таблиц в Google
-                        Sheets. 
+                        Конфиг и переводы скачиваются отдельно друг от друга — так можно обновить только одну
+                        таблицу, не трогая другую. Ссылки уже подставлены ниже. Повторяйте после каждого изменения
+                        соответствующей таблицы в Google Sheets.
                         Если каких-то иконок, данных в объектах сайта не хватает — они либо не загружены, либо не прогружены до конца. Нажмите «Скачать», если после установки проблема через некоторое время не решится, обратитесь к администратору
                     </Alert>
 
@@ -119,34 +123,47 @@ export default function SourcesPage() {
                         покрывает сразу несколько таблиц (Items, переводы, механики).
                     </Typography>
 
-                    <TextField
-                        label="Источник конфигурации"
-                        placeholder="https://docs.google.com/spreadsheets/... или Apps Script URL"
-                        value={configUrl}
-                        onChange={(event) => setConfigUrl(event.target.value)}
-                        fullWidth
-                        size="small"
-                    />
+                    <Stack spacing={1}>
+                        <TextField
+                            label="Источник конфигурации"
+                            placeholder="https://docs.google.com/spreadsheets/... или Apps Script URL"
+                            value={configUrl}
+                            onChange={(event) => setConfigUrl(event.target.value)}
+                            fullWidth
+                            size="small"
+                        />
+                        <Box>
+                            <Button
+                                variant="contained"
+                                onClick={handleDownloadConfig}
+                                disabled={store.importing || !configUrl}
+                                startIcon={store.importing ? <CircularProgress size={16} /> : undefined}
+                            >
+                                {store.importing ? "Скачивание..." : "Скачать конфиг"}
+                            </Button>
+                        </Box>
+                    </Stack>
 
-                    <TextField
-                        label="Источник переводов"
-                        placeholder="https://docs.google.com/spreadsheets/... или Apps Script URL"
-                        value={translationsUrl}
-                        onChange={(event) => setTranslationsUrl(event.target.value)}
-                        fullWidth
-                        size="small"
-                    />
-
-                    <Box>
-                        <Button
-                            variant="contained"
-                            onClick={handleDownload}
-                            disabled={store.importing || (!configUrl && !translationsUrl)}
-                            startIcon={store.importing ? <CircularProgress size={16} /> : undefined}
-                        >
-                            {store.importing ? "Скачивание..." : "Скачать"}
-                        </Button>
-                    </Box>
+                    <Stack spacing={1}>
+                        <TextField
+                            label="Источник переводов"
+                            placeholder="https://docs.google.com/spreadsheets/... или Apps Script URL"
+                            value={translationsUrl}
+                            onChange={(event) => setTranslationsUrl(event.target.value)}
+                            fullWidth
+                            size="small"
+                        />
+                        <Box>
+                            <Button
+                                variant="contained"
+                                onClick={handleDownloadTranslations}
+                                disabled={store.importing || !translationsUrl}
+                                startIcon={store.importing ? <CircularProgress size={16} /> : undefined}
+                            >
+                                {store.importing ? "Скачивание..." : "Скачать переводы"}
+                            </Button>
+                        </Box>
+                    </Stack>
                 </Stack>
             </Paper>
 

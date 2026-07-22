@@ -233,7 +233,15 @@ export class GameStore {
         return this.getTranslation(item.descKey) ?? "";
     }
 
-    private applyImportResult(result: ImportResult, options?: { merge?: boolean }): void {
+    /**
+     * `scope` matters only for a non-merge (full replace) apply: "config" replaces every config-derived field
+     * (items/mechanics/upgradeChains/replaceRules/enumValues) but leaves `translations` untouched, "translations"
+     * is the mirror image, and omitting it (the CSV-merge path aside) replaces everything — used by importConfig/
+     * importTranslations so re-downloading just one table can never wipe out the other one's already-loaded data,
+     * which is what a plain full-replace would do since a config-only fetch's `result.data.translations` is
+     * simply empty (no Translations-shaped table was ever fetched), not "the translations were cleared."
+     */
+    private applyImportResult(result: ImportResult, options?: { merge?: boolean; scope?: "config" | "translations" }): void {
         if (options?.merge) {
             this.allItems = mergeById(this.allItems, result.data.items);
             this.translations = mergeByKey(this.translations, result.data.translations);
@@ -242,12 +250,16 @@ export class GameStore {
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
-            this.allItems = result.data.items;
-            this.translations = result.data.translations;
-            this.mechanics = result.data.mechanics;
-            this.upgradeChains = result.data.upgradeChains;
-            this.replaceRules = result.data.replaceRules;
-            this.enumValues = result.data.enumValues;
+            if (options?.scope !== "translations") {
+                this.allItems = result.data.items;
+                this.mechanics = result.data.mechanics;
+                this.upgradeChains = result.data.upgradeChains;
+                this.replaceRules = result.data.replaceRules;
+                this.enumValues = result.data.enumValues;
+            }
+            if (options?.scope !== "config") {
+                this.translations = result.data.translations;
+            }
         }
 
         this.rebuildDerivedCaches();
@@ -263,18 +275,16 @@ export class GameStore {
         });
     }
 
-    async importFromSources(sources: SourceUrls): Promise<void> {
-        this.sources = sources;
-        this.notify();
-        void updateSourcesRemote(sources).catch((error) => console.error("importFromSources → Firestore", error));
-
+    private async runImport(
+        result: () => Promise<ImportResult>,
+        applyOptions: { merge?: boolean; scope?: "config" | "translations" }
+    ): Promise<void> {
         this.importing = true;
         this.importError = null;
         this.notify();
 
         try {
-            const result = await this.importService.importFromUrls(sources);
-            this.applyImportResult(result);
+            this.applyImportResult(await result(), applyOptions);
         } catch (error) {
             this.importError = error instanceof Error ? error.message : String(error);
         } finally {
@@ -283,20 +293,30 @@ export class GameStore {
         }
     }
 
-    async importCsvFiles(files: File[]): Promise<void> {
-        this.importing = true;
-        this.importError = null;
+    /** Re-downloads only the config source (Cards/Houses/Artefacts, Mech-tables, CardUpgrades, ...) — existing
+     *  translations are left exactly as they were, so this can be re-run on its own after a config-only edit. */
+    async importConfig(configUrl: string): Promise<void> {
+        this.sources = { ...this.sources, configUrl };
         this.notify();
+        void updateSourcesRemote(this.sources).catch((error) => console.error("importConfig → Firestore", error));
 
-        try {
-            const result = await this.importService.importCsvFiles(files);
-            this.applyImportResult(result, { merge: true });
-        } catch (error) {
-            this.importError = error instanceof Error ? error.message : String(error);
-        } finally {
-            this.importing = false;
-            this.notify();
-        }
+        await this.runImport(() => this.importService.importFromUrls({ configUrl }), { scope: "config" });
+    }
+
+    /** Re-downloads only the translations source (item_name/item_desc) — existing config-derived data (items,
+     *  mechanics, etc.) is left exactly as it was, so this can be re-run on its own after a translations-only edit. */
+    async importTranslations(translationsUrl: string): Promise<void> {
+        this.sources = { ...this.sources, translationsUrl };
+        this.notify();
+        void updateSourcesRemote(this.sources).catch((error) =>
+            console.error("importTranslations → Firestore", error)
+        );
+
+        await this.runImport(() => this.importService.importFromUrls({ translationsUrl }), { scope: "translations" });
+    }
+
+    async importCsvFiles(files: File[]): Promise<void> {
+        await this.runImport(() => this.importService.importCsvFiles(files), { merge: true });
     }
 
     createBuild(name = ""): Build {
