@@ -48,6 +48,12 @@ function InsertDivider({ onInsert }: { onInsert: () => void }) {
     );
 }
 
+/** Reserved footprint for a preview (icon image or emoji glyph) next to its field — always occupies this much
+ *  space, present or not, so a row with an icon/emoji set doesn't push its own fields wider than an otherwise
+ *  identical row without one (see PREVIEW_SLOT_SX usage below — that mismatch was the actual cause of the
+ *  "Фраза" field's width/position seeming to jump around between records). */
+const PREVIEW_SLOT_SX = { width: 28, height: 28, flexShrink: 0 } as const;
+
 /** Small live preview of a glossary entry's icon path — same resolution as the real description renderer
  *  (glossaryIconSrc), hidden on load error instead of showing a broken-image icon. Resets the "failed" flag
  *  when `icon` itself changes, via React's adjust-state-during-render idiom (not an effect) — comparing against
@@ -61,13 +67,13 @@ function IconPreview({ icon }: { icon: string | undefined }) {
         setFailed(false);
     }
 
-    if (!icon || failed) return null;
+    if (!icon || failed) return <Box sx={PREVIEW_SLOT_SX} />;
     return (
         <Box
             component="img"
             src={glossaryIconSrc(icon)}
             alt=""
-            sx={{ width: 28, height: 28, objectFit: "contain", flexShrink: 0 }}
+            sx={{ ...PREVIEW_SLOT_SX, objectFit: "contain" }}
             onError={() => setFailed(true)}
         />
     );
@@ -161,14 +167,21 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
                 {filtered.map((entry) => (
                     <Fragment key={entry.id}>
                         <Paper variant="outlined" sx={{ p: 2 }}>
-                            <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", flexWrap: "wrap" }}>
+                            <Box
+                                sx={{
+                                    display: "grid",
+                                    gridTemplateColumns: "220px 230px 150px 1fr 40px",
+                                    gap: 2,
+                                    alignItems: "center",
+                                }}
+                            >
                                 <TextField
                                     label="Фраза"
                                     value={entry.phrase}
                                     onChange={(event) => updateLocal(entry.id, { phrase: event.target.value })}
                                     onBlur={handleBlur}
                                     size="small"
-                                    sx={{ minWidth: 220, flex: 1 }}
+                                    fullWidth
                                 />
 
                                 <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
@@ -181,7 +194,7 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
                                         onBlur={handleBlur}
                                         size="small"
                                         placeholder="icons-tags/foo.svg"
-                                        sx={{ minWidth: 200 }}
+                                        fullWidth
                                     />
                                     <IconPreview icon={entry.icon} />
                                 </Stack>
@@ -195,9 +208,11 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
                                         }
                                         onBlur={handleBlur}
                                         size="small"
-                                        sx={{ width: 100 }}
+                                        sx={{ width: 90 }}
                                     />
-                                    {entry.emoji && <Typography sx={{ fontSize: 24 }}>{entry.emoji}</Typography>}
+                                    <Box sx={PREVIEW_SLOT_SX}>
+                                        {entry.emoji && <Typography sx={{ fontSize: 24 }}>{entry.emoji}</Typography>}
+                                    </Box>
                                 </Stack>
 
                                 <TextField
@@ -207,13 +222,13 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
                                     onBlur={handleBlur}
                                     size="small"
                                     placeholder="напр. MechAddItem / удалить"
-                                    sx={{ minWidth: 200, flex: 1 }}
+                                    fullWidth
                                 />
 
                                 <IconButton aria-label="Удалить запись" onClick={() => handleDelete(entry.id)} size="small">
                                     <CloseIcon fontSize="small" />
                                 </IconButton>
-                            </Stack>
+                            </Box>
                         </Paper>
                         <InsertDivider onInsert={() => handleInsertAfter(entry.id)} />
                     </Fragment>
