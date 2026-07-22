@@ -40,6 +40,7 @@ import {
     addCustomParamValueRemote,
     updateSourcesRemote,
     updateDescriptionSettingsRemote,
+    updateTranslationOverrideRemote,
     subscribeGlossary,
     replaceGlossaryRemote,
     replaceAllBuilds,
@@ -84,6 +85,10 @@ export class GameStore {
     sources: SourceUrls = { configUrl: "", translationsUrl: "" };
 
     descriptionSettings: DescriptionSettings = DEFAULT_DESCRIPTION_SETTINGS;
+
+    /** User-edited name/description text, keyed by translation key — wins over the imported translations table
+     *  for the same key. See getTranslation()/setTranslationOverride(). */
+    translationOverrides: Record<string, string> = {};
 
     /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
@@ -166,6 +171,7 @@ export class GameStore {
             this.customParamValues = shared.customParamValues;
             this.sources = shared.sources;
             this.descriptionSettings = shared.descriptionSettings;
+            this.translationOverrides = shared.translationOverrides;
             this.sharedReady = true;
             this.notify();
         });
@@ -220,9 +226,29 @@ export class GameStore {
         return this.itemIcons[itemId];
     }
 
+    /** A user-edited override (see setTranslationOverride) wins over whatever the imported translations table
+     *  has for the same key — lets names/descriptions be authored on the site itself, ahead of the sheet. `||`
+     *  (not `??`) since a cleared override is stored as `""`, which should fall through to the real translation
+     *  just like an override that was never set at all. */
     getTranslation(key: string | undefined): string | undefined {
         if (!key) return undefined;
-        return this._translationsByKey.get(key)?.value;
+        return this.translationOverrides[key] || this._translationsByKey.get(key)?.value;
+    }
+
+    /** Point-update, like setItemIcon — two people editing different items' names/descriptions never clobber
+     *  each other. Passing "" clears back to whatever the imported translations table has for this key. */
+    setTranslationOverride(key: string, value: string): void {
+        if (value) {
+            this.translationOverrides = { ...this.translationOverrides, [key]: value };
+        } else {
+            const next = { ...this.translationOverrides };
+            delete next[key];
+            this.translationOverrides = next;
+        }
+        this.notify();
+        void updateTranslationOverrideRemote(key, value).catch((error) =>
+            console.error("setTranslationOverride → Firestore", error)
+        );
     }
 
     itemName(item: Item): string {
@@ -491,6 +517,7 @@ export class GameStore {
             customParamValues: this.customParamValues,
             sources: this.sources,
             descriptionSettings: this.descriptionSettings,
+            translationOverrides: this.translationOverrides,
             importCache: {
                 items: this.allItems,
                 translations: this.translations,
@@ -514,6 +541,7 @@ export class GameStore {
                 customParamValues: state.customParamValues,
                 sources: state.sources,
                 descriptionSettings: state.descriptionSettings,
+                translationOverrides: state.translationOverrides,
             }),
         ]);
 

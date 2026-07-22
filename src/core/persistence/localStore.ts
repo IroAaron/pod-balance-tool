@@ -21,6 +21,10 @@ export interface PersistedState {
 
     descriptionSettings: DescriptionSettings;
 
+    /** User-edited name/description text, keyed by translation key (item.nameKey/descKey) — wins over whatever
+     *  value the same key has in the imported translations table. See GameStore.getTranslation(). */
+    translationOverrides: Record<string, string>;
+
     importCache: NormalizedData | null;
 
     importCacheTimestamp: string | null;
@@ -32,6 +36,7 @@ const DEFAULT_STATE: PersistedState = {
     customParamValues: {},
     sources: { configUrl: "", translationsUrl: "" },
     descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
+    translationOverrides: {},
     importCache: null,
     importCacheTimestamp: null,
 };
@@ -108,6 +113,7 @@ export async function parseSnapshotFile(file: File): Promise<PersistedState> {
         customParamValues: parsed.customParamValues ?? {},
         sources: parsed.sources ?? DEFAULT_STATE.sources,
         descriptionSettings: parsed.descriptionSettings ?? DEFAULT_STATE.descriptionSettings,
+        translationOverrides: parsed.translationOverrides ?? DEFAULT_STATE.translationOverrides,
         importCache: parsed.importCache ?? null,
         importCacheTimestamp: parsed.importCacheTimestamp ?? null,
     };

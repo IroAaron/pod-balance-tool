@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import { Box, Button, Chip, Paper, Stack, TextField, Typography } from "@mui/material";
+import { Box, Button, Chip, IconButton, Paper, Stack, TextField, Typography } from "@mui/material";
+import EditIcon from "@mui/icons-material/Edit";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
@@ -20,6 +21,10 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
     const item = id ? store.getItem(id) : undefined;
     const [editingIcon, setEditingIcon] = useState(false);
     const [iconDraft, setIconDraft] = useState("");
+    const [editingName, setEditingName] = useState(false);
+    const [nameDraft, setNameDraft] = useState("");
+    const [editingDescription, setEditingDescription] = useState(false);
+    const [descriptionDraft, setDescriptionDraft] = useState("");
 
     const related = useMemo(() => {
         if (!item) return [];
@@ -106,16 +111,100 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                     </Box>
 
                     <Box sx={{ flex: 1 }}>
-                        <Typography variant="h4">{store.itemName(item)}</Typography>
+                        {editingName ? (
+                            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                <TextField
+                                    size="small"
+                                    value={nameDraft}
+                                    onChange={(event) => setNameDraft(event.target.value)}
+                                    autoFocus
+                                    fullWidth
+                                    sx={{ maxWidth: 400 }}
+                                />
+                                <Button
+                                    size="small"
+                                    variant="contained"
+                                    onClick={() => {
+                                        store.setTranslationOverride(item.nameKey ?? item.id, nameDraft);
+                                        setEditingName(false);
+                                    }}
+                                >
+                                    OK
+                                </Button>
+                                <Button size="small" onClick={() => setEditingName(false)}>
+                                    Отмена
+                                </Button>
+                            </Stack>
+                        ) : (
+                            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                <Typography variant="h4">{store.itemName(item)}</Typography>
+                                <IconButton
+                                    size="small"
+                                    aria-label="Редактировать название"
+                                    onClick={() => {
+                                        setNameDraft(store.itemName(item));
+                                        setEditingName(true);
+                                    }}
+                                >
+                                    <EditIcon fontSize="small" />
+                                </IconButton>
+                            </Stack>
+                        )}
+
                         <Typography variant="body2" color="text.secondary">
                             {item.id}
                             {item.itemType ? ` · ${item.itemType}` : ""}
                         </Typography>
 
-                        {store.itemDescription(item) && (
-                            <Typography sx={{ mt: 2 }}>
-                                <ItemDescription item={item} description={store.itemDescription(item)} />
-                            </Typography>
+                        {editingDescription ? (
+                            <Stack spacing={1} sx={{ mt: 2, maxWidth: 600 }}>
+                                <TextField
+                                    value={descriptionDraft}
+                                    onChange={(event) => setDescriptionDraft(event.target.value)}
+                                    multiline
+                                    minRows={2}
+                                    maxRows={12}
+                                    autoFocus
+                                    fullWidth
+                                    helperText="Обычный текст, как в таблице переводов — [img]/[color]/{...} не рендерятся здесь."
+                                />
+                                <Stack direction="row" spacing={1}>
+                                    <Button
+                                        size="small"
+                                        variant="contained"
+                                        onClick={() => {
+                                            store.setTranslationOverride(
+                                                item.descKey ?? `${item.id}_desc`,
+                                                descriptionDraft
+                                            );
+                                            setEditingDescription(false);
+                                        }}
+                                    >
+                                        Сохранить
+                                    </Button>
+                                    <Button size="small" onClick={() => setEditingDescription(false)}>
+                                        Отмена
+                                    </Button>
+                                </Stack>
+                            </Stack>
+                        ) : (
+                            <Stack direction="row" spacing={1} sx={{ mt: 2, alignItems: "flex-start" }}>
+                                {store.itemDescription(item) && (
+                                    <Typography sx={{ flex: 1 }}>
+                                        <ItemDescription item={item} description={store.itemDescription(item)} />
+                                    </Typography>
+                                )}
+                                <IconButton
+                                    size="small"
+                                    aria-label="Редактировать описание"
+                                    onClick={() => {
+                                        setDescriptionDraft(store.itemDescription(item));
+                                        setEditingDescription(true);
+                                    }}
+                                >
+                                    <EditIcon fontSize="small" />
+                                </IconButton>
+                            </Stack>
                         )}
 
                         <Stack direction="row" sx={{ mt: 2, flexWrap: "wrap", gap: 0.5 }}>

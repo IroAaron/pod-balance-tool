@@ -3,10 +3,10 @@ import {
     arrayUnion,
     collection,
     deleteDoc,
+    deleteField,
     doc,
     type DocumentReference,
     FieldPath,
-    FirestoreError,
     getDocs,
     onSnapshot,
     setDoc,
@@ -31,6 +31,9 @@ export interface SharedState {
     sources: SourceUrls;
 
     descriptionSettings: DescriptionSettings;
+
+    /** User-edited name/description text, keyed by translation key — see GameStore.getTranslation(). */
+    translationOverrides: Record<string, string>;
 }
 
 const DEFAULT_SHARED: SharedState = {
@@ -38,6 +41,7 @@ const DEFAULT_SHARED: SharedState = {
     customParamValues: {},
     sources: { configUrl: "", translationsUrl: "" },
     descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
+    translationOverrides: {},
 };
 
 export interface LegacyLocalState {
@@ -100,11 +104,21 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         (error) => console.error("subscribeShared:descriptionSettings", error)
     );
 
+    const unsubTranslationOverrides = onSnapshot(
+        doc(sharedCol, "translationOverrides"),
+        (snapshot) => {
+            state.translationOverrides = (snapshot.data() as Record<string, string> | undefined) ?? {};
+            emit();
+        },
+        (error) => console.error("subscribeShared:translationOverrides", error)
+    );
+
     return () => {
         unsubIcons();
         unsubParamValues();
         unsubSources();
         unsubDescriptionSettings();
+        unsubTranslationOverrides();
     };
 }
 
@@ -187,12 +201,19 @@ export function unlinkBuildsRemote(buildIdA: string, buildIdB: string): Promise<
  * different keys (different item icons / different param dimensions) never clobber each other. Falls back to
  * setDoc only the first time the doc doesn't exist yet — FieldPath sidesteps updateDoc's usual "dot in a
  * string key means nested path" parsing, which matters since itemId/dimension values aren't guaranteed dot-free.
+ *
+ * **This fallback never actually ran before** — the "not-found" check used `error instanceof FirestoreError`,
+ * but the Firebase JS SDK actually throws a plain `FirebaseError` with a `.code` string (`FirestoreError` isn't
+ * a real runtime class here, just a type). Every doc this function ever targeted (itemIcons, customParamValues)
+ * happened to already exist from the initial Firestore migration, so the broken fallback path was never
+ * exercised until `translationOverrides` — a genuinely new doc — hit it for the first time and errored instead
+ * of creating the doc. Fixed by checking `.code` directly instead of `instanceof`.
  */
 async function upsertDocField(ref: DocumentReference, field: string, value: unknown): Promise<void> {
     try {
         await updateDoc(ref, new FieldPath(field), value);
     } catch (error) {
-        if (error instanceof FirestoreError && error.code === "not-found") {
+        if (error && typeof error === "object" && "code" in error && error.code === "not-found") {
             await setDoc(ref, { [field]: value });
         } else {
             throw error;
@@ -216,6 +237,12 @@ export function updateDescriptionSettingsRemote(settings: DescriptionSettings): 
     return setDoc(doc(sharedCol, "descriptionSettings"), settings);
 }
 
+/** Passing "" deletes the field entirely rather than storing an empty string, so a cleared override doesn't
+ *  linger as clutter in the doc — getTranslation() would treat either the same way, but this keeps the data clean. */
+export function updateTranslationOverrideRemote(key: string, value: string): Promise<void> {
+    return upsertDocField(doc(sharedCol, "translationOverrides"), key, value || deleteField());
+}
+
 /** Full overwrite of all `shared/*` docs — used by importSnapshot, which is a full-replace operation. */
 export function replaceSharedState(shared: SharedState): Promise<void> {
     const batch = writeBatch(db);
@@ -223,6 +250,7 @@ export function replaceSharedState(shared: SharedState): Promise<void> {
     batch.set(doc(sharedCol, "customParamValues"), shared.customParamValues);
     batch.set(doc(sharedCol, "sources"), shared.sources);
     batch.set(doc(sharedCol, "descriptionSettings"), shared.descriptionSettings);
+    batch.set(doc(sharedCol, "translationOverrides"), shared.translationOverrides);
     return batch.commit();
 }
 
