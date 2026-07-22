@@ -111,13 +111,14 @@ export class GameStore {
 
     /**
      * Derived from allItems/translations by rebuildDerivedCaches(), called only where those two arrays are
-     * reassigned (constructor, applyImportResult, importSnapshot) — NOT recomputed on every access, unlike the
-     * old `items` getter which re-filtered allItems against translations (an O(items × translations) linear scan
-     * via .some()) on every single call. That getter was called by getItem()/itemsForBuildGeneration() etc. from
-     * inside render-path loops (once per rendered item icon, once per build member, ...), so its cost multiplied
-     * into multi-second UI freezes on the Builds page and item detail cards. See project memory: perf investigation.
+     * reassigned (constructor, applyImportResult, importSnapshot) — NOT recomputed on every access. `items` used
+     * to be a getter that re-filtered allItems against translations (an O(items × translations) linear scan via
+     * .some()) on every single call, from inside render-path loops (once per rendered item icon, once per build
+     * member, ...) — see project memory for that perf investigation. The filter itself is gone now (every config
+     * item shows regardless of translation, see rebuildDerivedCaches), so `items`/`allItems` are the same array
+     * today — `_itemsById` is kept as a cache purely so getItem() stays O(1) instead of rebuilding the Map (or
+     * doing a linear find) on every call.
      */
-    private _items: Item[] = [];
     private _itemsById: Map<string, Item> = new Map();
     private _translationsByKey: Map<string, Translation> = new Map();
 
@@ -146,13 +147,10 @@ export class GameStore {
         this.initRemoteSync();
     }
 
-    /** Recomputes items/itemsById/translationsByKey from allItems/translations — call after reassigning either. */
+    /** Recomputes itemsById/translationsByKey from allItems/translations — call after reassigning either. */
     private rebuildDerivedCaches(): void {
         this._translationsByKey = new Map(this.translations.map((translation) => [translation.key, translation]));
-        this._items = this.allItems.filter(
-            (item) => item.nameKey !== undefined && this._translationsByKey.has(item.nameKey)
-        );
-        this._itemsById = new Map(this._items.map((item) => [item.id, item]));
+        this._itemsById = new Map(this.allItems.map((item) => [item.id, item]));
     }
 
     /** Subscribes to Firestore for the lifetime of the app — this store is a page-lifetime singleton, never disposed. */
@@ -197,9 +195,9 @@ export class GameStore {
         );
     }
 
-    /** Config items without a matching translation are treated as unfinished/removed content — hidden everywhere. */
+    /** Every config item, regardless of whether it has a matching translation. */
     get items(): Item[] {
-        return this._items;
+        return this.allItems;
     }
 
     getItem(id: string): Item | undefined {
