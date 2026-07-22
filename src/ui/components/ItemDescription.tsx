@@ -32,8 +32,10 @@ function glossaryTooltipSlotProps(tooltipFontSizePx: number) {
 /**
  * Renders an item's description per the site-wide description mode (Settings page): "text" shows the raw
  * translations-table string completely untouched (no {ValueOrRange}/[img]/[color] handling at all); "text-icons"
- * (the default, and the only mode that ever existed before) resolves those; "icons-emoji" does the same plus
- * swaps known glossary phrases (see GlossaryEntry) for their icon/emoji.
+ * ("Текст + Включенные записи", the default) resolves those plus swaps in glossary entries whose own "enabled"
+ * checkbox (GlossaryPage) is on; "icons-emoji" ("Все записи") does the same but ignores that checkbox entirely —
+ * every glossary entry with an icon/emoji applies, which is useful for reviewing the whole glossary against real
+ * descriptions regardless of which entries are currently switched on for normal use.
  */
 export default function ItemDescription({ item, description, settingsOverride }: Props) {
     const store = useStore();
@@ -47,7 +49,14 @@ export default function ItemDescription({ item, description, settingsOverride }:
         );
     }
 
-    const glossary = settings.descriptionMode === "icons-emoji" ? store.glossary : [];
+    // "text-icons" only applies entries whose own checkbox is on; "icons-emoji" ("Все записи") bypasses that
+    // filter and applies every entry that has an icon/emoji, regardless of its enabled state.
+    const glossary =
+        settings.descriptionMode === "icons-emoji"
+            ? store.glossary
+            : settings.descriptionMode === "text-icons"
+              ? store.glossary.filter((entry) => entry.enabled !== false)
+              : [];
     const parts = parseItemDescription(item, description, store.mechanics, glossary);
     const tooltipSlotProps = glossaryTooltipSlotProps(settings.tooltipFontSizePx);
 

@@ -6,9 +6,14 @@ import { SPRITE_BASE_PATH, findRawValue } from "./sprites";
 /**
  * "text" — the raw string from the translations table, completely unprocessed (no {placeholder}/[img]/[color]
  * handling at all — see ItemDescription.tsx, which bypasses parseItemDescription entirely for this mode).
- * "text-icons" — today's only-ever behavior: [img]/[color=#...] BBCode and {placeholder}s resolved, nothing else.
- * "icons-emoji" — text-icons, plus known glossary phrases (see GlossaryEntry) swapped for their icon/emoji;
- * unmatched text stays as plain text, this is additive, not a full replace of the description.
+ * "text-icons" ("Текст + Включенные записи") — [img]/[color=#...] BBCode and {placeholder}s resolved, plus
+ * glossary entries whose own "enabled" checkbox (GlossaryPage) is on swapped in for their matched phrase.
+ * "icons-emoji" ("Все записи") — same as "text-icons", but every glossary entry with an icon/emoji applies
+ * regardless of its enabled checkbox — lets you review the full glossary against real descriptions. In both
+ * cases unmatched text stays as plain text; this is additive, not a full replace of the description. The string
+ * values themselves predate this 3-way split (the type used to mean "no glossary at all" / "every entry, no
+ * enabled concept existed yet") — kept as-is since the slots map 1:1 onto the new modes, so no stored
+ * `descriptionMode` value needs migrating.
  */
 export type DescriptionMode = "text" | "text-icons" | "icons-emoji";
 
@@ -22,7 +27,7 @@ export interface DescriptionSettings {
 
     descriptionMode: DescriptionMode;
 
-    /** Font size (px) of the glossary-note tooltip shown on an "icons-emoji" icon/emoji — see ItemDescription. */
+    /** Font size (px) of the glossary-note tooltip shown on a glossary-matched icon/emoji — see ItemDescription. */
     tooltipFontSizePx: number;
 }
 
@@ -245,8 +250,9 @@ function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): Des
 /**
  * Resolves {ValueOrRange}/{ValueOrRange2}/raw-column/mechanic-field placeholders, then splits [img] and
  * [color=#...] BBCode into renderable parts. `mechanics` is the full loaded list — only this item's own rows
- * are used (first one, per the user). `glossary` is only meaningful for the "icons-emoji" mode — pass `[]` (the
- * default) to skip that pass entirely, which is what the "text-icons" mode does.
+ * are used (first one, per the user). `glossary` drives the extra phrase-substitution pass — pass `[]` (the
+ * default) to skip it entirely (the "text" mode never calls this at all; ItemDescription.tsx decides which
+ * subset of the glossary to pass based on the "text-icons"/"icons-emoji" mode and each entry's enabled flag).
  */
 export function parseItemDescription(
     item: Item,

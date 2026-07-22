@@ -1,9 +1,9 @@
 /**
- * A manually-curated "phrase in an item description -> icon/emoji" mapping, used by the "Иконки + Эмоджи"
- * description mode (see descriptionTemplate.ts's applyGlossary) to replace recognized phrases with a pictogram.
- * Matching is against the actual translated description text, not raw mechanic field values — see project memory
- * for why (real descriptions are free-form prose; mechanic modification tokens like "удалить" never appear in it
- * as substrings).
+ * A manually-curated "phrase in an item description -> icon/emoji" mapping, used by the "Текст + Включенные
+ * записи"/"Все записи" description modes (see descriptionTemplate.ts's applyGlossary) to replace recognized
+ * phrases with a pictogram. Matching is against the actual translated description text, not raw mechanic field
+ * values — see project memory for why (real descriptions are free-form prose; mechanic modification tokens like
+ * "удалить" never appear in it as substrings).
  */
 export interface GlossaryEntry {
     id: string;

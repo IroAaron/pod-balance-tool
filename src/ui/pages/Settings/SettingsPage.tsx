@@ -19,11 +19,20 @@ const PREVIEW_TEXT =
 
 const DESCRIPTION_MODE_LABELS: Record<DescriptionMode, string> = {
     text: "Текст",
-    "text-icons": "Текст + иконки",
-    "icons-emoji": "Иконки + Эмоджи",
+    "text-icons": "Текст + Включенные записи",
+    "icons-emoji": "Все записи",
 };
 
-export default function SettingsPage() {
+/**
+ * Owns the actual form — all 4 fields are local state seeded once from `store.descriptionSettings`, so the
+ * parent below forces a fresh mount (via `key`) exactly once the real Firestore value replaces the initial
+ * DEFAULT_DESCRIPTION_SETTINGS placeholder (same pattern GlossaryPage uses for the same reason). Without this,
+ * a fresh page load shows the hardcoded defaults until the very first Firestore snapshot arrives, and — worse —
+ * never updates afterwards, since nothing here re-reads the store past the initial useState call. Touching any
+ * other control after that (e.g. dragging a slider) would silently commit those stale defaults back over the
+ * team's real shared settings.
+ */
+function SettingsForm() {
     const store = useStore();
     const [spriteScale, setSpriteScale] = useState(store.descriptionSettings.spriteScale);
     const [fontSizePx, setFontSizePx] = useState(store.descriptionSettings.fontSizePx);
@@ -73,8 +82,8 @@ export default function SettingsPage() {
                             descriptionMode === "text"
                                 ? "Как есть, из таблицы переводов — без [img]/[color]/{...} и без глоссария."
                                 : descriptionMode === "text-icons"
-                                  ? "Сегодняшнее поведение: [img]/[color=#...] и {...} становятся иконками/цветным текстом."
-                                  : "Как «Текст + иконки», плюс известные глоссарию фразы заменяются на иконку/эмодзи."
+                                  ? "[img]/[color=#...] и {...} становятся иконками/цветным текстом, плюс подключаются только включённые (галочка слева) записи глоссария."
+                                  : "Как «Текст + Включенные записи», но подключаются вообще все записи глоссария — независимо от галочки."
                         }
                     >
                         {(Object.entries(DESCRIPTION_MODE_LABELS) as [DescriptionMode, string][]).map(
@@ -135,8 +144,8 @@ export default function SettingsPage() {
                             valueLabelDisplay="auto"
                         />
                         <Typography variant="caption" color="text.secondary">
-                            Размер текста в тултипе с заметкой из глоссария (наведение на иконку/эмодзи в режиме
-                            «Иконки + Эмоджи»).
+                            Размер текста в тултипе с заметкой из глоссария (наведение на иконку/эмодзи в режимах
+                            «Текст + Включенные записи» и «Все записи»).
                         </Typography>
                     </Box>
 
@@ -162,4 +171,9 @@ export default function SettingsPage() {
             </Paper>
         </Stack>
     );
+}
+
+export default function SettingsPage() {
+    const store = useStore();
+    return <SettingsForm key={store.sharedReady ? "ready" : "loading"} />;
 }
