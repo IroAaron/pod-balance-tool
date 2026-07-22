@@ -121,10 +121,19 @@ export function subscribeGlossary(onChange: (entries: GlossaryEntry[]) => void):
     );
 }
 
+/** Firestore's setDoc rejects any object with a literal `undefined` property value (distinct from the key being
+ *  absent entirely) — GlossaryPage's per-row editor always writes `icon: value || undefined` for whichever
+ *  optional field the user leaves blank, so an entry that never had that key set gains one set to `undefined`
+ *  the moment any field on its row is blurred. Stripping here, right before the write, protects every caller of
+ *  replaceGlossaryRemote regardless of how the patch was built upstream. */
+function stripUndefined<T extends object>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
+}
+
 /** Full overwrite, like updateSourcesRemote/updateDescriptionSettingsRemote — the glossary is small and
  *  hand-curated, so there's no need for the itemIcons-style per-key point-update dance. */
 export function replaceGlossaryRemote(entries: GlossaryEntry[]): Promise<void> {
-    return setDoc(doc(sharedCol, "glossary"), { entries });
+    return setDoc(doc(sharedCol, "glossary"), { entries: stripUndefined(entries) });
 }
 
 export function writeBuild(build: Build): Promise<void> {
