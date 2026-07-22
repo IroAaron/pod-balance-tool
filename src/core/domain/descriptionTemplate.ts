@@ -178,10 +178,13 @@ export function glossaryIconSrc(icon: string): string {
 }
 
 /**
- * Swaps known glossary phrases inside a description's plain-text parts for their icon/emoji — icon/color/img
- * parts already produced by parseColorAndImageTags are left untouched, only original text is scanned. Matching
- * is case-insensitive substring, longest phrase first (same principle as TOKEN_RE above), so a more specific
- * phrase wins over a shorter one it happens to contain. An entry with neither icon nor emoji set is a no-op.
+ * Swaps known glossary phrases inside a description's plain-text parts for their icon/emoji, AND annotates any
+ * icon already embedded directly via a real `[img]` tag (resolved by parseColorAndImageTags, so it was never a
+ * text substitution at all) with the same note when that icon's path matches a glossary entry's own `icon` —
+ * e.g. a description that already spells out `[img]...ui_icon_activation.svg[/img]` gets the "Активация" note
+ * on hover too, not just phrase-substituted occurrences. Matching for the phrase-substitution part is
+ * case-insensitive substring, longest phrase first (same principle as TOKEN_RE above), so a more specific phrase
+ * wins over a shorter one it happens to contain. An entry with neither icon nor emoji set is a no-op.
  */
 function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): DescriptionPart[] {
     const usable = glossary.filter((entry) => entry.phrase.trim() && (entry.icon || entry.emoji));
@@ -191,7 +194,17 @@ function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): Des
     const byPhraseLower = new Map(sorted.map((entry) => [entry.phrase.toLowerCase(), entry]));
     const matchRe = new RegExp(sorted.map((entry) => escapeRegExp(entry.phrase)).join("|"), "gi");
 
+    const noteByIconSrc = new Map<string, string>();
+    for (const entry of usable) {
+        if (!entry.icon) continue;
+        noteByIconSrc.set(glossaryIconSrc(entry.icon), entry.note?.trim() || entry.phrase);
+    }
+
     return parts.flatMap((part): DescriptionPart[] => {
+        if (part.kind === "icon" && !part.note) {
+            const note = noteByIconSrc.get(part.src);
+            if (note) return [{ ...part, note }];
+        }
         if (part.kind !== "text") return [part];
 
         const pieces: DescriptionPart[] = [];

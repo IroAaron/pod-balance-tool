@@ -229,6 +229,20 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
         ]);
     });
 
+    it("annotates a plain [img] icon already baked into the text when its path matches a glossary entry's icon", () => {
+        // Real shape: a description already spells out an icon via [img] (not a phrase match at all) — if a
+        // glossary entry documents that exact icon, hovering it should show the note too.
+        const glossary = [
+            { id: "g1", phrase: "монета", icon: "roulette_interface/icons-tags/coin.png", note: "Монетка — бонус" },
+        ];
+        const raw = "Дает [img width=16]res://roulette_interface/Icons_tags/coin.png[/img] очков.";
+        expect(parseItemDescription(makeItem(), raw, [], glossary)).toEqual([
+            { kind: "text", value: "Дает " },
+            { kind: "icon", src: `${TAG_ICON_BASE_PATH}coin.png`, width: 16, alt: "coin.png", note: "Монетка — бонус" },
+            { kind: "text", value: " очков." },
+        ]);
+    });
+
     it("ignores an entry with neither icon nor emoji set", () => {
         const glossary = [{ id: "g1", phrase: "Активирует" }];
         expect(parseItemDescription(makeItem(), "Активирует ячейку.", [], glossary)).toEqual([
