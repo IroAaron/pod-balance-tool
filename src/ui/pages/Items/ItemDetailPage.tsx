@@ -188,6 +188,22 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                     fullWidth
                                     helperText="Обычный текст, как в таблице переводов — [img]/[color]/{...} не рендерятся здесь. {item:ID}/{tag:Имя} — значки, вставляются кнопкой ниже."
                                 />
+
+                                <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "action.hover" }}>
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                                        Превью (как в настройках «Описания предметов»)
+                                    </Typography>
+                                    <Typography>
+                                        {descriptionDraft ? (
+                                            <ItemDescription item={item} description={descriptionDraft} />
+                                        ) : (
+                                            <Typography component="span" color="text.secondary" sx={{ fontStyle: "italic" }}>
+                                                (пусто)
+                                            </Typography>
+                                        )}
+                                    </Typography>
+                                </Paper>
+
                                 <Stack direction="row" spacing={1}>
                                     <Button
                                         size="small"
