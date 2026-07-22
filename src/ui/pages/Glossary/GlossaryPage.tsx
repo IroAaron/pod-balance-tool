@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Box, Button, IconButton, Paper, Stack, TextField, Typography } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import { glossaryIconSrc } from "../../../core/domain/descriptionTemplate";
@@ -7,6 +8,44 @@ import type { GlossaryEntry } from "../../../core/models/GlossaryEntry";
 
 function makeEmptyEntry(): GlossaryEntry {
     return { id: `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, phrase: "" };
+}
+
+/**
+ * The gap below a row — invisible until hovered, at which point a "+" appears centered in it to insert a new
+ * entry right there. Driven by onMouseEnter/Leave state rather than a CSS `:hover` descendant selector — MUI's
+ * own emitted rule for the button's baseline `opacity: 0` sx otherwise wins the cascade over a plain class-based
+ * hover selector regardless of specificity (order-dependent, not worth fighting), so state is the reliable path.
+ */
+function InsertDivider({ onInsert }: { onInsert: () => void }) {
+    const [hovered, setHovered] = useState(false);
+
+    return (
+        <Box
+            onPointerEnter={() => setHovered(true)}
+            onPointerLeave={() => setHovered(false)}
+            sx={{ position: "relative", height: 20 }}
+        >
+            <IconButton
+                aria-label="Добавить запись здесь"
+                onClick={onInsert}
+                size="small"
+                sx={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    opacity: hovered ? 1 : 0,
+                    transition: "opacity 0.15s",
+                    bgcolor: "background.paper",
+                    border: "1px solid",
+                    borderColor: "divider",
+                    "&:hover": { bgcolor: "action.hover" },
+                }}
+            >
+                <AddIcon fontSize="small" />
+            </IconButton>
+        </Box>
+    );
 }
 
 /** Small live preview of a glossary entry's icon path — same resolution as the real description renderer
@@ -64,6 +103,18 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
 
     const handleAdd = () => setEntries((prev) => [...prev, makeEmptyEntry()]);
 
+    // Looks the id up in the real (unfiltered) list — the boundary a user hovers in a filtered/searched view
+    // still needs to insert into that entry's actual neighboring position, not wherever it happens to sit
+    // among just the filtered results.
+    const handleInsertAfter = (afterId: string) => {
+        setEntries((prev) => {
+            const index = prev.findIndex((entry) => entry.id === afterId);
+            const next = [...prev];
+            next.splice(index + 1, 0, makeEmptyEntry());
+            return next;
+        });
+    };
+
     const handleDelete = (id: string) => commit(entries.filter((entry) => entry.id !== id));
 
     const normalizedQuery = query.trim().toLowerCase();
@@ -106,59 +157,66 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
                 </Typography>
             )}
 
-            <Stack spacing={1.5}>
+            <Stack>
                 {filtered.map((entry) => (
-                    <Paper key={entry.id} variant="outlined" sx={{ p: 2 }}>
-                        <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", flexWrap: "wrap" }}>
-                            <TextField
-                                label="Фраза"
-                                value={entry.phrase}
-                                onChange={(event) => updateLocal(entry.id, { phrase: event.target.value })}
-                                onBlur={handleBlur}
-                                size="small"
-                                sx={{ minWidth: 220, flex: 1 }}
-                            />
-
-                            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                    <Fragment key={entry.id}>
+                        <Paper variant="outlined" sx={{ p: 2 }}>
+                            <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", flexWrap: "wrap" }}>
                                 <TextField
-                                    label="Иконка (путь)"
-                                    value={entry.icon ?? ""}
-                                    onChange={(event) => updateLocal(entry.id, { icon: event.target.value || undefined })}
+                                    label="Фраза"
+                                    value={entry.phrase}
+                                    onChange={(event) => updateLocal(entry.id, { phrase: event.target.value })}
                                     onBlur={handleBlur}
                                     size="small"
-                                    placeholder="icons-tags/foo.svg"
-                                    sx={{ minWidth: 200 }}
+                                    sx={{ minWidth: 220, flex: 1 }}
                                 />
-                                <IconPreview icon={entry.icon} />
-                            </Stack>
 
-                            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                    <TextField
+                                        label="Иконка (путь)"
+                                        value={entry.icon ?? ""}
+                                        onChange={(event) =>
+                                            updateLocal(entry.id, { icon: event.target.value || undefined })
+                                        }
+                                        onBlur={handleBlur}
+                                        size="small"
+                                        placeholder="icons-tags/foo.svg"
+                                        sx={{ minWidth: 200 }}
+                                    />
+                                    <IconPreview icon={entry.icon} />
+                                </Stack>
+
+                                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                    <TextField
+                                        label="Эмодзи"
+                                        value={entry.emoji ?? ""}
+                                        onChange={(event) =>
+                                            updateLocal(entry.id, { emoji: event.target.value || undefined })
+                                        }
+                                        onBlur={handleBlur}
+                                        size="small"
+                                        sx={{ width: 100 }}
+                                    />
+                                    {entry.emoji && <Typography sx={{ fontSize: 24 }}>{entry.emoji}</Typography>}
+                                </Stack>
+
                                 <TextField
-                                    label="Эмодзи"
-                                    value={entry.emoji ?? ""}
-                                    onChange={(event) => updateLocal(entry.id, { emoji: event.target.value || undefined })}
+                                    label="Заметка"
+                                    value={entry.note ?? ""}
+                                    onChange={(event) => updateLocal(entry.id, { note: event.target.value || undefined })}
                                     onBlur={handleBlur}
                                     size="small"
-                                    sx={{ width: 100 }}
+                                    placeholder="напр. MechAddItem / удалить"
+                                    sx={{ minWidth: 200, flex: 1 }}
                                 />
-                                {entry.emoji && <Typography sx={{ fontSize: 24 }}>{entry.emoji}</Typography>}
+
+                                <IconButton aria-label="Удалить запись" onClick={() => handleDelete(entry.id)} size="small">
+                                    <CloseIcon fontSize="small" />
+                                </IconButton>
                             </Stack>
-
-                            <TextField
-                                label="Заметка"
-                                value={entry.note ?? ""}
-                                onChange={(event) => updateLocal(entry.id, { note: event.target.value || undefined })}
-                                onBlur={handleBlur}
-                                size="small"
-                                placeholder="напр. MechAddItem / удалить"
-                                sx={{ minWidth: 200, flex: 1 }}
-                            />
-
-                            <IconButton aria-label="Удалить запись" onClick={() => handleDelete(entry.id)} size="small">
-                                <CloseIcon fontSize="small" />
-                            </IconButton>
-                        </Stack>
-                    </Paper>
+                        </Paper>
+                        <InsertDivider onInsert={() => handleInsertAfter(entry.id)} />
+                    </Fragment>
                 ))}
             </Stack>
         </Stack>
