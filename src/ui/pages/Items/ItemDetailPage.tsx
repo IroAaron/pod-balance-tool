@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { Box, Button, Chip, IconButton, Paper, Stack, TextField, Typography } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
+import IconTokenInsertButton from "../../components/IconTokenInsertButton";
 import { relatedItems } from "../../../core/domain/relations";
 import type { MechanicRow } from "../../../core/models/Mechanic";
 
@@ -25,6 +26,24 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
     const [nameDraft, setNameDraft] = useState("");
     const [editingDescription, setEditingDescription] = useState(false);
     const [descriptionDraft, setDescriptionDraft] = useState("");
+    const descriptionFieldRef = useRef<HTMLTextAreaElement | null>(null);
+
+    // Splices at the current cursor position (falling back to the end if the field never had focus) rather than
+    // always appending, so inserting a second token in the middle of already-typed text lands where expected.
+    const handleInsertToken = (token: string) => {
+        const field = descriptionFieldRef.current;
+        const start = field?.selectionStart ?? descriptionDraft.length;
+        const end = field?.selectionEnd ?? descriptionDraft.length;
+        const next = descriptionDraft.slice(0, start) + token + descriptionDraft.slice(end);
+        setDescriptionDraft(next);
+
+        // Restore focus/caret after the inserted token — has to wait a tick for the TextField's own re-render
+        // with the new value to land before selectionStart/End can be set on it again.
+        requestAnimationFrame(() => {
+            field?.focus();
+            field?.setSelectionRange(start + token.length, start + token.length);
+        });
+    };
 
     const related = useMemo(() => {
         if (!item) return [];
@@ -161,12 +180,13 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                 <TextField
                                     value={descriptionDraft}
                                     onChange={(event) => setDescriptionDraft(event.target.value)}
+                                    inputRef={descriptionFieldRef}
                                     multiline
                                     minRows={2}
                                     maxRows={12}
                                     autoFocus
                                     fullWidth
-                                    helperText="Обычный текст, как в таблице переводов — [img]/[color]/{...} не рендерятся здесь."
+                                    helperText="Обычный текст, как в таблице переводов — [img]/[color]/{...} не рендерятся здесь. {item:ID}/{tag:Имя} — значки, вставляются кнопкой ниже."
                                 />
                                 <Stack direction="row" spacing={1}>
                                     <Button
@@ -185,6 +205,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                     <Button size="small" onClick={() => setEditingDescription(false)}>
                                         Отмена
                                     </Button>
+                                    <IconTokenInsertButton onInsert={handleInsertToken} />
                                 </Stack>
                             </Stack>
                         ) : (

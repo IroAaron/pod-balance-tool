@@ -1,7 +1,8 @@
 import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
 import type { GlossaryEntry } from "../models/GlossaryEntry";
-import { SPRITE_BASE_PATH, findRawValue } from "./sprites";
+import type { TagIcon } from "../models/TagIcon";
+import { SPRITE_BASE_PATH, getItemSpritePath, findRawValue } from "./sprites";
 
 /**
  * "text" — the raw string from the translations table, completely unprocessed (no {placeholder}/[img]/[color]
@@ -247,21 +248,90 @@ function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): Des
     });
 }
 
+/** Everything needed to resolve `{item:ID}`/`{tag:Name}` tokens (see applyIconTokens) — bundled into one object
+ *  so parseItemDescription's own parameter list doesn't keep growing per new token kind. */
+export interface IconTokenContext {
+    items: Item[];
+    itemIcons: Record<string, string>;
+    tagIcons: TagIcon[];
+}
+
+// `{item:ID}` and `{tag:Name}` — deliberately distinct syntax from PLACEHOLDER_RE ({Word}, no colon allowed) so
+// there's no ambiguity between the two; inserted by ItemDetailPage's "Вставить значок" picker (see task notes)
+// instead of the editor needing to hand-type a real res://.../file.png path.
+const ICON_TOKEN_RE = /\{item:([A-Za-z0-9_]+)\}|\{tag:([^}]+)\}/g;
+
+/**
+ * Resolves `{item:ID}` (an item's own icon — manual emoji override wins, else its real sprite, else the 🧩
+ * placeholder, same priority as the ItemIcon component) and `{tag:Name}` (looked up in the curated TagIcon list,
+ * GlossaryPage's "Иконки тегов" tab) into icon/emoji parts. An `{item:ID}` naming an id that doesn't exist, or a
+ * `{tag:Name}` with no matching entry, is left as literal text — visible so a stale/typo'd reference is obvious
+ * rather than silently vanishing, same philosophy as an unrecognized `res://` prefix elsewhere in this file.
+ */
+function applyIconTokens(parts: DescriptionPart[], context: IconTokenContext): DescriptionPart[] {
+    const itemsById = new Map(context.items.map((item) => [item.id, item]));
+    const tagIconByName = new Map(context.tagIcons.map((entry) => [entry.tag.trim().toLowerCase(), entry]));
+
+    return parts.flatMap((part): DescriptionPart[] => {
+        if (part.kind !== "text") return [part];
+
+        const pieces: DescriptionPart[] = [];
+        let lastIndex = 0;
+        for (const match of part.value.matchAll(ICON_TOKEN_RE)) {
+            const [fullMatch, itemId, tagName] = match;
+            const index = match.index ?? 0;
+            if (index > lastIndex) pieces.push({ kind: "text", value: part.value.slice(lastIndex, index) });
+
+            if (itemId !== undefined) {
+                const refItem = itemsById.get(itemId);
+                const manualIcon = refItem ? context.itemIcons[itemId] : undefined;
+                const spritePath = refItem ? getItemSpritePath(refItem) : undefined;
+
+                if (manualIcon) {
+                    pieces.push({ kind: "emoji", value: manualIcon });
+                } else if (spritePath) {
+                    pieces.push({ kind: "icon", src: spritePath, width: DEFAULT_ICON_WIDTH, alt: itemId });
+                } else if (refItem) {
+                    pieces.push({ kind: "emoji", value: "🧩" });
+                } else {
+                    pieces.push({ kind: "text", value: fullMatch });
+                }
+            } else if (tagName !== undefined) {
+                const entry = tagIconByName.get(tagName.trim().toLowerCase());
+                pieces.push(
+                    entry?.icon
+                        ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.tag }
+                        : { kind: "text", value: fullMatch }
+                );
+            }
+
+            lastIndex = index + fullMatch.length;
+        }
+        if (lastIndex < part.value.length) pieces.push({ kind: "text", value: part.value.slice(lastIndex) });
+
+        return pieces;
+    });
+}
+
 /**
  * Resolves {ValueOrRange}/{ValueOrRange2}/raw-column/mechanic-field placeholders, then splits [img] and
  * [color=#...] BBCode into renderable parts. `mechanics` is the full loaded list — only this item's own rows
  * are used (first one, per the user). `glossary` drives the extra phrase-substitution pass — pass `[]` (the
  * default) to skip it entirely (the "text" mode never calls this at all; ItemDescription.tsx decides which
  * subset of the glossary to pass based on the "text-icons"/"icons-emoji" mode and each entry's enabled flag).
+ * `iconTokens`, if given, additionally resolves `{item:ID}`/`{tag:Name}` tokens — omit it (e.g. in tests that
+ * don't care about this feature) to leave those tokens as literal text.
  */
 export function parseItemDescription(
     item: Item,
     rawDescription: string,
     mechanics: MechanicRow[],
-    glossary: GlossaryEntry[] = []
+    glossary: GlossaryEntry[] = [],
+    iconTokens?: IconTokenContext
 ): DescriptionPart[] {
     const firstMechanic = mechanics.find((mechanic) => mechanic.itemId === item.id);
     const substituted = substitutePlaceholders(rawDescription, item, firstMechanic);
-    const parts = parseColorAndImageTags(substituted, item);
+    let parts = parseColorAndImageTags(substituted, item);
+    if (iconTokens) parts = applyIconTokens(parts, iconTokens);
     return glossary.length > 0 ? applyGlossary(parts, glossary) : parts;
 }

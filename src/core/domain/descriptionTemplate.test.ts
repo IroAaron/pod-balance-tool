@@ -270,3 +270,62 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
         ]);
     });
 });
+
+describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
+    const referencedItem = makeItem({ id: "c_chel_foo", raw: { CardSpriteNameMini: "card_track_foo_mini.png" } });
+
+    it("resolves {item:ID} to the referenced item's real sprite when it has one", () => {
+        const iconTokens = { items: [referencedItem], itemIcons: {}, tagIcons: [] };
+        expect(parseItemDescription(makeItem(), "Рядом с {item:c_chel_foo} активируется.", [], [], iconTokens)).toEqual([
+            { kind: "text", value: "Рядом с " },
+            { kind: "icon", src: `${SPRITE_BASE_PATH}card_track_foo_mini.png`, width: 24, alt: "c_chel_foo" },
+            { kind: "text", value: " активируется." },
+        ]);
+    });
+
+    it("prefers a manual emoji override over the item's real sprite", () => {
+        const iconTokens = { items: [referencedItem], itemIcons: { c_chel_foo: "⚡" }, tagIcons: [] };
+        expect(parseItemDescription(makeItem(), "{item:c_chel_foo}", [], [], iconTokens)).toEqual([
+            { kind: "emoji", value: "⚡" },
+        ]);
+    });
+
+    it("falls back to the 🧩 placeholder for a real item with neither manual icon nor sprite", () => {
+        const bareItem = makeItem({ id: "c_chel_bare" });
+        const iconTokens = { items: [bareItem], itemIcons: {}, tagIcons: [] };
+        expect(parseItemDescription(makeItem(), "{item:c_chel_bare}", [], [], iconTokens)).toEqual([
+            { kind: "emoji", value: "🧩" },
+        ]);
+    });
+
+    it("leaves {item:ID} as literal text when the id doesn't match any known item", () => {
+        const iconTokens = { items: [], itemIcons: {}, tagIcons: [] };
+        expect(parseItemDescription(makeItem(), "{item:unknown_id}", [], [], iconTokens)).toEqual([
+            { kind: "text", value: "{item:unknown_id}" },
+        ]);
+    });
+
+    it("resolves {tag:Name} to the matching TagIcon entry, case-insensitively", () => {
+        const iconTokens = {
+            items: [],
+            itemIcons: {},
+            tagIcons: [{ id: "t1", tag: "Sport", icon: "roulette_interface/icons-tags/sport.svg" }],
+        };
+        expect(parseItemDescription(makeItem(), "{tag:sport}", [], [], iconTokens)).toEqual([
+            { kind: "icon", src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/sport.svg`, width: 24, alt: "Sport" },
+        ]);
+    });
+
+    it("leaves {tag:Name} as literal text when no TagIcon entry matches", () => {
+        const iconTokens = { items: [], itemIcons: {}, tagIcons: [] };
+        expect(parseItemDescription(makeItem(), "{tag:Unknown}", [], [], iconTokens)).toEqual([
+            { kind: "text", value: "{tag:Unknown}" },
+        ]);
+    });
+
+    it("leaves both tokens as literal text when iconTokens isn't passed at all", () => {
+        expect(parseItemDescription(makeItem(), "{item:c_chel_foo} {tag:Sport}", [])).toEqual([
+            { kind: "text", value: "{item:c_chel_foo} {tag:Sport}" },
+        ]);
+    });
+});

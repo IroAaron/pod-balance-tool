@@ -16,6 +16,7 @@ import {
 
 import type { Build } from "../models/Build";
 import { normalizeGlossaryEntry, type GlossaryEntry } from "../models/GlossaryEntry";
+import type { TagIcon } from "../models/TagIcon";
 import type { SourceUrls } from "./localStore";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
 import { db } from "./firebaseClient";
@@ -151,6 +152,19 @@ function stripUndefined<T extends object>(value: T): T {
  *  hand-curated, so there's no need for the itemIcons-style per-key point-update dance. */
 export function replaceGlossaryRemote(entries: GlossaryEntry[]): Promise<void> {
     return setDoc(doc(sharedCol, "glossary"), { entries: stripUndefined(entries) });
+}
+
+/** Same independent-doc/full-overwrite pattern as the glossary — a small, hand-curated tag→icon list. */
+export function subscribeTagIcons(onChange: (entries: TagIcon[]) => void): () => void {
+    return onSnapshot(
+        doc(sharedCol, "tagIcons"),
+        (snapshot) => onChange((snapshot.data()?.entries as TagIcon[] | undefined) ?? []),
+        (error) => console.error("subscribeTagIcons", error)
+    );
+}
+
+export function replaceTagIconsRemote(entries: TagIcon[]): Promise<void> {
+    return setDoc(doc(sharedCol, "tagIcons"), { entries: stripUndefined(entries) });
 }
 
 export function writeBuild(build: Build): Promise<void> {

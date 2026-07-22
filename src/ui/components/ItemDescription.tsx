@@ -57,7 +57,11 @@ export default function ItemDescription({ item, description, settingsOverride }:
             : settings.descriptionMode === "text-icons"
               ? store.glossary.filter((entry) => entry.enabled !== false)
               : [];
-    const parts = parseItemDescription(item, description, store.mechanics, glossary);
+    const parts = parseItemDescription(item, description, store.mechanics, glossary, {
+        items: store.items,
+        itemIcons: store.itemIcons,
+        tagIcons: store.tagIcons,
+    });
     const tooltipSlotProps = glossaryTooltipSlotProps(settings.tooltipFontSizePx);
 
     return (

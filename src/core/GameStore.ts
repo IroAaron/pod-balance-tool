@@ -5,6 +5,7 @@ import type { MechanicRow } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
+import type { TagIcon } from "./models/TagIcon";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
@@ -43,6 +44,8 @@ import {
     updateTranslationOverrideRemote,
     subscribeGlossary,
     replaceGlossaryRemote,
+    subscribeTagIcons,
+    replaceTagIconsRemote,
     replaceAllBuilds,
     replaceSharedState,
     migrateIfEmpty,
@@ -94,6 +97,10 @@ export class GameStore {
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
     glossary: GlossaryEntry[] = [];
 
+    /** Manually-curated "tag -> icon" entries, used to resolve `{tag:Name}` tokens inserted into descriptions —
+     *  see GlossaryPage's "Иконки тегов" tab and descriptionTemplate.ts. Synced independently, like glossary. */
+    tagIcons: TagIcon[] = [];
+
     /** False until the first Firestore `builds` snapshot arrives — distinguishes "still loading" from "no builds yet". */
     buildsReady = false;
 
@@ -102,6 +109,9 @@ export class GameStore {
 
     /** False until the first Firestore `shared/glossary` snapshot arrives. */
     glossaryReady = false;
+
+    /** False until the first Firestore `shared/tagIcons` snapshot arrives. */
+    tagIconsReady = false;
 
     importReport: ImportReport | null = null;
 
@@ -179,6 +189,12 @@ export class GameStore {
         subscribeGlossary((entries) => {
             this.glossary = entries;
             this.glossaryReady = true;
+            this.notify();
+        });
+
+        subscribeTagIcons((entries) => {
+            this.tagIcons = entries;
+            this.tagIconsReady = true;
             this.notify();
         });
     }
@@ -508,6 +524,13 @@ export class GameStore {
         this.glossary = entries;
         this.notify();
         void replaceGlossaryRemote(entries).catch((error) => console.error("setGlossary → Firestore", error));
+    }
+
+    /** Full replace, same reasoning as setGlossary — the tag→icon list is small and hand-curated. */
+    setTagIcons(entries: TagIcon[]): void {
+        this.tagIcons = entries;
+        this.notify();
+        void replaceTagIconsRemote(entries).catch((error) => console.error("setTagIcons → Firestore", error));
     }
 
     exportSnapshot(): void {
