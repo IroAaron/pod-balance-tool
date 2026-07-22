@@ -1,6 +1,6 @@
 import type { Item } from "../models/Item";
 
-export type ItemSortKey = "name" | "id" | "tags" | "itemType";
+export type ItemSortKey = "name" | "id" | "tags" | "itemType" | "buildCount";
 
 export interface ItemFilters {
     tags?: string[];
@@ -39,7 +39,12 @@ export class ItemService {
         });
     }
 
-    sort(items: Item[], key: ItemSortKey, resolveName: (item: Item) => string = (item) => item.id): Item[] {
+    sort(
+        items: Item[],
+        key: ItemSortKey,
+        resolveName: (item: Item) => string = (item) => item.id,
+        resolveBuildCount: (item: Item) => number = () => 0
+    ): Item[] {
         const sorted = [...items];
 
         sorted.sort((a, b) => {
@@ -50,6 +55,10 @@ export class ItemService {
                     return (a.tags[0] ?? "").localeCompare(b.tags[0] ?? "");
                 case "itemType":
                     return (a.itemType ?? "").localeCompare(b.itemType ?? "");
+                // Ascending — items in the fewest (or no) builds float to the top, so this pairs with the
+                // Items page's "unused in any build" highlight instead of burying those items at the bottom.
+                case "buildCount":
+                    return resolveBuildCount(a) - resolveBuildCount(b) || resolveName(a).localeCompare(resolveName(b));
                 case "id":
                 default:
                     return a.id.localeCompare(b.id);

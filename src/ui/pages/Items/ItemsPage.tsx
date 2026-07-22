@@ -28,15 +28,17 @@ export default function ItemsPage() {
     // itemName reads live translations at call time, so this stable wrapper stays correct.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const resolveName = useCallback((item: Item) => store.itemName(item), []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const resolveBuildCount = useCallback((item: Item) => store.buildsForItem(item.id).length, []);
 
     const filtered = useMemo(() => {
         let result = store.itemService.filter(store.items, { tags, itemType: itemType || undefined });
         result = store.itemService.search(result, query, resolveName);
-        result = store.itemService.sort(result, sortKey, resolveName);
+        result = store.itemService.sort(result, sortKey, resolveName, resolveBuildCount);
         return result;
         // itemService is a stable method on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [store.items, store.translations, query, tags, itemType, sortKey, resolveName]);
+    }, [store.items, store.translations, store.builds, query, tags, itemType, sortKey, resolveName, resolveBuildCount]);
 
     const availableTags = store.paramValues.ItemTag ?? [];
     const availableTypes = store.paramValues.ItemType ?? [];
@@ -92,6 +94,7 @@ export default function ItemsPage() {
                     <MenuItem value="id">По Id</MenuItem>
                     <MenuItem value="tags">По тегам</MenuItem>
                     <MenuItem value="itemType">По типу</MenuItem>
+                    <MenuItem value="buildCount">По присутствию в билдах</MenuItem>
                 </TextField>
             </Stack>
 
@@ -107,7 +110,15 @@ export default function ItemsPage() {
                 }}
             >
                 {filtered.map((item) => (
-                    <Card key={item.id} variant="outlined">
+                    <Card
+                        key={item.id}
+                        variant="outlined"
+                        sx={
+                            resolveBuildCount(item) === 0
+                                ? { bgcolor: "rgba(244, 67, 54, 0.12)", borderColor: "error.main" }
+                                : undefined
+                        }
+                    >
                         <CardActionArea
                             component={RouterLink}
                             to={`/items/${encodeURIComponent(item.id)}`}
