@@ -13,6 +13,12 @@ dist-ssr
 *.local
 public/_test_data
 
+# Synced locally from the game repo by the Sources page's "Подгрузить спрайты" button (scripts/sync-sprites.mjs)
+# — bulk game assets, not meant to be committed. public/pod-mini-characters is NOT here: those sprites are
+# intentionally checked in.
+public/roulette_interface
+public/icons-tags
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

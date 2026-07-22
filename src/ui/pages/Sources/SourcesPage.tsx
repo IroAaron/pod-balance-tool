@@ -25,6 +25,8 @@ const DEFAULT_CONFIG_URL =
 const DEFAULT_TRANSLATIONS_URL =
     "https://script.google.com/macros/s/AKfycbxALyjgkQxcZYzxoYFipoCJXVrQ9UuE8vydXpWe03ctQ1fYtnrmhG_cpQRTGYeaKJwc/exec";
 
+type SpriteSyncResult = { ok: true; files: number } | { ok: false; error: string };
+
 export default function SourcesPage() {
     const store = useStore();
     const [configUrl, setConfigUrl] = useState(store.sources.configUrl || DEFAULT_CONFIG_URL);
@@ -32,10 +34,28 @@ export default function SourcesPage() {
     const [dragOver, setDragOver] = useState(false);
     const [migrating, setMigrating] = useState(false);
     const [pendingSnapshotFile, setPendingSnapshotFile] = useState<File | null>(null);
+    const [syncingSprites, setSyncingSprites] = useState(false);
+    const [spriteSyncResult, setSpriteSyncResult] = useState<SpriteSyncResult | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleDownload = () => {
         void store.importFromSources({ configUrl, translationsUrl });
+    };
+
+    const handleSyncSprites = async () => {
+        setSyncingSprites(true);
+        setSpriteSyncResult(null);
+        try {
+            const response = await fetch("/__sync-sprites", { method: "POST" });
+            const body = (await response.json()) as { ok: boolean; files?: number; error?: string };
+            setSpriteSyncResult(
+                body.ok ? { ok: true, files: body.files ?? 0 } : { ok: false, error: body.error ?? "Неизвестная ошибка" }
+            );
+        } catch (error) {
+            setSpriteSyncResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setSyncingSprites(false);
+        }
     };
 
     const handleFiles = (files: FileList | null) => {
@@ -171,6 +191,45 @@ export default function SourcesPage() {
                     </Box>
                 </Stack>
             </Paper>
+
+            {import.meta.env.DEV && (
+                <Paper sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                        <Typography variant="h6">Спрайты (только локальная разработка)</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                            Подгружает папку <code>roulette_interface</code> из репозитория игры (
+                            <code>KlukvaGames/preess-or-die</code>, ветка <code>gun2</code>) в <code>public/</code> —
+                            то же самое, что при деплое делает CI, только по кнопке и сразу видно локально. Нужен
+                            <code> SPRITE_REPO_TOKEN</code> в <code>.env.local</code> (см. <code>.env.example</code>
+                            ). Эта кнопка не появляется на задеплоенном сайте — она есть только пока запущен{" "}
+                            <code>npm run dev</code>.
+                        </Typography>
+
+                        <Box>
+                            <Button
+                                variant="outlined"
+                                onClick={() => void handleSyncSprites()}
+                                disabled={syncingSprites}
+                                startIcon={syncingSprites ? <CircularProgress size={16} /> : undefined}
+                            >
+                                {syncingSprites ? "Подгружаем..." : "Подгрузить спрайты из репозитория игры"}
+                            </Button>
+                        </Box>
+
+                        {spriteSyncResult &&
+                            (spriteSyncResult.ok ? (
+                                <Alert severity="success" onClose={() => setSpriteSyncResult(null)}>
+                                    Готово — обновлено файлов: {spriteSyncResult.files}. Обновите страницу, если
+                                    иконки где-то ещё не подхватились.
+                                </Alert>
+                            ) : (
+                                <Alert severity="error" onClose={() => setSpriteSyncResult(null)}>
+                                    {spriteSyncResult.error}
+                                </Alert>
+                            ))}
+                    </Stack>
+                </Paper>
+            )}
 
             {store.importError && <Alert severity="error">{store.importError}</Alert>}
 
