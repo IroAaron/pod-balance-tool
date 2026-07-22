@@ -8,16 +8,19 @@ import { getItemSpriteFileName } from "./sprites";
  * inverse direction of parseItemDescription's rendering pipeline, but deliberately NOT a mirror of it:
  * {ValueOrRange}/{MoneyValue}/etc. placeholders and any [img]/[color=#...] BBCode the item already had authored
  * are left completely untouched (the game itself resolves those at runtime; baking in today's numbers would be
- * wrong). Only two things get converted into real BBCode/emoji here: `{item:ID}`/`{tag:Name}` tokens (which have
- * no other representation — see descriptionTemplate.ts's applyIconTokens) and glossary phrases, and the glossary
- * pass only touches whichever entries `glossaryToApply` contains — the caller (GameStore.buildExportPayload)
- * filters that list by the site's current descriptionMode + enabled flags first, so the export matches whatever
- * the site itself would currently show, not "all glossary entries unconditionally."
+ * wrong). Three things convert into real BBCode/emoji here: `{item:ID}`/`{tag:Name}`/`{glossary:ID}` tokens
+ * (direct insertions with no other representation — see descriptionTemplate.ts's applyIconTokens — so they
+ * always resolve regardless of the entry's own enabled flag) and glossary *phrase matches*, which only touch
+ * whichever entries `glossaryToApply` contains — the caller (GameStore.exportEditedTranslations) filters that
+ * list by the site's current descriptionMode + enabled flags first, so phrase-driven substitution matches
+ * whatever the site itself would currently show, not "all glossary entries unconditionally." `{glossary:ID}` is
+ * looked up in `allGlossaryEntries` (every entry, unfiltered) instead, same as the render side.
  */
 export interface ExportIconContext {
     items: Item[];
     itemIcons: Record<string, string>;
     tagIcons: TagIcon[];
+    allGlossaryEntries: GlossaryEntry[];
     glossaryToApply: GlossaryEntry[];
     spriteWidthPx: number;
 }
@@ -45,7 +48,7 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const ICON_TOKEN_RE = /\{item:([A-Za-z0-9_]+)\}|\{tag:([^}]+)\}/g;
+const ICON_TOKEN_RE = /\{item:([A-Za-z0-9_]+)\}|\{tag:([^}]+)\}|\{glossary:([^}]+)\}/g;
 
 /** Placeholder marker unlikely to appear in real description prose or in a res:// path/filename, used to shield
  *  freshly-resolved icon BBCode from the glossary phrase pass that runs after it (see buildExportDescriptionText) —
@@ -63,37 +66,45 @@ function replaceIconTokensWithPlaceholders(
 ): { text: string; replacements: string[] } {
     const itemsById = new Map(context.items.map((item) => [item.id, item]));
     const tagIconByName = new Map(context.tagIcons.map((entry) => [entry.tag.trim().toLowerCase(), entry]));
+    const glossaryById = new Map(context.allGlossaryEntries.map((entry) => [entry.id, entry]));
     const replacements: string[] = [];
 
-    const withPlaceholders = text.replace(ICON_TOKEN_RE, (fullMatch, itemId: string | undefined, tagName: string | undefined) => {
-        let resolved: string;
+    const withPlaceholders = text.replace(
+        ICON_TOKEN_RE,
+        (fullMatch, itemId: string | undefined, tagName: string | undefined, glossaryId: string | undefined) => {
+            let resolved: string;
 
-        if (itemId !== undefined) {
-            const refItem = itemsById.get(itemId);
-            if (!refItem) {
-                resolved = fullMatch;
-            } else {
-                const manualIcon = context.itemIcons[itemId];
-                const spriteFileName = getItemSpriteFileName(refItem);
-                if (manualIcon) {
-                    resolved = manualIcon;
-                } else if (spriteFileName) {
-                    resolved = imgTag(`res://roulette_interface/pod-mini characters/${spriteFileName}`, context.spriteWidthPx);
+            if (itemId !== undefined) {
+                const refItem = itemsById.get(itemId);
+                if (!refItem) {
+                    resolved = fullMatch;
                 } else {
-                    resolved = "🧩";
+                    const manualIcon = context.itemIcons[itemId];
+                    const spriteFileName = getItemSpriteFileName(refItem);
+                    if (manualIcon) {
+                        resolved = manualIcon;
+                    } else if (spriteFileName) {
+                        resolved = imgTag(`res://roulette_interface/pod-mini characters/${spriteFileName}`, context.spriteWidthPx);
+                    } else {
+                        resolved = "🧩";
+                    }
                 }
+            } else if (tagName !== undefined) {
+                const entry = tagIconByName.get(tagName.trim().toLowerCase());
+                const resPath = entry?.icon ? reconstructResPath(entry.icon) : undefined;
+                resolved = resPath ? imgTag(resPath, context.spriteWidthPx) : fullMatch;
+            } else if (glossaryId !== undefined) {
+                const entry = glossaryById.get(glossaryId);
+                const resPath = entry?.icon ? reconstructResPath(entry.icon) : undefined;
+                resolved = resPath ? imgTag(resPath, context.spriteWidthPx) : (entry?.emoji ?? fullMatch);
+            } else {
+                resolved = fullMatch;
             }
-        } else if (tagName !== undefined) {
-            const entry = tagIconByName.get(tagName.trim().toLowerCase());
-            const resPath = entry?.icon ? reconstructResPath(entry.icon) : undefined;
-            resolved = resPath ? imgTag(resPath, context.spriteWidthPx) : fullMatch;
-        } else {
-            resolved = fullMatch;
-        }
 
-        const index = replacements.push(resolved) - 1;
-        return iconPlaceholder(index);
-    });
+            const index = replacements.push(resolved) - 1;
+            return iconPlaceholder(index);
+        }
+    );
 
     return { text: withPlaceholders, replacements };
 }

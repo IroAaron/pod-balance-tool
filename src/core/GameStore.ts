@@ -313,6 +313,7 @@ export class GameStore {
                     items: this.allItems,
                     itemIcons: this.itemIcons,
                     tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
                     glossaryToApply,
                     spriteWidthPx: this.descriptionSettings.spriteWidthPx,
                 });

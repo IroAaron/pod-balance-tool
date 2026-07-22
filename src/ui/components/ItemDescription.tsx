@@ -61,6 +61,7 @@ export default function ItemDescription({ item, description, settingsOverride }:
         items: store.items,
         itemIcons: store.itemIcons,
         tagIcons: store.tagIcons,
+        glossary: store.glossary,
     });
     const tooltipSlotProps = glossaryTooltipSlotProps(settings.tooltipFontSizePx);
 

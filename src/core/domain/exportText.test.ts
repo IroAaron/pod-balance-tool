@@ -3,7 +3,15 @@ import { buildExportDescriptionText, type ExportIconContext } from "./exportText
 import type { Item } from "../models/Item";
 
 function makeContext(overrides: Partial<ExportIconContext> = {}): ExportIconContext {
-    return { items: [], itemIcons: {}, tagIcons: [], glossaryToApply: [], spriteWidthPx: 40, ...overrides };
+    return {
+        items: [],
+        itemIcons: {},
+        tagIcons: [],
+        allGlossaryEntries: [],
+        glossaryToApply: [],
+        spriteWidthPx: 40,
+        ...overrides,
+    };
 }
 
 describe("buildExportDescriptionText", () => {
@@ -76,5 +84,23 @@ describe("buildExportDescriptionText", () => {
         expect(buildExportDescriptionText("{item:c_active_thing}", context)).toBe(
             "[img width=40]res://roulette_interface/pod-mini characters/card_active_mini.png[/img]"
         );
+    });
+
+    it("converts {glossary:ID} into real [img] BBCode, regardless of glossaryToApply (unconditional, like item/tag tokens)", () => {
+        const glossaryEntry = { id: "g1", phrases: ["активирует"], icon: "roulette_interface/icons-tags/activate.svg", enabled: false };
+        const context = makeContext({ allGlossaryEntries: [glossaryEntry], glossaryToApply: [] });
+        expect(buildExportDescriptionText("{glossary:g1}", context)).toBe(
+            "[img width=40]res://roulette_interface/Icons_tags/activate.svg[/img]"
+        );
+    });
+
+    it("converts {glossary:ID} into the entry's emoji when it has no icon", () => {
+        const glossaryEntry = { id: "g1", phrases: ["активирует"], emoji: "⚡" };
+        const context = makeContext({ allGlossaryEntries: [glossaryEntry] });
+        expect(buildExportDescriptionText("{glossary:g1}", context)).toBe("⚡");
+    });
+
+    it("leaves {glossary:ID} literal when the id is unknown", () => {
+        expect(buildExportDescriptionText("{glossary:missing}", makeContext())).toBe("{glossary:missing}");
     });
 });

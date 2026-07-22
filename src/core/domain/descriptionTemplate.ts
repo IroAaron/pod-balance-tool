@@ -253,29 +253,44 @@ function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): Des
     });
 }
 
-/** Everything needed to resolve `{item:ID}`/`{tag:Name}` tokens (see applyIconTokens) — bundled into one object
- *  so parseItemDescription's own parameter list doesn't keep growing per new token kind. */
+/** Everything needed to resolve `{item:ID}`/`{tag:Name}`/`{glossary:ID}` tokens (see applyIconTokens) — bundled
+ *  into one object so parseItemDescription's own parameter list doesn't keep growing per new token kind. */
 export interface IconTokenContext {
     items: Item[];
     itemIcons: Record<string, string>;
     tagIcons: TagIcon[];
+    /** Every glossary entry, unfiltered by descriptionMode/enabled — `{glossary:ID}` is a deliberate direct
+     *  insertion (like `{item:ID}`/`{tag:Name}`), not a phrase match, so it always resolves regardless of
+     *  whether that entry's own checkbox is on. */
+    glossary: GlossaryEntry[];
 }
 
-// `{item:ID}` and `{tag:Name}` — deliberately distinct syntax from PLACEHOLDER_RE ({Word}, no colon allowed) so
-// there's no ambiguity between the two; inserted by ItemDetailPage's "Вставить значок" picker (see task notes)
-// instead of the editor needing to hand-type a real res://.../file.png path.
-const ICON_TOKEN_RE = /\{item:([A-Za-z0-9_]+)\}|\{tag:([^}]+)\}/g;
+// `{item:ID}`, `{tag:Name}`, `{glossary:ID}` — deliberately distinct syntax from PLACEHOLDER_RE ({Word}, no colon
+// allowed) so there's no ambiguity; inserted by ItemDetailPage's "Вставить значок" picker instead of the editor
+// needing to hand-type a real res://.../file.png path or hope a glossary phrase happens to appear verbatim.
+const ICON_TOKEN_RE = /\{item:([A-Za-z0-9_]+)\}|\{tag:([^}]+)\}|\{glossary:([^}]+)\}/g;
+
+/** icon (wins) or emoji for a glossary entry, or undefined if it has neither — shared by the render-side token
+ *  resolution below and by GlossaryPage's own preview, so "what does this entry look like" has one definition. */
+function glossaryEntryIconOrEmoji(entry: GlossaryEntry): { kind: "icon"; src: string } | { kind: "emoji"; value: string } | undefined {
+    if (entry.icon) return { kind: "icon", src: glossaryIconSrc(entry.icon) };
+    if (entry.emoji) return { kind: "emoji", value: entry.emoji };
+    return undefined;
+}
 
 /**
  * Resolves `{item:ID}` (an item's own icon — manual emoji override wins, else its real sprite, else the 🧩
- * placeholder, same priority as the ItemIcon component) and `{tag:Name}` (looked up in the curated TagIcon list,
- * GlossaryPage's "Иконки тегов" tab) into icon/emoji parts. An `{item:ID}` naming an id that doesn't exist, or a
- * `{tag:Name}` with no matching entry, is left as literal text — visible so a stale/typo'd reference is obvious
- * rather than silently vanishing, same philosophy as an unrecognized `res://` prefix elsewhere in this file.
+ * placeholder, same priority as the ItemIcon component), `{tag:Name}` (looked up in the curated TagIcon list,
+ * GlossaryPage's "Иконки тегов" tab), and `{glossary:ID}` (a specific glossary entry's icon/emoji, inserted
+ * directly rather than relying on its phrase appearing in the text) into icon/emoji parts. A token naming
+ * something that doesn't exist (or a glossary entry with neither icon nor emoji set) is left as literal text —
+ * visible so a stale/typo'd reference is obvious rather than silently vanishing, same philosophy as an
+ * unrecognized `res://` prefix elsewhere in this file.
  */
 function applyIconTokens(parts: DescriptionPart[], context: IconTokenContext): DescriptionPart[] {
     const itemsById = new Map(context.items.map((item) => [item.id, item]));
     const tagIconByName = new Map(context.tagIcons.map((entry) => [entry.tag.trim().toLowerCase(), entry]));
+    const glossaryById = new Map(context.glossary.map((entry) => [entry.id, entry]));
 
     return parts.flatMap((part): DescriptionPart[] => {
         if (part.kind !== "text") return [part];
@@ -283,7 +298,7 @@ function applyIconTokens(parts: DescriptionPart[], context: IconTokenContext): D
         const pieces: DescriptionPart[] = [];
         let lastIndex = 0;
         for (const match of part.value.matchAll(ICON_TOKEN_RE)) {
-            const [fullMatch, itemId, tagName] = match;
+            const [fullMatch, itemId, tagName, glossaryId] = match;
             const index = match.index ?? 0;
             if (index > lastIndex) pieces.push({ kind: "text", value: part.value.slice(lastIndex, index) });
 
@@ -308,6 +323,17 @@ function applyIconTokens(parts: DescriptionPart[], context: IconTokenContext): D
                         ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.tag }
                         : { kind: "text", value: fullMatch }
                 );
+            } else if (glossaryId !== undefined) {
+                const entry = glossaryById.get(glossaryId);
+                const resolved = entry ? glossaryEntryIconOrEmoji(entry) : undefined;
+                const note = entry?.note?.trim() || entry?.phrases[0];
+                if (resolved?.kind === "icon") {
+                    pieces.push({ kind: "icon", src: resolved.src, width: DEFAULT_ICON_WIDTH, alt: note ?? "", note });
+                } else if (resolved?.kind === "emoji") {
+                    pieces.push({ kind: "emoji", value: resolved.value, note });
+                } else {
+                    pieces.push({ kind: "text", value: fullMatch });
+                }
             }
 
             lastIndex = index + fullMatch.length;

@@ -275,7 +275,7 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
     const referencedItem = makeItem({ id: "c_chel_foo", raw: { CardSpriteNameMini: "card_track_foo_mini.png" } });
 
     it("resolves {item:ID} to the referenced item's real sprite when it has one", () => {
-        const iconTokens = { items: [referencedItem], itemIcons: {}, tagIcons: [] };
+        const iconTokens = { items: [referencedItem], itemIcons: {}, tagIcons: [], glossary: [] };
         expect(parseItemDescription(makeItem(), "Рядом с {item:c_chel_foo} активируется.", [], [], iconTokens)).toEqual([
             { kind: "text", value: "Рядом с " },
             { kind: "icon", src: `${SPRITE_BASE_PATH}card_track_foo_mini.png`, width: 24, alt: "c_chel_foo" },
@@ -284,7 +284,7 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
     });
 
     it("prefers a manual emoji override over the item's real sprite", () => {
-        const iconTokens = { items: [referencedItem], itemIcons: { c_chel_foo: "⚡" }, tagIcons: [] };
+        const iconTokens = { items: [referencedItem], itemIcons: { c_chel_foo: "⚡" }, tagIcons: [], glossary: [] };
         expect(parseItemDescription(makeItem(), "{item:c_chel_foo}", [], [], iconTokens)).toEqual([
             { kind: "emoji", value: "⚡" },
         ]);
@@ -292,14 +292,14 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
 
     it("falls back to the 🧩 placeholder for a real item with neither manual icon nor sprite", () => {
         const bareItem = makeItem({ id: "c_chel_bare" });
-        const iconTokens = { items: [bareItem], itemIcons: {}, tagIcons: [] };
+        const iconTokens = { items: [bareItem], itemIcons: {}, tagIcons: [], glossary: [] };
         expect(parseItemDescription(makeItem(), "{item:c_chel_bare}", [], [], iconTokens)).toEqual([
             { kind: "emoji", value: "🧩" },
         ]);
     });
 
     it("leaves {item:ID} as literal text when the id doesn't match any known item", () => {
-        const iconTokens = { items: [], itemIcons: {}, tagIcons: [] };
+        const iconTokens = { items: [], itemIcons: {}, tagIcons: [], glossary: [] };
         expect(parseItemDescription(makeItem(), "{item:unknown_id}", [], [], iconTokens)).toEqual([
             { kind: "text", value: "{item:unknown_id}" },
         ]);
@@ -310,6 +310,7 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
             items: [],
             itemIcons: {},
             tagIcons: [{ id: "t1", tag: "Sport", icon: "roulette_interface/icons-tags/sport.svg" }],
+            glossary: [],
         };
         expect(parseItemDescription(makeItem(), "{tag:sport}", [], [], iconTokens)).toEqual([
             { kind: "icon", src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/sport.svg`, width: 24, alt: "Sport" },
@@ -317,7 +318,7 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
     });
 
     it("leaves {tag:Name} as literal text when no TagIcon entry matches", () => {
-        const iconTokens = { items: [], itemIcons: {}, tagIcons: [] };
+        const iconTokens = { items: [], itemIcons: {}, tagIcons: [], glossary: [] };
         expect(parseItemDescription(makeItem(), "{tag:Unknown}", [], [], iconTokens)).toEqual([
             { kind: "text", value: "{tag:Unknown}" },
         ]);
@@ -326,6 +327,44 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
     it("leaves both tokens as literal text when iconTokens isn't passed at all", () => {
         expect(parseItemDescription(makeItem(), "{item:c_chel_foo} {tag:Sport}", [])).toEqual([
             { kind: "text", value: "{item:c_chel_foo} {tag:Sport}" },
+        ]);
+    });
+
+    it("resolves {glossary:ID} to that entry's icon, regardless of its own enabled flag", () => {
+        const glossaryEntry = {
+            id: "g1",
+            phrases: ["активирует"],
+            icon: "roulette_interface/icons-tags/activate.svg",
+            enabled: false,
+        };
+        const iconTokens = { items: [], itemIcons: {}, tagIcons: [], glossary: [glossaryEntry] };
+        expect(parseItemDescription(makeItem(), "{glossary:g1}", [], [], iconTokens)).toEqual([
+            {
+                kind: "icon",
+                src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/activate.svg`,
+                width: 24,
+                alt: "активирует",
+                note: "активирует",
+            },
+        ]);
+    });
+
+    it("resolves {glossary:ID} to that entry's emoji when it has no icon", () => {
+        const glossaryEntry = { id: "g1", phrases: ["активирует"], emoji: "⚡" };
+        const iconTokens = { items: [], itemIcons: {}, tagIcons: [], glossary: [glossaryEntry] };
+        expect(parseItemDescription(makeItem(), "{glossary:g1}", [], [], iconTokens)).toEqual([
+            { kind: "emoji", value: "⚡", note: "активирует" },
+        ]);
+    });
+
+    it("leaves {glossary:ID} as literal text when the id is unknown or the entry has neither icon nor emoji", () => {
+        const bareEntry = { id: "g1", phrases: ["активирует"] };
+        const iconTokens = { items: [], itemIcons: {}, tagIcons: [], glossary: [bareEntry] };
+        expect(parseItemDescription(makeItem(), "{glossary:missing}", [], [], iconTokens)).toEqual([
+            { kind: "text", value: "{glossary:missing}" },
+        ]);
+        expect(parseItemDescription(makeItem(), "{glossary:g1}", [], [], iconTokens)).toEqual([
+            { kind: "text", value: "{glossary:g1}" },
         ]);
     });
 });
