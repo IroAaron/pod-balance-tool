@@ -64,6 +64,9 @@ jobs:
           VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          # Must match the EXPORT_TOKEN Script Property on the Apps Script project handling doPost —
+          # see docs/apps-script-export.gs.
+          VITE_SHEETS_EXPORT_TOKEN: ${{ secrets.VITE_SHEETS_EXPORT_TOKEN }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
