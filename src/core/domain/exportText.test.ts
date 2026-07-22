@@ -58,6 +58,15 @@ describe("buildExportDescriptionText", () => {
         expect(buildExportDescriptionText("{tag:Unknown}", makeContext())).toBe("{tag:Unknown}");
     });
 
+    it("reconstructs a res:// path under Icons_tags_fields (separate folder from Icons_tags) for a TagIcon entry", () => {
+        const context = makeContext({
+            tagIcons: [{ id: "t1", tag: "Corner", icon: "roulette_interface/icons-tags-fields/ui_field_02_icon_corners.svg" }],
+        });
+        expect(buildExportDescriptionText("{tag:Corner}", context)).toBe(
+            "[img width=40]res://roulette_interface/Icons_tags_fields/ui_field_02_icon_corners.svg[/img]"
+        );
+    });
+
     it("replaces a glossary-matched phrase with its icon, only when passed in glossaryToApply", () => {
         const glossary = [{ id: "g1", phrases: ["активирует"], icon: "roulette_interface/icons-tags/activate.svg" }];
         expect(

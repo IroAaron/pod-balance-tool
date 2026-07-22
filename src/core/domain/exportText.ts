@@ -28,6 +28,7 @@ export interface ExportIconContext {
 const RELATIVE_BASE_TO_RES_PREFIX: Array<{ relativeBase: string; resPrefix: string }> = [
     { relativeBase: "roulette_interface/pod-mini-characters/", resPrefix: "res://roulette_interface/pod-mini characters/" },
     { relativeBase: "roulette_interface/icons-tags/", resPrefix: "res://roulette_interface/Icons_tags/" },
+    { relativeBase: "roulette_interface/icons-tags-fields/", resPrefix: "res://roulette_interface/Icons_tags_fields/" },
 ];
 
 /** Inverse of descriptionTemplate.ts's resolveResPath — turns a public/-relative icon path (as stored on a

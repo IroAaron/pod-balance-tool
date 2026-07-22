@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseItemDescription, TAG_ICON_BASE_PATH } from "./descriptionTemplate";
+import { parseItemDescription, TAG_ICON_BASE_PATH, TAG_ICON_FIELDS_BASE_PATH } from "./descriptionTemplate";
 import { SPRITE_BASE_PATH } from "./sprites";
 import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
@@ -77,6 +77,22 @@ describe("parseItemDescription", () => {
                 src: `${TAG_ICON_BASE_PATH}ui_icon_show_business.png`,
                 width: 40,
                 alt: "ui_icon_show_business.png",
+            },
+        ]);
+    });
+
+    it("resolves a [img] tag pointing at the Icons_tags_fields folder (separate from Icons_tags)", () => {
+        const result = parseItemDescription(
+            makeItem(),
+            "[img width=32]res://roulette_interface/Icons_tags_fields/ui_field_02_icon_corners.svg[/img]",
+            []
+        );
+        expect(result).toEqual([
+            {
+                kind: "icon",
+                src: `${TAG_ICON_FIELDS_BASE_PATH}ui_field_02_icon_corners.svg`,
+                width: 32,
+                alt: "ui_field_02_icon_corners.svg",
             },
         ]);
     });

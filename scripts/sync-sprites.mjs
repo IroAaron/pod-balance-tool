@@ -77,9 +77,13 @@ export async function syncSprites() {
         await rm(mirrorTarget, { recursive: true, force: true });
         await cp(sourceRoot, mirrorTarget, { recursive: true });
 
-        // Also flatten (rename hyphen-case, drop the space) the two subfolders the app's existing sprite/icon
+        // Also flatten (rename hyphen-case, drop the space) the subfolders the app's existing sprite/icon
         // resolution expects — see src/core/domain/sprites.ts (SPRITE_BASE_PATH) and descriptionTemplate.ts
-        // (TAG_ICON_BASE_PATH) — as siblings of the raw mirror above, both under public/roulette_interface/.
+        // (TAG_ICON_BASE_PATH/TAG_ICON_FIELDS_BASE_PATH) — as siblings of the raw mirror above, both under
+        // public/roulette_interface/. Icons_tags_fields (added 2026-07-23) is a separate folder from Icons_tags —
+        // small field/line/corner indicator icons real descriptions reference; the raw full-mirror above already
+        // copies it verbatim as `Icons_tags_fields/`, but the site's resolveResPath looks for the flattened
+        // `icons-tags-fields/` alias specifically, same as the other two.
         const spriteCount = await copyMatching(
             path.join(sourceRoot, "pod-mini characters"),
             path.join(mirrorTarget, "pod-mini-characters"),
@@ -90,10 +94,15 @@ export async function syncSprites() {
             path.join(mirrorTarget, "icons-tags"),
             new Set([".png", ".svg"])
         );
+        const fieldIconCount = await copyMatching(
+            path.join(sourceRoot, "Icons_tags_fields"),
+            path.join(mirrorTarget, "icons-tags-fields"),
+            new Set([".png", ".svg"])
+        );
 
         await execFileAsync("node", [path.join(__dirname, "generate-sprite-manifest.mjs")]);
 
-        return { files: spriteCount + iconCount };
+        return { files: spriteCount + iconCount + fieldIconCount };
     } finally {
         await rm(tmp, { recursive: true, force: true });
     }

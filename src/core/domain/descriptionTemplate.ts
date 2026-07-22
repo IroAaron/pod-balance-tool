@@ -48,15 +48,22 @@ export const DEFAULT_DESCRIPTION_SETTINGS: DescriptionSettings = {
 /** Synced from the game repo's `roulette_interface/Icons_tags/` on every deploy — see .github/workflows/deploy.yml. */
 export const TAG_ICON_BASE_PATH = `${import.meta.env.BASE_URL}roulette_interface/icons-tags/`;
 
+/** Synced from the game repo's `roulette_interface/Icons_tags_fields/` — a separate folder from Icons_tags,
+ *  holding the little field/line/corner indicator icons real descriptions reference (e.g. "on corner" markers).
+ *  Found missing 2026-07-23: real descriptions had been referencing this folder all along, silently falling
+ *  back to literal BBCode text since it was never in RES_PATH_PREFIXES nor synced anywhere. */
+export const TAG_ICON_FIELDS_BASE_PATH = `${import.meta.env.BASE_URL}roulette_interface/icons-tags-fields/`;
+
 /**
  * Descriptions embed images as Godot resource paths (`res://roulette_interface/<folder>/<file>.png`), matching
- * whatever the game's own BBCode renderer expects. Only these two folders are synced into `public/roulette_interface/`
+ * whatever the game's own BBCode renderer expects. Only these folders are synced into `public/roulette_interface/`
  * (renamed hyphen-case on the way in, see scripts/sync-sprites.mjs / deploy.yml) — an unrecognized prefix falls
  * through to the raw BBCode tag in parseItemDescription rather than a broken <img>.
  */
 const RES_PATH_PREFIXES: Array<{ prefix: string; base: string }> = [
     { prefix: "res://roulette_interface/pod-mini characters/", base: SPRITE_BASE_PATH },
     { prefix: "res://roulette_interface/Icons_tags/", base: TAG_ICON_BASE_PATH },
+    { prefix: "res://roulette_interface/Icons_tags_fields/", base: TAG_ICON_FIELDS_BASE_PATH },
 ];
 
 function resolveResPath(resPath: string): string | undefined {

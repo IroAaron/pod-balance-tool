@@ -34,6 +34,7 @@ jobs:
           sparse-checkout: |
             roulette_interface/pod-mini characters
             roulette_interface/Icons_tags
+            roulette_interface/Icons_tags_fields
           sparse-checkout-cone-mode: false
 
       - name: Sync sprites from game repo
@@ -48,6 +49,14 @@ jobs:
           mkdir -p public/roulette_interface/icons-tags
           # This folder mixes .png and .svg — copy both, not just *.png.
           find "sprite-source/roulette_interface/Icons_tags/" -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.svg" \) -exec cp {} public/roulette_interface/icons-tags/ \;
+
+      # A separate folder from Icons_tags (found missing 2026-07-23) — small field/line/corner indicator icons
+      # real descriptions reference via res://roulette_interface/Icons_tags_fields/... BBCode.
+      - name: Sync field icons from game repo
+        run: |
+          rm -rf public/roulette_interface/icons-tags-fields
+          mkdir -p public/roulette_interface/icons-tags-fields
+          find "sprite-source/roulette_interface/Icons_tags_fields/" -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.svg" \) -exec cp {} public/roulette_interface/icons-tags-fields/ \;
 
       - uses: actions/setup-node@v4
         with:
