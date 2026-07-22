@@ -34,13 +34,13 @@ const DESCRIPTION_MODE_LABELS: Record<DescriptionMode, string> = {
  */
 function SettingsForm() {
     const store = useStore();
-    const [spriteScale, setSpriteScale] = useState(store.descriptionSettings.spriteScale);
+    const [spriteWidthPx, setSpriteWidthPx] = useState(store.descriptionSettings.spriteWidthPx);
     const [fontSizePx, setFontSizePx] = useState(store.descriptionSettings.fontSizePx);
     const [descriptionMode, setDescriptionMode] = useState(store.descriptionSettings.descriptionMode);
     const [tooltipFontSizePx, setTooltipFontSizePx] = useState(store.descriptionSettings.tooltipFontSizePx);
 
     const commit = (next: {
-        spriteScale: number;
+        spriteWidthPx: number;
         fontSizePx: number;
         descriptionMode: DescriptionMode;
         tooltipFontSizePx: number;
@@ -49,7 +49,7 @@ function SettingsForm() {
     };
 
     const handleReset = () => {
-        setSpriteScale(DEFAULT_DESCRIPTION_SETTINGS.spriteScale);
+        setSpriteWidthPx(DEFAULT_DESCRIPTION_SETTINGS.spriteWidthPx);
         setFontSizePx(DEFAULT_DESCRIPTION_SETTINGS.fontSizePx);
         setDescriptionMode(DEFAULT_DESCRIPTION_SETTINGS.descriptionMode);
         setTooltipFontSizePx(DEFAULT_DESCRIPTION_SETTINGS.tooltipFontSizePx);
@@ -74,7 +74,7 @@ function SettingsForm() {
                         onChange={(event) => {
                             const next = event.target.value as DescriptionMode;
                             setDescriptionMode(next);
-                            commit({ spriteScale, fontSizePx, descriptionMode: next, tooltipFontSizePx });
+                            commit({ spriteWidthPx, fontSizePx, descriptionMode: next, tooltipFontSizePx });
                         }}
                         size="small"
                         sx={{ maxWidth: 280 }}
@@ -96,22 +96,22 @@ function SettingsForm() {
                     </TextField>
 
                     <Box>
-                        <Typography gutterBottom>Размер спрайтов в описании: {Math.round(spriteScale * 100)}%</Typography>
+                        <Typography gutterBottom>Размер спрайтов в описании: {spriteWidthPx}px</Typography>
                         <Slider
-                            value={spriteScale}
-                            min={0.25}
-                            max={3}
-                            step={0.05}
-                            onChange={(_event, value) => setSpriteScale(value as number)}
+                            value={spriteWidthPx}
+                            min={12}
+                            max={96}
+                            step={2}
+                            onChange={(_event, value) => setSpriteWidthPx(value as number)}
                             onChangeCommitted={(_event, value) =>
-                                commit({ spriteScale: value as number, fontSizePx, descriptionMode, tooltipFontSizePx })
+                                commit({ spriteWidthPx: value as number, fontSizePx, descriptionMode, tooltipFontSizePx })
                             }
                             valueLabelDisplay="auto"
-                            valueLabelFormat={(value) => `${Math.round(value * 100)}%`}
+                            valueLabelFormat={(value) => `${value}px`}
                         />
                         <Typography variant="caption" color="text.secondary">
-                            Множитель к ширине из [img width=N] в самом тексте описания — 100% значит «как задано в
-                            игре».
+                            Ширина каждого значка в описании (в пикселях) — идёт напрямую в [img width=N], который
+                            сайт сам генерирует для {"{item:ID}"}/{"{tag:Имя}"} и при экспорте в Google Sheets.
                         </Typography>
                     </Box>
 
@@ -124,7 +124,7 @@ function SettingsForm() {
                             step={1}
                             onChange={(_event, value) => setFontSizePx(value as number)}
                             onChangeCommitted={(_event, value) =>
-                                commit({ spriteScale, fontSizePx: value as number, descriptionMode, tooltipFontSizePx })
+                                commit({ spriteWidthPx, fontSizePx: value as number, descriptionMode, tooltipFontSizePx })
                             }
                             valueLabelDisplay="auto"
                         />
@@ -139,7 +139,7 @@ function SettingsForm() {
                             step={1}
                             onChange={(_event, value) => setTooltipFontSizePx(value as number)}
                             onChangeCommitted={(_event, value) =>
-                                commit({ spriteScale, fontSizePx, descriptionMode, tooltipFontSizePx: value as number })
+                                commit({ spriteWidthPx, fontSizePx, descriptionMode, tooltipFontSizePx: value as number })
                             }
                             valueLabelDisplay="auto"
                         />
@@ -164,7 +164,7 @@ function SettingsForm() {
                         <ItemDescription
                             item={PREVIEW_ITEM}
                             description={PREVIEW_TEXT}
-                            settingsOverride={{ spriteScale, fontSizePx, descriptionMode, tooltipFontSizePx }}
+                            settingsOverride={{ spriteWidthPx, fontSizePx, descriptionMode, tooltipFontSizePx }}
                         />
                     </Typography>
                 </Stack>

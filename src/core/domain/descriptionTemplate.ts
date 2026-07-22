@@ -20,8 +20,13 @@ export type DescriptionMode = "text" | "text-icons" | "icons-emoji";
 
 /** Site-wide display knobs for ItemDescription, editable on the Settings page and shared via Firestore. */
 export interface DescriptionSettings {
-    /** Multiplier applied to each [img width=N] tag's own width — 1 = render exactly as authored. */
-    spriteScale: number;
+    /** Literal width (px) every rendered icon uses — replaces whatever width a [img width=N] tag was authored
+     *  with, and is what {item:ID}/{tag:Name} tokens (which have no width of their own) render at too. Used to
+     *  be a multiplier applied on top of each tag's own authored width, back when the Google Sheet was the only
+     *  place descriptions were written; now that the site itself authors them (including the Sheets export
+     *  pipeline, which writes this value straight into the [img width=N] it generates), one site-wide literal
+     *  width made more sense than preserving per-icon authored variance. */
+    spriteWidthPx: number;
 
     /** Font size (px) for both plain and colored/shimmer description text. */
     fontSizePx: number;
@@ -32,9 +37,9 @@ export interface DescriptionSettings {
     tooltipFontSizePx: number;
 }
 
-/** Matches today's actual look (unscaled BBCode width, ItemDetailPage's plain-Typography ~16px body text). */
+/** 40px matches the site's own default icon-insertion width — ItemDetailPage's plain-Typography ~16px body text. */
 export const DEFAULT_DESCRIPTION_SETTINGS: DescriptionSettings = {
-    spriteScale: 1,
+    spriteWidthPx: 40,
     fontSizePx: 16,
     descriptionMode: "text-icons",
     tooltipFontSizePx: 14,

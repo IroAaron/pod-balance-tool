@@ -95,7 +95,10 @@ export default function ItemDescription({ item, description, settingsOverride }:
                 }
 
                 if (part.kind === "icon") {
-                    const width = Math.round(part.width * settings.spriteScale);
+                    // The setting is now a literal width, not a multiplier on part.width (whatever a [img
+                    // width=N] tag was authored with, or the fixed default parseItemDescription assigns to a
+                    // glossary/icon-token match) — see DescriptionSettings.spriteWidthPx.
+                    const width = settings.spriteWidthPx;
                     const imgStyle = { objectFit: "contain" as const, verticalAlign: "middle" as const, margin: "0 2px" };
                     const onImgError = (event: React.SyntheticEvent<HTMLImageElement>) => {
                         event.currentTarget.style.display = "none";

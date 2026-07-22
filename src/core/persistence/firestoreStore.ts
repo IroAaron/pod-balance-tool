@@ -98,8 +98,13 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
     const unsubDescriptionSettings = onSnapshot(
         doc(sharedCol, "descriptionSettings"),
         (snapshot) => {
-            state.descriptionSettings =
-                (snapshot.data() as DescriptionSettings | undefined) ?? DEFAULT_SHARED.descriptionSettings;
+            // Merged over the defaults (not a raw cast) so a doc written before a field existed/was renamed
+            // (e.g. the old spriteScale -> spriteWidthPx rename) falls back sanely for just that field instead
+            // of silently reading as `undefined` until the next full commit from the Settings page.
+            state.descriptionSettings = {
+                ...DEFAULT_SHARED.descriptionSettings,
+                ...(snapshot.data() as Partial<DescriptionSettings> | undefined),
+            };
             emit();
         },
         (error) => console.error("subscribeShared:descriptionSettings", error)
