@@ -14,6 +14,8 @@ import { ImportService, type ImportReport, type ImportResult } from "./services/
 import { computeSuggestedBuilds, computeCascadeBuilds, higherTierIds } from "./domain/relations";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "./domain/descriptionTemplate";
+import { buildExportDescriptionText } from "./domain/exportText";
+import { postExportPayload, type ExportResult } from "./import/sheetSource";
 
 import {
     loadImportCache,
@@ -265,6 +267,59 @@ export class GameStore {
         void updateTranslationOverrideRemote(key, value).catch((error) =>
             console.error("setTranslationOverride → Firestore", error)
         );
+    }
+
+    /** How many translation keys have a site-authored override — what exportEditedTranslations() would send. */
+    get pendingExportCount(): number {
+        return Object.keys(this.translationOverrides).length;
+    }
+
+    /**
+     * Sends every site-edited name/description (not the full 424-item catalog — only what was actually touched
+     * via setTranslationOverride) to the Apps Script's doPost endpoint. Descriptions run through
+     * buildExportDescriptionText first, converting {item:ID}/{tag:Name} tokens and whichever glossary phrases the
+     * site's *current* descriptionMode/enabled settings would actually apply into real [img] BBCode — matches
+     * what the site currently shows, not "every glossary entry unconditionally."
+     */
+    async exportEditedTranslations(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.translationsUrl) {
+            throw new Error("Не задан источник переводов на странице «Источники»");
+        }
+
+        const glossaryToApply =
+            this.descriptionSettings.descriptionMode === "icons-emoji"
+                ? this.glossary
+                : this.descriptionSettings.descriptionMode === "text-icons"
+                  ? this.glossary.filter((entry) => entry.enabled !== false)
+                  : [];
+
+        const names: Record<string, string> = {};
+        const descriptions: Record<string, string> = {};
+
+        for (const item of this.allItems) {
+            const nameKey = item.nameKey ?? item.id;
+            const descKey = item.descKey ?? `${item.id}_desc`;
+
+            const nameOverride = this.translationOverrides[nameKey];
+            if (nameOverride) names[nameKey] = nameOverride;
+
+            const descOverride = this.translationOverrides[descKey];
+            if (descOverride) {
+                descriptions[descKey] = buildExportDescriptionText(descOverride, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+            }
+        }
+
+        return postExportPayload(this.sources.translationsUrl, { token, names, descriptions });
     }
 
     itemName(item: Item): string {

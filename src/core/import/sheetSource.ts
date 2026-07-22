@@ -100,3 +100,45 @@ export async function fetchSourceTables(url: string, sourceLabel: string): Promi
 
     return fetchAppsScriptJson(url);
 }
+
+export interface ExportPayload {
+    token: string;
+
+    /** translation key -> new value, written into item_name's `ru` column. */
+    names: Record<string, string>;
+
+    /** translation key -> new value, written into item_desc's `ru` column. */
+    descriptions: Record<string, string>;
+}
+
+export interface ExportResult {
+    ok: boolean;
+
+    /** Rows written per sheet, only present when ok. */
+    updated?: Record<string, number>;
+
+    error?: string;
+}
+
+/**
+ * POSTs to the same Apps Script Web App URL used for reads — it needs a `doPost` handler added (see the Apps
+ * Script snippet given alongside this feature) that checks `token` against a Script Property before writing.
+ * Sent as `Content-Type: text/plain`, not `application/json` — a real content-type triggers a CORS preflight
+ * (OPTIONS) request first, which Apps Script Web Apps don't handle (no doOptions), so the browser blocks the
+ * actual POST entirely. `text/plain` is a CORS "simple request" (no preflight); `e.postData.contents` on the
+ * Apps Script side receives the same raw JSON string either way, and JSON.parse there doesn't care about the
+ * header we sent it under.
+ */
+export async function postExportPayload(url: string, payload: ExportPayload): Promise<ExportResult> {
+    const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Не удалось отправить данные (HTTP ${response.status})`);
+    }
+
+    return (await response.json()) as ExportResult;
+}

@@ -17,6 +17,7 @@ import {
     Typography,
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
+import type { ExportResult } from "../../../core/import/sheetSource";
 
 // Пока никто ни разу не жал «Скачать», общих значений в Firestore ещё нет — подставляем боевые ссылки на
 // таблицы проекта по умолчанию, чтобы не заставлять первого зашедшего коллегу искать их вручную.
@@ -37,6 +38,9 @@ export default function SourcesPage() {
     const [syncingSprites, setSyncingSprites] = useState(false);
     const [spriteSyncResult, setSpriteSyncResult] = useState<SpriteSyncResult | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [confirmingExport, setConfirmingExport] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
 
     const handleDownloadConfig = () => {
         void store.importConfig(configUrl);
@@ -80,6 +84,19 @@ export default function SourcesPage() {
         if (!pendingSnapshotFile) return;
         void store.importSnapshot(pendingSnapshotFile);
         setPendingSnapshotFile(null);
+    };
+
+    const confirmExport = async () => {
+        setConfirmingExport(false);
+        setExporting(true);
+        setExportResult(null);
+        try {
+            setExportResult(await store.exportEditedTranslations());
+        } catch (error) {
+            setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setExporting(false);
+        }
     };
 
     return (
@@ -164,6 +181,47 @@ export default function SourcesPage() {
                             </Button>
                         </Box>
                     </Stack>
+                </Stack>
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Stack spacing={2}>
+                    <Typography variant="h6">Экспорт правок в Google Sheets</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Отправляет только названия/описания, отредактированные на сайте (не всю таблицу целиком) —
+                        обратно в те же item_name/item_desc по колонке key, в «Источник переводов» выше. Значки
+                        глоссария подключаются так же, как сейчас настроено в Настройках (режим описаний и
+                        включённые записи); {"{item:ID}"}/{"{tag:Имя}"} всегда превращаются в настоящие ссылки.
+                        Требует доработки Apps Script (см. <code>docs/apps-script-export.gs</code>) и
+                        <code> VITE_SHEETS_EXPORT_TOKEN</code> в <code>.env.local</code>.
+                    </Typography>
+
+                    <Box>
+                        <Button
+                            variant="contained"
+                            onClick={() => setConfirmingExport(true)}
+                            disabled={exporting || store.pendingExportCount === 0}
+                            startIcon={exporting ? <CircularProgress size={16} /> : undefined}
+                        >
+                            {exporting
+                                ? "Отправка..."
+                                : `Экспортировать правки (${store.pendingExportCount})`}
+                        </Button>
+                    </Box>
+
+                    {exportResult &&
+                        (exportResult.ok ? (
+                            <Alert severity="success" onClose={() => setExportResult(null)}>
+                                Готово. Обновлено строк:{" "}
+                                {Object.entries(exportResult.updated ?? {})
+                                    .map(([sheet, count]) => `${sheet} — ${count}`)
+                                    .join(", ") || "0"}
+                            </Alert>
+                        ) : (
+                            <Alert severity="error" onClose={() => setExportResult(null)}>
+                                {exportResult.error}
+                            </Alert>
+                        ))}
                 </Stack>
             </Paper>
 
@@ -329,6 +387,23 @@ export default function SourcesPage() {
                     <Button onClick={() => setPendingSnapshotFile(null)}>Отмена</Button>
                     <Button color="error" onClick={confirmSnapshotImport}>
                         Импортировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={confirmingExport} onClose={() => setConfirmingExport(false)}>
+                <DialogTitle>Экспортировать правки в Google Sheets?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Запишет {store.pendingExportCount} отредактированных на сайте названий/описаний обратно в
+                        реальные таблицы item_name/item_desc (по колонке key — существующие строки обновятся,
+                        новых ключей — добавятся). Действие необратимо.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingExport(false)}>Отмена</Button>
+                    <Button color="error" onClick={() => void confirmExport()}>
+                        Экспортировать
                     </Button>
                 </DialogActions>
             </Dialog>
