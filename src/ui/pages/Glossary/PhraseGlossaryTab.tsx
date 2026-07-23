@@ -3,7 +3,7 @@ import { Box, Button, Checkbox, IconButton, Paper, Stack, TextField, Tooltip, Ty
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import type { GlossaryEntry } from "../../../core/models/GlossaryEntry";
-import { IconPreview, InsertDivider, PREVIEW_SLOT_SX } from "./shared";
+import { IconPathField, InsertDivider, PREVIEW_SLOT_SX } from "./shared";
 
 function makeEmptyEntry(): GlossaryEntry {
     return { id: `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, phrases: [] };
@@ -46,24 +46,27 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
 
     // Omits (not just falsy-sets) icon/emoji/note when blank — an explicit `undefined` value on a plain object
     // key is a real, different thing from the key being absent, and Firestore's setDoc rejects the former (see
-    // stripUndefined in firestoreStore.ts, kept as a second line of defense regardless of this one). Takes an
-    // explicit `enabledOverride` since the checkbox commits immediately on click (its own onChange runs before
-    // setEnabled's re-render lands), rather than reading the not-yet-updated `enabled` state variable.
-    const buildFields = (enabledOverride: boolean): Omit<GlossaryEntry, "id"> => ({
+    // stripUndefined in firestoreStore.ts, kept as a second line of defense regardless of this one). Takes
+    // explicit overrides since both the enabled checkbox and the icon picker commit immediately on their own
+    // change/select (their handler runs before the corresponding setState's re-render lands), rather than
+    // reading the not-yet-updated state variable.
+    const buildFields = (enabledOverride: boolean, iconOverride: string): Omit<GlossaryEntry, "id"> => ({
         phrases: parsePhrasesText(phrasesText),
-        ...(icon ? { icon } : {}),
+        ...(iconOverride ? { icon: iconOverride } : {}),
         ...(emoji ? { emoji } : {}),
         ...(note ? { note } : {}),
         enabled: enabledOverride,
     });
 
-    const commit = () => onCommit(entry.id, buildFields(enabled));
+    const commit = () => onCommit(entry.id, buildFields(enabled, icon));
 
     const handleEnabledChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const next = event.target.checked;
         setEnabled(next);
-        onCommit(entry.id, buildFields(next));
+        onCommit(entry.id, buildFields(next, icon));
     };
+
+    const handleIconCommit = (nextIcon: string) => onCommit(entry.id, buildFields(enabled, nextIcon));
 
     return (
         <Fragment>
@@ -101,18 +104,7 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
                         fullWidth
                     />
 
-                    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                        <TextField
-                            label="Иконка (путь)"
-                            value={icon}
-                            onChange={(event) => setIcon(event.target.value)}
-                            onBlur={commit}
-                            size="small"
-                            placeholder="roulette_interface/icons-tags/foo.svg"
-                            fullWidth
-                        />
-                        <IconPreview icon={icon || undefined} />
-                    </Stack>
+                    <IconPathField value={icon} onChange={setIcon} onCommit={handleIconCommit} />
 
                     <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                         <TextField

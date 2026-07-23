@@ -3,7 +3,7 @@ import { Box, Button, IconButton, Paper, Stack, TextField, Typography } from "@m
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import type { TagIcon } from "../../../core/models/TagIcon";
-import { IconPreview, InsertDivider } from "./shared";
+import { IconPathField, InsertDivider } from "./shared";
 
 function makeEmptyEntry(): TagIcon {
     return { id: `tag-icon-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tag: "", icon: "" };
@@ -23,6 +23,9 @@ const TagIconRow = memo(function TagIconRow({ entry, onCommit, onDelete, onInser
     const [icon, setIcon] = useState(entry.icon);
 
     const commit = () => onCommit(entry.id, { tag, icon });
+    // Explicit override, same reasoning as PhraseGlossaryTab's handleIconCommit — the icon picker's onChange
+    // and onCommit run synchronously in the same handler, before setIcon's re-render lands.
+    const handleIconCommit = (nextIcon: string) => onCommit(entry.id, { tag, icon: nextIcon });
 
     return (
         <Fragment>
@@ -38,18 +41,7 @@ const TagIconRow = memo(function TagIconRow({ entry, onCommit, onDelete, onInser
                         fullWidth
                     />
 
-                    <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                        <TextField
-                            label="Иконка (путь)"
-                            value={icon}
-                            onChange={(event) => setIcon(event.target.value)}
-                            onBlur={commit}
-                            size="small"
-                            placeholder="roulette_interface/icons-tags/foo.svg"
-                            fullWidth
-                        />
-                        <IconPreview icon={icon || undefined} />
-                    </Stack>
+                    <IconPathField value={icon} onChange={setIcon} onCommit={handleIconCommit} />
 
                     <IconButton aria-label="Удалить запись" onClick={() => onDelete(entry.id)} size="small">
                         <CloseIcon fontSize="small" />
