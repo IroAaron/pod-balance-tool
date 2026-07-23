@@ -9,16 +9,20 @@ import {
     Checkbox,
     Chip,
     FormControlLabel,
+    IconButton,
     MenuItem,
     Stack,
     TextField,
+    Tooltip,
     Typography,
 } from "@mui/material";
+import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
+import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
 import { computeUpgradeTierIds } from "../../../core/domain/relations";
-import type { ItemSortKey } from "../../../core/services/ItemService";
+import type { ItemSortKey, SortDirection } from "../../../core/services/ItemService";
 import type { Item } from "../../../core/models/Item";
 
 export default function ItemsPage() {
@@ -27,6 +31,7 @@ export default function ItemsPage() {
     const [tags, setTags] = useState<string[]>([]);
     const [itemType, setItemType] = useState("");
     const [sortKey, setSortKey] = useState<ItemSortKey>("name");
+    const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
     const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
 
     // itemName reads live translations at call time, so this stable wrapper stays correct.
@@ -43,7 +48,7 @@ export default function ItemsPage() {
         }
         result = store.itemService.filter(result, { tags, itemType: itemType || undefined });
         result = store.itemService.search(result, query, resolveName);
-        result = store.itemService.sort(result, sortKey, resolveName, resolveBuildCount);
+        result = store.itemService.sort(result, sortKey, resolveName, resolveBuildCount, sortDirection);
         return result;
         // itemService is a stable method on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -56,6 +61,7 @@ export default function ItemsPage() {
         tags,
         itemType,
         sortKey,
+        sortDirection,
         includeUpgradeTiers,
         resolveName,
         resolveBuildCount,
@@ -103,20 +109,32 @@ export default function ItemsPage() {
                     ))}
                 </TextField>
 
-                <TextField
-                    select
-                    label="Сортировка"
-                    value={sortKey}
-                    onChange={(event) => setSortKey(event.target.value as ItemSortKey)}
-                    size="small"
-                    sx={{ minWidth: 160 }}
-                >
-                    <MenuItem value="name">По названию</MenuItem>
-                    <MenuItem value="id">По Id</MenuItem>
-                    <MenuItem value="tags">По тегам</MenuItem>
-                    <MenuItem value="itemType">По типу</MenuItem>
-                    <MenuItem value="buildCount">По присутствию в билдах</MenuItem>
-                </TextField>
+                <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+                    <TextField
+                        select
+                        label="Сортировка"
+                        value={sortKey}
+                        onChange={(event) => setSortKey(event.target.value as ItemSortKey)}
+                        size="small"
+                        sx={{ minWidth: 160 }}
+                    >
+                        <MenuItem value="name">По названию</MenuItem>
+                        <MenuItem value="id">По Id</MenuItem>
+                        <MenuItem value="tags">По тегам</MenuItem>
+                        <MenuItem value="itemType">По типу</MenuItem>
+                        <MenuItem value="buildCount">По присутствию в билдах</MenuItem>
+                    </TextField>
+
+                    <Tooltip title={sortDirection === "asc" ? "По возрастанию" : "По убыванию"}>
+                        <IconButton
+                            size="small"
+                            aria-label="Направление сортировки"
+                            onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
+                        >
+                            {sortDirection === "asc" ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />}
+                        </IconButton>
+                    </Tooltip>
+                </Stack>
 
                 <FormControlLabel
                     control={

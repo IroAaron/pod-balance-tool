@@ -2,6 +2,8 @@ import type { Item } from "../models/Item";
 
 export type ItemSortKey = "name" | "id" | "tags" | "itemType" | "buildCount";
 
+export type SortDirection = "asc" | "desc";
+
 export interface ItemFilters {
     tags?: string[];
 
@@ -43,25 +45,28 @@ export class ItemService {
         items: Item[],
         key: ItemSortKey,
         resolveName: (item: Item) => string = (item) => item.id,
-        resolveBuildCount: (item: Item) => number = () => 0
+        resolveBuildCount: (item: Item) => number = () => 0,
+        direction: SortDirection = "asc"
     ): Item[] {
         const sorted = [...items];
+        const sign = direction === "desc" ? -1 : 1;
 
         sorted.sort((a, b) => {
             switch (key) {
                 case "name":
-                    return resolveName(a).localeCompare(resolveName(b));
+                    return sign * resolveName(a).localeCompare(resolveName(b));
                 case "tags":
-                    return (a.tags[0] ?? "").localeCompare(b.tags[0] ?? "");
+                    return sign * (a.tags[0] ?? "").localeCompare(b.tags[0] ?? "");
                 case "itemType":
-                    return (a.itemType ?? "").localeCompare(b.itemType ?? "");
-                // Ascending — items in the fewest (or no) builds float to the top, so this pairs with the
-                // Items page's "unused in any build" highlight instead of burying those items at the bottom.
+                    return sign * (a.itemType ?? "").localeCompare(b.itemType ?? "");
+                // Ascending default — items in the fewest (or no) builds float to the top, pairing with the
+                // Items page's "unused in any build" highlight instead of burying those items at the bottom;
+                // "desc" flips that to surface the most-used items first instead.
                 case "buildCount":
-                    return resolveBuildCount(a) - resolveBuildCount(b) || resolveName(a).localeCompare(resolveName(b));
+                    return sign * (resolveBuildCount(a) - resolveBuildCount(b) || resolveName(a).localeCompare(resolveName(b)));
                 case "id":
                 default:
-                    return a.id.localeCompare(b.id);
+                    return sign * a.id.localeCompare(b.id);
             }
         });
 
