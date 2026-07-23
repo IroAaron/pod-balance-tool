@@ -362,6 +362,22 @@ interface CascadeIndex {
      * item to nearly every build.
      */
     itemIdsByTargetedTag: Map<string, Set<string>>;
+
+    /** targetId -> items whose MechActivate row fires an extra activation of it directly (UseTargetIds) — the
+     *  "activates" counterpart to targetersOf's "boosts". Kept as a separate map rather than folded into
+     *  targetersOf: an extra activation and a value boost are different effects on the target, even though both
+     *  read as "this item helps that one". */
+    activatorsOf: Map<string, Set<string>>;
+
+    /**
+     * tag -> items whose MechActivate row's own TargetTag filter (not a specific id) fires an extra activation of
+     * anything with that tag. The "activates" counterpart to itemIdsByTargetedTag. Real example: Тренер
+     * (`c_chel_activate_sport_same_color_for_ball_pass_1`, TargetTag=Sport, no UseTargetIds) activates any
+     * Sport-tagged card when the ball passes it — this is what lets level 6 find him as a second-order lever for
+     * Гонщик (tagged Sport), who has no PlayerScore payoff of his own and only enters a build as a level-3
+     * activator (see producedActivatorType's LoopComplitedCounter case).
+     */
+    itemIdsByActivatedTag: Map<string, Set<string>>;
 }
 
 function buildCascadeIndex(
@@ -380,6 +396,8 @@ function buildCascadeIndex(
     const itemIdsByTag = new Map<string, Set<string>>();
     const itemIdsByType = new Map<string, Set<string>>();
     const itemIdsByTargetedTag = new Map<string, Set<string>>();
+    const activatorsOf = new Map<string, Set<string>>();
+    const itemIdsByActivatedTag = new Map<string, Set<string>>();
 
     const addTo = (map: Map<string, Set<string>>, key: string, value: string) => {
         if (!map.has(key)) map.set(key, new Set());
@@ -406,6 +424,17 @@ function buildCascadeIndex(
                 // Card with tag=Sport"), which is just as real a "boosts X" connection as a direct id reference.
                 if (targetIds.length === 0) {
                     for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(itemIdsByTargetedTag, tag, itemId);
+                }
+            }
+
+            if (row.table === "MechActivate") {
+                const targetIds = splitList(row.fields.UseTargetIds ?? "").filter((token) => knownIds.has(token));
+                for (const token of targetIds) addTo(activatorsOf, token, itemId);
+
+                // No concrete target id — the row fires its extra activation via a Tag filter instead, same
+                // "no id ref needed" case as itemIdsByTargetedTag above, just for the "activates" relationship.
+                if (targetIds.length === 0) {
+                    for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(itemIdsByActivatedTag, tag, itemId);
                 }
             }
 
@@ -468,11 +497,48 @@ function buildCascadeIndex(
         itemIdsByProducedTaggedEvent,
         itemIdsByGrantedTag,
         itemIdsByTargetedTag,
+        activatorsOf,
+        itemIdsByActivatedTag,
     };
 }
 
 function recolorersForColor(index: CascadeIndex, color: string): Iterable<string> {
     return RELATIVE_COLOR_VALUES.has(color) ? index.allRecolorers : index.itemIdsByProducedColor.get(color) ?? [];
+}
+
+/** True if this item has at least one MechChangeColor row whose own TargetPlace targets something other than
+ *  itself (anything but the literal "MyPosition" — Near/SameSide/All/Opposite/...), i.e. it genuinely repaints
+ *  someone *else*, not only itself. Needed to tell apart, e.g., Сумасшедший (recolors only himself, TargetPlace=
+ *  MyPosition on every row) from Сумасшедший+ (also has a Near row) when a payoff's filter combines a tag with a
+ *  color: a self-only recolorer that doesn't itself carry the required tag can never produce a matching target
+ *  (see recolorerMatchesTagFilter, the actual caller of this). */
+function recolorsSomethingElse(itemId: string, mechanicsByItem: Map<string, MechanicRow[]>): boolean {
+    return (mechanicsByItem.get(itemId) ?? []).some(
+        (row) => row.table === "MechChangeColor" && row.fields.TargetPlace !== "MyPosition"
+    );
+}
+
+/**
+ * Whether a recolorer candidate is a genuine lever for a payoff row whose Target filter combines a *tag* with a
+ * color (e.g. Тренер: TargetTag=Sport + TargetColor=Same — "a same-color Sport card"). Real example that
+ * motivated this: Сумасшедший only ever repaints himself and isn't Sport-tagged, so repainting himself can never
+ * produce a same-color Sport card — he's not a lever for Тренер at all, even though he's a recolorer and even
+ * though "Same" can't rule out any literal color. A recolorer counts as relevant only if it can plausibly produce
+ * a card carrying the required tag: either it repaints something *other than itself* (could land on any nearby
+ * Sport card, self or not unknown), or it repaints only itself but is *already* tagged with what's required
+ * (repainting itself is what makes it a matching target). No required tag at all (empty `requiredTags`) means
+ * there's nothing to check here — every recolorer for the color stays relevant, same as before this fix.
+ */
+function recolorerMatchesTagFilter(
+    recolorerId: string,
+    requiredTags: string[],
+    itemsById: Map<string, Item>,
+    mechanicsByItem: Map<string, MechanicRow[]>
+): boolean {
+    if (requiredTags.length === 0) return true;
+    if (recolorsSomethingElse(recolorerId, mechanicsByItem)) return true;
+    const ownTags = itemsById.get(recolorerId)?.tags ?? [];
+    return requiredTags.some((tag) => ownTags.includes(tag));
 }
 
 /** Union-of-matches filter (any populated field is independently sufficient) — used for level 3's Activator
@@ -525,7 +591,8 @@ function collectScalers(index: CascadeIndex, fields: { tag?: string; type?: stri
 
 /**
  * Draft one build per item that earns PlayerScore (a MechAddValue row with TargetType=PlayerScore), following a
- * fixed, shallow structure — deliberately NOT a long recursive cascade, per the user's explicit request:
+ * fixed, shallow structure — deliberately NOT an open-ended recursive cascade, per the user's explicit request
+ * (though see level 6 below — one further fixed hop was added later, still not open recursion):
  *   1. Root — the item whose MechAddValue row earns PlayerScore; the build exists because of it.
  *   2. Scalers — items matching that row's Bonus filter, i.e. what's actually being counted to scale the root's
  *      income. Tag and type together are ONE compound condition on the same counted thing (collectScalers) — a
@@ -549,8 +616,23 @@ function collectScalers(index: CascadeIndex, fields: { tag?: string; type?: stri
  *      itemIdsByTargetedTag), since only those actually raise a Value/MoneyValue/etc property; a mechanic from
  *      any other table that merely *names* the root's id or tag (kills it, recolors it, retags it, ...) is a
  *      different kind of relationship and isn't folded in here as if it were a boost.
- * No further recursion past level 5 — each level is computed straight from the root/level-2/level-3 identities,
- * not from whatever got discovered at levels 4/5 themselves.
+ *   6. Activators of the level-2 scalers and level-3 activators — items whose MechActivate row fires an extra
+ *      activation of one of those specific members, either by id (UseTargetIds) or via a TargetTag filter
+ *      matching the member's own static tag (activatorsOf/itemIdsByActivatedTag) — the "activates" counterpart
+ *      to level 5's "spawns/boosts". Added for a real gap: a member that only enters the build at level 3 by
+ *      *producing* an event (e.g. Гонщик, who has no PlayerScore payoff of his own) had nothing asking what
+ *      activates *him* — Тренер does, via TargetTag=Sport, with no id reference at all.
+ *   6b. Recolorers feeding a level-6 activator's own TargetColor filter — same relative-placeholder handling as
+ *      level 5's BonusTargetColor (RELATIVE_COLOR_VALUES), but additionally filtered by recolorerMatchesTagFilter
+ *      when the row also has a TargetTag (a compound "tag AND color" condition, same principle as level 2's
+ *      Bonus filter): a recolorer only counts if it could plausibly produce a card carrying that tag — either it
+ *      repaints something other than itself, or it repaints only itself but already carries the tag. Real
+ *      example: Тренер's row is TargetTag=Sport *and* TargetColor=Same — Сумасшедший repaints only himself and
+ *      isn't Sport-tagged, so he can never become a matching target and is correctly excluded, unlike
+ *      Сумасшедший+ (also repaints nearby cards) or a hypothetical self-recoloring Sport character.
+ * No further recursion past level 6 — each level is computed straight from the root/level-2/level-3 identities
+ * (level 6 additionally reads level-2/level-3's own identities, but does not recurse into whatever it itself
+ * discovers).
  *
  * A PlayerScore payoff row is only root-eligible when it modifies MainValue *and* the item has a real ValueMin/
  * ValueMax range configured (see isEligiblePayoffRow/hasNoRealMainValueRange) — a MoneyValue payoff (e.g. the
@@ -570,6 +652,7 @@ export function computeCascadeBuilds(
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
     const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
+    const itemsById = new Map(items.map((item) => [item.id, item]));
 
     const roots = items.filter((item) =>
         (mechanicsByItem.get(item.id) ?? []).some((row) => isEligiblePayoffRow(item, row, includeMoneyValueRoots))
@@ -647,6 +730,45 @@ export function computeCascadeBuilds(
             for (const id of index.itemIdsByTargetedTag.get(tag) ?? []) buildItems.add(id);
         }
 
+        // Level 6 — activators of the level-2 scalers and level-3 activators: items that fire an *extra*
+        // activation of one of those members specifically (MechActivate), either by naming its id directly or via
+        // a TargetTag filter matching its own static tag — the "activates" counterpart to level 5's
+        // spawns/boosts. Real example: Гонщик enters the build at level 3 (he structurally produces LoopCompleted
+        // for a Дальнобойщик/Банк root), but has no PlayerScore payoff of his own, so nothing before this level
+        // ever asked what activates *him*. Тренер does, via TargetTag=Sport matching Гонщик's own static tag —
+        // without level 6 that second-order scaling lever stayed invisible. One fixed hop past level 5, computed
+        // straight from the level-2/level-3 identities already found — not a further recursive cascade.
+        const level6Activators = new Set<string>();
+        for (const memberId of [...scalers, ...activatorsAll]) {
+            for (const id of index.activatorsOf.get(memberId) ?? []) level6Activators.add(id);
+            for (const tag of itemsById.get(memberId)?.tags ?? []) {
+                for (const id of index.itemIdsByActivatedTag.get(tag) ?? []) level6Activators.add(id);
+            }
+        }
+        for (const id of level6Activators) buildItems.add(id);
+
+        // Level 6b — recolorers feeding a level-6 activator's own TargetColor filter (relative placeholders —
+        // Same/NotSame/Random — treated as "any recolorer", same as level 5's BonusTargetColor handling; see
+        // RELATIVE_COLOR_VALUES). Real example: Тренер's own row is TargetTag=Sport *and* TargetColor=Same — he
+        // only activates same-color Sport cards, so a recolorer that can shift something into matching color
+        // (or repaint Тренер himself) is a genuine lever for reaching that activation at all, not just Тренер's
+        // mere presence in the build. But TargetTag+TargetColor together is ONE compound condition, same as
+        // level 2's Bonus filter — a recolorer only counts when it could plausibly produce a *Sport* card of that
+        // color, not any recolorer whatsoever (see recolorerMatchesTagFilter: Сумасшедший repaints only himself
+        // and isn't Sport-tagged, so he can never satisfy this specific filter, unlike Сумасшедший+ who also
+        // repaints nearby cards).
+        for (const activatorId of level6Activators) {
+            for (const row of mechanicsByItem.get(activatorId) ?? []) {
+                if (row.table !== "MechActivate") continue;
+                const requiredTags = splitList(row.fields.TargetTag ?? "");
+                for (const color of splitList(row.fields.TargetColor ?? "")) {
+                    for (const id of recolorersForColor(index, color)) {
+                        if (recolorerMatchesTagFilter(id, requiredTags, itemsById, mechanicsByItem)) buildItems.add(id);
+                    }
+                }
+            }
+        }
+
         if (buildItems.size < 2) continue;
 
         const clusterItems = [...buildItems];
@@ -703,6 +825,26 @@ function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): 
                 for (const color of [
                     ...splitList(row.fields.ActivatorColor ?? ""),
                     ...splitList(row.fields.BonusTargetColor ?? ""),
+                ]) {
+                    for (const id of recolorersForColor(index, color)) connect(itemId, id);
+                }
+            }
+
+            // MechActivate rows were previously invisible to this signal entirely — an item that fires an *extra*
+            // activation of anything carrying a tag (e.g. Тренер: TargetTag=Sport, no UseTargetIds) never
+            // connected to its targets unless it also happened to name one by id. Real example: Тренер
+            // (`c_chel_activate_sport_same_color_for_ball_pass_1`) activates any Sport-tagged card when the ball
+            // passes it — that's exactly how he reaches Гонщик (statically tagged `Sport`), with no id reference
+            // between them at all. Same tag/color-filter treatment as the MechAddValue block above, just against
+            // this table's own Activator/Target columns (MechActivate has no Bonus* fields).
+            if (row.table === "MechActivate") {
+                for (const tag of [...splitList(row.fields.ActivatorTag ?? ""), ...splitList(row.fields.TargetTag ?? "")]) {
+                    for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
+                    for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) connect(itemId, id);
+                }
+                for (const color of [
+                    ...splitList(row.fields.ActivatorColor ?? ""),
+                    ...splitList(row.fields.TargetColor ?? ""),
                 ]) {
                     for (const id of recolorersForColor(index, color)) connect(itemId, id);
                 }

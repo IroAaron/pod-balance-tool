@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeCascadeBuilds } from "./relations";
+import { computeCascadeBuilds, relatedItems } from "./relations";
 import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
 import type { ReplaceRule } from "../models/ReplaceRule";
@@ -371,5 +371,148 @@ describe("computeCascadeBuilds item selection", () => {
         expect(stadiumBuild?.has(racer.id)).toBe(true);
         expect(truckerBuild).toBeDefined(); // previously skipped entirely — root alone never reached size >= 2
         expect(truckerBuild?.has(racer.id)).toBe(true);
+    });
+
+    it("level 6 chases activators of level-3 activators via a TargetTag filter (real Дальнобойщик/Гонщик/Тренер shape)", () => {
+        // Гонщик enters Дальнобойщик's build at level 3 (produces LoopCompleted, see the test above). Тренер
+        // activates any Sport-tagged card (TargetTag=Sport, no UseTargetIds) when the ball passes him — since
+        // Гонщик is tagged Sport, Тренер is a genuine second-order lever (more Гонщик activations -> more loops
+        // completed -> more Дальнобойщик payoffs) that only level 6 can reach.
+        const trucker = makeItem("trucker", { valueMin: 15, valueMax: 15 });
+        const racer = makeItem("racer", { tags: ["Sport"] });
+        const trainer = makeItem("trainer");
+        const unrelated = makeItem("unrelated", { tags: ["Bum"] });
+        const items = [trucker, racer, trainer, unrelated];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(trucker.id, { ActivatorType: "LoopCompleted" }),
+            {
+                id: "racer-loop-counter",
+                table: "MechAddValue",
+                itemId: racer.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTargetType: "Road",
+                    ActivatorPlace: "MyPosition",
+                    TargetType: "LoopComplitedCounter",
+                    TargetCount: "1",
+                },
+            },
+            {
+                id: "trainer-activate",
+                table: "MechActivate",
+                itemId: trainer.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Sport" },
+            },
+        ];
+
+        const built = buildItemsFor(trucker.id, items, mechanics);
+
+        expect(built?.has(racer.id)).toBe(true); // level 3, unchanged
+        expect(built?.has(trainer.id)).toBe(true); // level 6, new
+        expect(built?.has(unrelated.id)).toBe(false);
+    });
+
+    it("level 6b chases recolorers matching a level-6 activator's own TargetColor filter, but only ones that could actually produce a matching-tag card (real Тренер/Сумасшедший shape)", () => {
+        // Тренер's row carries TargetTag=Sport *and* TargetColor=Same — one compound "same-color Sport card"
+        // condition, not "any Sport card" union "any recolorer". Сумасшедший only ever repaints himself
+        // (TargetPlace=MyPosition on his one MechChangeColor row) and isn't Sport-tagged, so repainting himself
+        // can never produce a same-color Sport card — he's correctly excluded, per the user's real bug report.
+        // Сумасшедший+-shaped (recolors Near too, real tier-2 shape) IS relevant, since that could land on a
+        // nearby Sport card. A hypothetical self-recoloring *Sport*-tagged item is also relevant, since
+        // repainting itself is exactly what would make it a matching target.
+        const trucker = makeItem("trucker", { valueMin: 15, valueMax: 15 });
+        const racer = makeItem("racer", { tags: ["Sport"] });
+        const trainer = makeItem("trainer");
+        const crazySelfOnly = makeItem("crazy_self_only"); // real Сумасшедший shape: no tags, self-only recolor
+        const crazyPlusNear = makeItem("crazy_plus_near"); // real Сумасшедший+ shape: also recolors Near
+        const sportSelfPainter = makeItem("sport_self_painter", { tags: ["Sport"] });
+        const unrelated = makeItem("unrelated", { tags: ["Bum"] });
+        const items = [trucker, racer, trainer, crazySelfOnly, crazyPlusNear, sportSelfPainter, unrelated];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(trucker.id, { ActivatorType: "LoopCompleted" }),
+            {
+                id: "racer-loop-counter",
+                table: "MechAddValue",
+                itemId: racer.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTargetType: "Road",
+                    ActivatorPlace: "MyPosition",
+                    TargetType: "LoopComplitedCounter",
+                    TargetCount: "1",
+                },
+            },
+            {
+                id: "trainer-activate",
+                table: "MechActivate",
+                itemId: trainer.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorPlace: "MyPosition",
+                    TargetType: "Card",
+                    TargetTag: "Sport",
+                    TargetColor: "Same",
+                },
+            },
+            {
+                id: "crazy-self-recolor",
+                table: "MechChangeColor",
+                itemId: crazySelfOnly.id,
+                fields: { TargetPlace: "MyPosition", NewColor: "Random" },
+            },
+            {
+                id: "crazy-plus-self-recolor",
+                table: "MechChangeColor",
+                itemId: crazyPlusNear.id,
+                fields: { TargetPlace: "MyPosition", NewColor: "Same" },
+            },
+            {
+                id: "crazy-plus-near-recolor",
+                table: "MechChangeColor",
+                itemId: crazyPlusNear.id,
+                fields: { TargetPlace: "Near", NewColor: "Same" },
+            },
+            {
+                id: "sport-self-painter-recolor",
+                table: "MechChangeColor",
+                itemId: sportSelfPainter.id,
+                fields: { TargetPlace: "MyPosition", NewColor: "Same" },
+            },
+        ];
+
+        const built = buildItemsFor(trucker.id, items, mechanics);
+
+        expect(built?.has(trainer.id)).toBe(true); // level 6, unchanged
+        expect(built?.has(crazySelfOnly.id)).toBe(false); // self-only AND not Sport-tagged — never a valid target
+        expect(built?.has(crazyPlusNear.id)).toBe(true); // recolors Near too — could land on a Sport card
+        expect(built?.has(sportSelfPainter.id)).toBe(true); // self-only, but already Sport-tagged
+        expect(built?.has(unrelated.id)).toBe(false);
+    });
+});
+
+describe("relatedItems MechActivate tag-filter connections", () => {
+    it("a MechActivate row targeting by tag (no UseTargetIds) connects to items statically carrying that tag (real Тренер/Гонщик shape)", () => {
+        // Тренер (c_chel_activate_sport_same_color_for_ball_pass_1): MechActivate row with TargetTag=Sport and no
+        // UseTargetIds — activates any Sport-tagged card when the ball passes. Before this fix,
+        // buildCascadeStyleConnections only inspected MechAddValue rows for this kind of tag-filter match, so
+        // Тренер never showed up as related to Гонщик (statically tagged Sport) despite genuinely activating him.
+        const trainer = makeItem("trainer");
+        const racer = makeItem("racer", { tags: ["Sport"] });
+        const unrelated = makeItem("unrelated", { tags: ["Bum"] });
+        const items = [trainer, racer, unrelated];
+        const mechanics: MechanicRow[] = [
+            {
+                id: "trainer-activate",
+                table: "MechActivate",
+                itemId: trainer.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Sport" },
+            },
+        ];
+
+        const related = relatedItems(trainer.id, items, mechanics, [], []);
+        const racerRelation = related.find((rel) => rel.id === racer.id);
+
+        expect(racerRelation?.strength).toBe("strong");
+        expect(related.some((rel) => rel.id === unrelated.id)).toBe(false);
     });
 });
