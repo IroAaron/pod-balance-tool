@@ -2,6 +2,7 @@ import type { Item } from "../models/Item";
 import type { GlossaryEntry } from "../models/GlossaryEntry";
 import type { TagIcon } from "../models/TagIcon";
 import { getItemSpriteFileName } from "./sprites";
+import { normalizeIconRelativePath } from "./descriptionTemplate";
 
 /**
  * Turns a raw, site-edited description back into the game's own BBCode shape for export to item_desc — the
@@ -35,7 +36,10 @@ const RELATIVE_BASE_TO_RES_PREFIX: Array<{ relativeBase: string; resPrefix: stri
  *  GlossaryEntry/TagIcon) back into the res:// form the game's own BBCode expects. Undefined if the path isn't
  *  under one of the two synced folders (matches the render side's "unrecognized prefix" philosophy). */
 function reconstructResPath(relativePath: string): string | undefined {
-    const trimmed = relativePath.replace(/^\/+/, "");
+    // Stored icon paths may use either the site's canonical lowercase-hyphenated folder names or the game's
+    // real Godot casing (Icons_tags, Icons_tags_fields) — same mismatch normalizeIconRelativePath fixes for
+    // rendering. Normalize first so both forms reconstruct the same real res:// path here.
+    const trimmed = normalizeIconRelativePath(relativePath);
     const match = RELATIVE_BASE_TO_RES_PREFIX.find((entry) => trimmed.startsWith(entry.relativeBase));
     if (!match) return undefined;
     return `${match.resPrefix}${trimmed.slice(match.relativeBase.length)}`;

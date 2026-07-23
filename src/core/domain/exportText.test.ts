@@ -67,6 +67,18 @@ describe("buildExportDescriptionText", () => {
         );
     });
 
+    // Real entries on the deployed site were stored using the game's actual Godot folder casing (Icons_tags,
+    // not the site's internal icons-tags) — reconstructResPath must normalize that the same way the render
+    // side does, or export silently leaves the token unresolved instead of producing real BBCode.
+    it("reconstructs a res:// path for a TagIcon entry stored with Godot-style folder casing", () => {
+        const context = makeContext({
+            tagIcons: [{ id: "t1", tag: "Преступник", icon: "roulette_interface/Icons_tags/ui_icon_criminal.svg" }],
+        });
+        expect(buildExportDescriptionText("{tag:Преступник}", context)).toBe(
+            "[img width=40]res://roulette_interface/Icons_tags/ui_icon_criminal.svg[/img]"
+        );
+    });
+
     it("replaces a glossary-matched phrase with its icon, only when passed in glossaryToApply", () => {
         const glossary = [{ id: "g1", phrases: ["активирует"], icon: "roulette_interface/icons-tags/activate.svg" }];
         expect(

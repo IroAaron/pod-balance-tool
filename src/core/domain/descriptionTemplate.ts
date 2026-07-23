@@ -203,7 +203,9 @@ const ICON_FOLDER_ALIASES: Array<{ match: RegExp; canonical: string }> = [
     { match: /^pod-mini[_ -]characters$/i, canonical: "pod-mini-characters" },
 ];
 
-function normalizeIconRelativePath(icon: string): string {
+/** Exported so exportText.ts's reconstructResPath can normalize the same way before matching against its own
+ *  canonical-prefix table — the export direction hit the exact same real-vs-canonical casing mismatch. */
+export function normalizeIconRelativePath(icon: string): string {
     const segments = icon
         .trim()
         .replace(/^res:\/\//, "")
