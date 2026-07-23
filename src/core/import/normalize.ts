@@ -284,8 +284,22 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
         }
     }
 
+    // Multiple raw tables can classify as "Items" (Cards/Houses/Artefacts, and occasionally a misclassified one —
+    // a real production sheet had a "MechAddValue (копия)" tab wrongly detected as Items) with no guarantee their
+    // ItemIds are disjoint. Left undeduplicated, this doesn't fail loudly — it silently breaks React's key-based
+    // reconciliation on any page that lists items (stale cards, items appearing in the wrong position after a
+    // re-sort), which looks like an unrelated rendering bug rather than a duplicate-data problem. Last entry
+    // wins, same "later write overwrites earlier" convention as GameStore's mergeById.
+    const dedupedItems = [...new Map(items.map((item) => [item.id, item])).values()];
+    if (dedupedItems.length !== items.length) {
+        warnings.push({
+            sourceName: "Items",
+            message: `Найдено ${items.length - dedupedItems.length} предмет(ов) с повторяющимся ItemId в разных таблицах — оставлена последняя запись для каждого`,
+        });
+    }
+
     return {
-        data: { items, translations, mechanics, upgradeChains, replaceRules, enumValues },
+        data: { items: dedupedItems, translations, mechanics, upgradeChains, replaceRules, enumValues },
         warnings,
     };
 }
