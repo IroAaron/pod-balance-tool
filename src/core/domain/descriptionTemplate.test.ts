@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseItemDescription, TAG_ICON_BASE_PATH, TAG_ICON_FIELDS_BASE_PATH } from "./descriptionTemplate";
+import { parseItemDescription, glossaryIconSrc, TAG_ICON_BASE_PATH, TAG_ICON_FIELDS_BASE_PATH } from "./descriptionTemplate";
 import { SPRITE_BASE_PATH } from "./sprites";
 import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
@@ -382,5 +382,34 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
         expect(parseItemDescription(makeItem(), "{glossary:g1}", [], [], iconTokens)).toEqual([
             { kind: "text", value: "{glossary:g1}" },
         ]);
+    });
+});
+
+describe("glossaryIconSrc", () => {
+    it("resolves an already-canonical lowercase-hyphenated path unchanged", () => {
+        expect(glossaryIconSrc("roulette_interface/icons-tags/foo.svg")).toBe(`${TAG_ICON_BASE_PATH}foo.svg`);
+    });
+
+    // Real broken entries found on the deployed glossary 2026-07-23 — typed using the game's actual Godot
+    // res:// folder casing (Icons_tags/Icons_tags_fields), which 404s against the lowercase-hyphenated
+    // folders the sync scripts actually write to disk (GitHub Pages' filesystem is case-sensitive).
+    it("normalizes Godot-style casing (Icons_tags_fields) to the on-disk folder name", () => {
+        expect(glossaryIconSrc("roulette_interface/Icons_tags_fields/ui_field_02_icon_corners.svg")).toBe(
+            `${TAG_ICON_FIELDS_BASE_PATH}ui_field_02_icon_corners.svg`
+        );
+    });
+
+    it("normalizes Godot-style casing (Icons_tags) to the on-disk folder name", () => {
+        expect(glossaryIconSrc("roulette_interface/Icons_tags/ui_icon_activation.svg")).toBe(
+            `${TAG_ICON_BASE_PATH}ui_icon_activation.svg`
+        );
+    });
+
+    it("adds the missing roulette_interface/ prefix when the folder name is recognized without it", () => {
+        expect(glossaryIconSrc("icons-tags/ui_icon_cell.svg")).toBe(`${TAG_ICON_BASE_PATH}ui_icon_cell.svg`);
+    });
+
+    it("strips a res:// prefix if present", () => {
+        expect(glossaryIconSrc("res://roulette_interface/Icons_tags/foo.svg")).toBe(`${TAG_ICON_BASE_PATH}foo.svg`);
     });
 });

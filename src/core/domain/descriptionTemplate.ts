@@ -191,8 +191,38 @@ function escapeRegExp(value: string): string {
 /** src for a glossary entry's icon, resolved the same way [img] tags in a description already are — a path
  *  relative to `public/` (e.g. "roulette_interface/icons-tags/foo.svg"), not a res:// BBCode tag. Exported so
  *  GlossaryPage's own live icon preview resolves identically to how the description renderer will actually show it. */
+/** Folder names as they actually appear in Godot res:// paths (and as people naturally type/paste them into the
+ *  glossary/tag-icon "icon" field, matching real description text) vs. the lowercase-hyphenated form the sync
+ *  scripts (scripts/sync-sprites.mjs, deploy.yml) actually write to public/roulette_interface/ on disk. GitHub
+ *  Pages serves from a case-sensitive filesystem, so typing the Godot-style casing 404s silently — found
+ *  2026-07-23 via real broken entries on the deployed glossary ("Icons_tags_fields/..." and a path missing its
+ *  "roulette_interface/" prefix entirely, both 404 while the canonical form 200'd). */
+const ICON_FOLDER_ALIASES: Array<{ match: RegExp; canonical: string }> = [
+    { match: /^icons[_-]tags[_-]fields$/i, canonical: "icons-tags-fields" },
+    { match: /^icons[_-]tags$/i, canonical: "icons-tags" },
+    { match: /^pod-mini[_ -]characters$/i, canonical: "pod-mini-characters" },
+];
+
+function normalizeIconRelativePath(icon: string): string {
+    const segments = icon
+        .trim()
+        .replace(/^res:\/\//, "")
+        .replace(/^\/+/, "")
+        .split("/");
+
+    const hasRootFolder = segments[0]?.toLowerCase() === "roulette_interface";
+    const folderIndex = hasRootFolder ? 1 : 0;
+    const alias = segments[folderIndex] ? ICON_FOLDER_ALIASES.find((entry) => entry.match.test(segments[folderIndex])) : undefined;
+    if (!alias) return segments.join("/");
+
+    segments[folderIndex] = alias.canonical;
+    if (!hasRootFolder) segments.unshift("roulette_interface");
+    else segments[0] = "roulette_interface";
+    return segments.join("/");
+}
+
 export function glossaryIconSrc(icon: string): string {
-    return `${import.meta.env.BASE_URL}${icon.replace(/^\/+/, "")}`;
+    return `${import.meta.env.BASE_URL}${normalizeIconRelativePath(icon)}`;
 }
 
 type PhraseMatch = { phrase: string; entry: GlossaryEntry };
