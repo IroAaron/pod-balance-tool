@@ -106,6 +106,20 @@ export function IconPathField({
                 options={options}
                 groupBy={(option) => (typeof option === "string" ? "" : option.group)}
                 getOptionLabel={(option) => (typeof option === "string" ? option : option.label)}
+                renderOption={(props, option) => (
+                    <Stack component="li" {...props} direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                        <Box
+                            component="img"
+                            src={glossaryIconSrc(typeof option === "string" ? option : option.value)}
+                            alt=""
+                            sx={{ ...PREVIEW_SLOT_SX, objectFit: "contain" }}
+                            // A raw <img> (not IconPreview) — every option here comes straight from a real
+                            // manifest, so a broken preview would mean the manifest itself is stale, worth
+                            // seeing rather than silently hiding like a hand-typed path might need to.
+                        />
+                        <span>{typeof option === "string" ? option : option.label}</span>
+                    </Stack>
+                )}
                 inputValue={value}
                 // MUI also fires onInputChange (reason "reset") right after a selection, with the display text
                 // (getOptionLabel — just the filename) rather than the full path onChange already committed —
