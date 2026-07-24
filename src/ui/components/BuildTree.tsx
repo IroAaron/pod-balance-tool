@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { Box, Chip, Stack, Tooltip, Typography } from "@mui/material";
+import { Box, Chip, Paper, Stack, Tooltip, Typography } from "@mui/material";
 import { useStore } from "../hooks/useStore";
 import ItemIcon from "./ItemIcon";
 import ItemDescription from "./ItemDescription";
@@ -396,7 +396,7 @@ export default function BuildTree({ build }: Props) {
 
     return (
         <Stack direction={{ xs: "column", md: "row" }} spacing={3} sx={{ alignItems: "flex-start" }}>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Paper sx={{ p: 3, flex: 1, minWidth: 0 }}>
                 {/* zIndex here (not just position:relative) matters: it makes this box its own stacking context, so
                     the edges SVG's negative z-index below stays contained to "behind the node boxes in here" instead
                     of escaping to the nearest ancestor stacking context and rendering behind unrelated page content
@@ -511,18 +511,23 @@ export default function BuildTree({ build }: Props) {
                         </Stack>
                     </Box>
                 )}
-            </Box>
+            </Paper>
 
-            <Box
+            <Paper
+                variant="outlined"
                 sx={{
-                    width: { xs: "100%", md: 280 },
+                    p: 2,
+                    width: { xs: "100%", md: 320 },
                     flexShrink: 0,
                     position: { md: "sticky" },
                     top: { md: 16 },
                 }}
             >
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    Почему предмет здесь
+                </Typography>
                 <DetailPanel node={hoveredNode} onOpen={setOpenItemId} />
-            </Box>
+            </Paper>
 
             <DetailModal open={openItemId !== null} onClose={() => setOpenItemId(null)}>
                 {openItemId && <ItemDetailPage id={openItemId} />}

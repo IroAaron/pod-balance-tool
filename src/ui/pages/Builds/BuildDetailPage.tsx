@@ -68,7 +68,7 @@ export default function BuildDetailPage({ id: idProp }: Props = {}) {
     );
 
     return (
-        <Stack spacing={3} sx={{ maxWidth: 900 }}>
+        <Stack spacing={3} sx={{ maxWidth: 1300 }}>
             {!inModal && (
                 <Button component={RouterLink} to="/builds" size="small" sx={{ alignSelf: "flex-start" }}>
                     ← К списку билдов
@@ -131,16 +131,16 @@ export default function BuildDetailPage({ id: idProp }: Props = {}) {
             </Paper>
 
             {build.items.length > 0 && (
-                <Paper sx={{ p: 3 }}>
+                <Box>
                     <Typography variant="h6" sx={{ mb: 2 }}>
                         Дерево связей
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                         Ступени прямых/непрямых связей между предметами билда, от головного предмета (первого в
-                        списке) вниз.
+                        списке) вниз. Почему конкретный предмет здесь — справа, отдельным блоком.
                     </Typography>
                     <BuildTree build={build} />
-                </Paper>
+                </Box>
             )}
 
             <Paper sx={{ p: 3 }}>
