@@ -1114,3 +1114,103 @@ describe("computeCascadeLevels", () => {
         ]);
     });
 });
+
+/**
+ * Regression coverage for the 2026-07-24 "context nodes" polish: real motivating example — Киллер (a real member
+ * of "Билд от Банка") kills indiscriminately, and other items that react to *any* kill are thematically relevant
+ * even though they don't scale the root and often aren't build members at all. Off by default (BuildsPage's bulk
+ * per-card depth lookup doesn't need it); BuildTree opts in via `options.includeRelatedContext`.
+ */
+describe("computeCascadeLevels context nodes (options.includeRelatedContext)", () => {
+    function killerListenerFixture() {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const killer = makeItem("killer"); // real build member — kills indiscriminately, feeds root
+        const listener = makeItem("listener"); // NOT a build member — reacts to any kill, same as killer's victims
+        const items = [root, killer, listener];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorType: "ItemRemoved", ActivatorTag: "" }),
+            {
+                id: "killer-kill",
+                table: "MechAddItem",
+                itemId: killer.id,
+                fields: { ActivatorType: "BallPass", ItemMech: "удалить" },
+            },
+            {
+                id: "listener-reacts",
+                table: "MechAddValue",
+                itemId: listener.id,
+                fields: {
+                    ActivatorType: "ItemRemoved",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = { id: "bank", name: "Билд от Банка", items: [root.id, killer.id], auto: true };
+        return { root, killer, listener, items, mechanics, build };
+    }
+
+    it("is off by default — a strongly-related non-member never appears", () => {
+        const { listener, items, mechanics, build } = killerListenerFixture();
+        const result = computeCascadeLevels(build, items, mechanics, []);
+        expect(result.nodes.some((n) => n.itemId === listener.id)).toBe(false);
+    });
+
+    it("adds a strongly-related non-member as an extra node, one hop past its anchor, marked extra:true", () => {
+        const { root, killer, listener, items, mechanics, build } = killerListenerFixture();
+        const originalItems = [...build.items];
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const killerNode = result.nodes.find((n) => n.itemId === killer.id);
+        const listenerNode = result.nodes.find((n) => n.itemId === listener.id);
+        expect(killerNode?.depth).toBe(1);
+        expect(listenerNode).toMatchObject({
+            depth: 2,
+            extra: true,
+            parents: [{ itemId: killer.id, reason: "related" }],
+        });
+        // Never a build-membership change — listener was never a build member and stays out of unclassified, and
+        // the build's own item list is untouched by this call.
+        expect(result.unclassified).toEqual([]);
+        expect(build.items).toEqual(originalItems);
+        expect(build.items).toEqual([root.id, killer.id]);
+    });
+
+    it("a build member explained only via context isn't double-listed in unclassified", () => {
+        // sidekick is a real build member with no structural generation edge of its own to the root, but it *is*
+        // strongly related to killer (shares the same ItemRemoved reaction) — should show as an extra node in the
+        // tree instead of also sitting in the flat unclassified chip list.
+        const { root, killer, items: baseItems, mechanics: baseMechanics, build } = killerListenerFixture();
+        const sidekick = makeItem("sidekick");
+        const items = [...baseItems, sidekick];
+        const mechanics: MechanicRow[] = [
+            ...baseMechanics,
+            {
+                id: "sidekick-reacts",
+                table: "MechAddValue",
+                itemId: sidekick.id,
+                fields: {
+                    ActivatorType: "ItemRemoved",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        build.items = [root.id, killer.id, sidekick.id];
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const sidekickNode = result.nodes.find((n) => n.itemId === sidekick.id);
+        expect(sidekickNode?.extra).toBe(true);
+        expect(result.unclassified).toEqual([]);
+    });
+});
