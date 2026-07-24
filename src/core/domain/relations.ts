@@ -1268,6 +1268,14 @@ function placeCombosInGraph(nodes: CascadeLevelNode[], combos: ComboInfo[]): Set
  * Mutates `nodes` in place. Runs once against a snapshot of the graph's own real (non-combo) members taken before
  * the loop starts — an added node doesn't get its own second pass, so this stays a single "what else is around"
  * note rather than another BFS that could cascade arbitrarily far from the actual build.
+ *
+ * An item can be "related" to *more than one* anchor at once (real example: Медсестра reacts to ItemRemoved, and
+ * so do Маньяк, Killer, *and* Электрический стул all independently — she's not exclusively explained by whichever
+ * one happens to be first in iteration order). The first anchor to find a given item creates its extra node; every
+ * later anchor that's also strongly related to it appends an *additional* `related` parent to that same node
+ * instead of being silently dropped — the same "keep every real edge" rule the main scaling graph's multi-parent
+ * BFS already applies (see computeScalingGraphInternal). Original (non-extra) nodes are never touched here, only
+ * read — their depth/parents already come from the real generation graph.
  */
 function addRelatedContextNodes(
     nodes: CascadeLevelNode[],
@@ -1276,19 +1284,28 @@ function addRelatedContextNodes(
     upgradeChains: UpgradeChain[],
     replaceRules: ReplaceRule[]
 ): void {
-    const present = new Set(nodes.map((node) => node.itemId));
+    const originalIds = new Set(nodes.map((node) => node.itemId));
+    const addedNodes = new Map<string, CascadeLevelNode>();
     const anchors = nodes.filter((node) => !node.combo);
 
     for (const anchor of anchors) {
         for (const rel of relatedItems(anchor.itemId, items, mechanics, upgradeChains, replaceRules)) {
-            if (rel.strength !== "strong" || present.has(rel.id)) continue;
-            nodes.push({
+            if (rel.strength !== "strong" || originalIds.has(rel.id)) continue;
+
+            const existing = addedNodes.get(rel.id);
+            if (existing) {
+                existing.parents = [...existing.parents, { itemId: anchor.itemId, reason: "related" }];
+                continue;
+            }
+
+            const node: CascadeLevelNode = {
                 itemId: rel.id,
                 depth: anchor.depth + 1,
                 parents: [{ itemId: anchor.itemId, reason: "related" }],
                 extra: true,
-            });
-            present.add(rel.id);
+            };
+            nodes.push(node);
+            addedNodes.set(rel.id, node);
         }
     }
 }

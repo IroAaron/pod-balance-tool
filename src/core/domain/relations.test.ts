@@ -1213,6 +1213,55 @@ describe("computeCascadeLevels context nodes (options.includeRelatedContext)", (
         expect(sidekickNode?.extra).toBe(true);
         expect(result.unclassified).toEqual([]);
     });
+
+    it("an item strongly related to several real anchors at once keeps a parent for every one of them, not just the first found", () => {
+        // Real motivating example: Медсестра reacts to ItemRemoved the same way Маньяк, Killer, and Электрический
+        // стул all independently produce it — she shouldn't end up attached to only whichever one the anchor loop
+        // happens to reach first.
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const killer1 = makeItem("killer1");
+        const killer2 = makeItem("killer2");
+        const nurse = makeItem("nurse"); // not a build member — reacts to any kill, same as both killers' victims
+        const items = [root, killer1, killer2, nurse];
+        const killRow = (id: string, itemId: string) => ({
+            id,
+            table: "MechAddItem" as const,
+            itemId,
+            fields: { ActivatorType: "BallPass", ItemMech: "удалить" },
+        });
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorType: "ItemRemoved", ActivatorTag: "" }),
+            killRow("killer1-kill", killer1.id),
+            killRow("killer2-kill", killer2.id),
+            {
+                id: "nurse-reacts",
+                table: "MechAddValue",
+                itemId: nurse.id,
+                fields: {
+                    ActivatorType: "ItemRemoved",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = { id: "b", name: "Билд", items: [root.id, killer1.id, killer2.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const nurseNode = result.nodes.find((n) => n.itemId === nurse.id);
+        expect(nurseNode?.extra).toBe(true);
+        expect(nurseNode?.parents).toEqual(
+            expect.arrayContaining([
+                { itemId: killer1.id, reason: "related" },
+                { itemId: killer2.id, reason: "related" },
+            ])
+        );
+        expect(nurseNode?.parents.length).toBe(2);
+    });
 });
 
 /**
