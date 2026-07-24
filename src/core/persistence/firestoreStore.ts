@@ -248,8 +248,18 @@ export function addCustomParamValueRemote(dimension: string, value: string): Pro
     return upsertDocField(doc(sharedCol, "customParamValues"), dimension, arrayUnion(value));
 }
 
-export function updateSourcesRemote(sources: SourceUrls): Promise<void> {
-    return setDoc(doc(sharedCol, "sources"), sources);
+/** Point-updates just this one field of shared/sources — NOT a full-document setDoc, deliberately. importConfig
+ *  and importTranslations each only ever touch their own URL; a whole-object setDoc using this store's locally
+ *  cached `sources` would silently clobber the *other* field back to whatever stale value was last loaded here
+ *  (e.g. still "" if the initial Firestore snapshot hadn't arrived yet when the button was clicked) — this is
+ *  exactly what happened in production: translationsUrl got wiped to "" by an importConfig call that raced the
+ *  initial subscribeShared snapshot, even though nobody ever touched the translations field. */
+export function updateSourceConfigUrlRemote(configUrl: string): Promise<void> {
+    return upsertDocField(doc(sharedCol, "sources"), "configUrl", configUrl);
+}
+
+export function updateSourceTranslationsUrlRemote(translationsUrl: string): Promise<void> {
+    return upsertDocField(doc(sharedCol, "sources"), "translationsUrl", translationsUrl);
 }
 
 export function updateDescriptionSettingsRemote(settings: DescriptionSettings): Promise<void> {

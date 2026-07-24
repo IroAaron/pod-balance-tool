@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { computeBuildConnections, computeCascadeBuilds, computeCascadeLevels, relatedItems } from "./relations";
+import {
+    computeBuildConnections,
+    computeCascadeBuilds,
+    computeCascadeLevels,
+    computeScalingGraph,
+    relatedItems,
+} from "./relations";
 import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
 import type { ReplaceRule } from "../models/ReplaceRule";
@@ -702,6 +708,160 @@ describe("computeCascadeBuilds scaling graph (real edges only, recursive depth)"
 
         expect(built.has(homeless.id)).toBe(true);
         expect(built.has(richKiller.id)).toBe(false);
+    });
+});
+
+/**
+ * Regression coverage for the 2026-07-24 follow-up spec: "каждая следующая ступень — это прямая связь с
+ * предыдущей ступенью... прямая связь имеется в виду ТОЛЬКО по механикам" — a MechChangeColor/MechAddItem
+ * "удалить"/MechAddTag row's own Target* fields (who it directly recolors/kills/tags) are real structural edges
+ * in their own right, not just an input to the event-producer mechanism. And "если этих предметов еще не было в
+ * графе — [создаётся], если были — к ним идёт связь": an already-placed node keeps collecting real parent edges
+ * discovered in later rounds instead of losing them (see computeScalingGraphInternal).
+ */
+describe("computeScalingGraph direct Target-side edges (recolors/removes/retags)", () => {
+    it("a MechChangeColor row's own TargetTag directly connects to anything carrying that tag, with no color/event angle needed", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5, tags: ["Sport"] });
+        const painter = makeItem("painter"); // recolors anything tagged Sport — no id, no shared event with root
+        const items = [root, painter];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id),
+            {
+                id: "painter-recolor",
+                table: "MechChangeColor",
+                itemId: painter.id,
+                fields: { ActivatorType: "BallPass", TargetTag: "Sport", NewColor: "Red" },
+            },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, []);
+        const painterNode = graph.get(painter.id);
+        expect(painterNode?.depth).toBe(1);
+        expect(painterNode?.parents.some((p) => p.itemId === root.id && p.reason === "recolors")).toBe(true);
+    });
+
+    it("a MechAddItem 'удалить' row's own TargetItemId directly connects (removes) even with no listener for the kill", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const killer = makeItem("killer"); // kills root by id — no one listens for ItemRemoved anywhere
+        const items = [root, killer];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id),
+            {
+                id: "killer-remove-by-id",
+                table: "MechAddItem",
+                itemId: killer.id,
+                fields: { ActivatorType: "BallPass", ItemMech: "удалить", TargetItemId: root.id },
+            },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, []);
+        expect(graph.get(killer.id)?.parents.some((p) => p.reason === "removes")).toBe(true);
+    });
+
+    it("a MechAddItem 'удалить' row's own TargetTag (no id) directly connects to anything carrying that tag (removes)", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5, tags: ["Prisoner"] });
+        const killer = makeItem("killer");
+        const items = [root, killer];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id),
+            {
+                id: "killer-remove-by-tag",
+                table: "MechAddItem",
+                itemId: killer.id,
+                fields: { ActivatorType: "BallPass", ItemMech: "удалить", TargetTag: "Prisoner" },
+            },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, []);
+        expect(graph.get(killer.id)?.parents.some((p) => p.reason === "removes")).toBe(true);
+    });
+
+    it("a MechAddTag row's own TargetItemId/TargetTag directly connects (retags), by id and by tag", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5, tags: ["Cheap"] });
+        const taggerByTag = makeItem("tagger_by_tag");
+        const taggerById = makeItem("tagger_by_id");
+        const items = [root, taggerByTag, taggerById];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id),
+            {
+                id: "tag-by-tag",
+                table: "MechAddTag",
+                itemId: taggerByTag.id,
+                fields: { ActivatorType: "BallPass", TargetTag: "Cheap", NewTags: "Marked" },
+            },
+            {
+                id: "tag-by-id",
+                table: "MechAddTag",
+                itemId: taggerById.id,
+                fields: { ActivatorType: "BallPass", TargetItemId: root.id, NewTags: "Marked" },
+            },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, []);
+        expect(graph.get(taggerByTag.id)?.parents.some((p) => p.reason === "retags")).toBe(true);
+        expect(graph.get(taggerById.id)?.parents.some((p) => p.reason === "retags")).toBe(true);
+    });
+});
+
+describe("computeScalingGraph keeps every real edge to an already-placed node, not just the ones from its first discovery round", () => {
+    it("a node discovered early gains an additional parent when a later-processed node also structurally depends on it", () => {
+        // F (tag Bum) and D (tag Rich) are both found directly off root's own payoff row in round 1 (activation-
+        // subject and money-scaler respectively). In round 2, expanding D finds F again — F's own MechAddValue row
+        // boosts D by id — but F is already placed. The old code silently dropped this second edge; the new spec
+        // ("если были — к ним идёт связь") keeps it: F ends up with two parents, root and D.
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const feeder = makeItem("feeder", { tags: ["Bum"] });
+        const deeper = makeItem("deeper", { tags: ["Rich"] });
+        const items = [root, feeder, deeper];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum", BonusTargetTag: "Rich", BonusCountingType: "ItemMoneyValue" }),
+            {
+                id: "feeder-boosts-deeper",
+                table: "MechAddValue",
+                itemId: feeder.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    UseTargetIds: deeper.id,
+                },
+            },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, []);
+        const feederNode = graph.get(feeder.id);
+
+        expect(feederNode?.depth).toBe(1); // shortest path unchanged — still one hop from root
+        expect(feederNode?.parents).toEqual(
+            expect.arrayContaining([
+                { itemId: root.id, reason: "activation-subject" },
+                { itemId: deeper.id, reason: "modifier" },
+            ])
+        );
+        expect(feederNode?.parents.length).toBe(2);
+    });
+
+    it("root never gains a parent, even when root itself (via a separate non-payoff row) structurally feeds a deeper node", () => {
+        // Root has two rows: its payoff (finds D via money-scaler) and an unrelated MechChangeColor row that
+        // recolors anything tagged Rich. When D is later expanded, recolorTargetsOf surfaces *root itself* as one
+        // of D's feeders (root's recolor row targets D's tag) — since root's node can never gain a parent, this
+        // particular edge has nowhere valid to be recorded and is correctly dropped rather than corrupting root.
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const deeper = makeItem("deeper", { tags: ["Rich"] });
+        const items = [root, deeper];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { BonusTargetTag: "Rich", BonusCountingType: "ItemMoneyValue" }),
+            {
+                id: "root-recolors-rich-things",
+                table: "MechChangeColor",
+                itemId: root.id,
+                fields: { ActivatorType: "BallPass", TargetTag: "Rich", NewColor: "Blue" },
+            },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, []);
+        expect(graph.get(root.id)?.parents).toEqual([]);
+        expect(graph.get(deeper.id)?.parents).toEqual([{ itemId: root.id, reason: "money-scaler" }]);
     });
 });
 
