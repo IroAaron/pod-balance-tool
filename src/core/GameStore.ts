@@ -41,7 +41,8 @@ import {
     unlinkBuildsRemote,
     updateItemIconRemote,
     addCustomParamValueRemote,
-    updateSourcesRemote,
+    updateSourceConfigUrlRemote,
+    updateSourceTranslationsUrlRemote,
     updateDescriptionSettingsRemote,
     updateTranslationOverrideRemote,
     subscribeGlossary,
@@ -396,7 +397,7 @@ export class GameStore {
     async importConfig(configUrl: string): Promise<void> {
         this.sources = { ...this.sources, configUrl };
         this.notify();
-        void updateSourcesRemote(this.sources).catch((error) => console.error("importConfig → Firestore", error));
+        void updateSourceConfigUrlRemote(configUrl).catch((error) => console.error("importConfig → Firestore", error));
 
         await this.runImport(() => this.importService.importFromUrls({ configUrl }), { scope: "config" });
     }
@@ -406,7 +407,7 @@ export class GameStore {
     async importTranslations(translationsUrl: string): Promise<void> {
         this.sources = { ...this.sources, translationsUrl };
         this.notify();
-        void updateSourcesRemote(this.sources).catch((error) =>
+        void updateSourceTranslationsUrlRemote(translationsUrl).catch((error) =>
             console.error("importTranslations → Firestore", error)
         );
 
