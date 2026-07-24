@@ -775,7 +775,12 @@ export type ScalingEdgeReason =
     /** Feeds a synthetic ReplaceItem combo node (see ComboInfo) — the ingredient side. */
     | "combo-ingredient"
     /** What a synthetic ReplaceItem combo node feeds into — the result side. */
-    | "combo-result";
+    | "combo-result"
+    /** Not a real generation edge at all — a *strong* relatedItems() connection to something already in the
+     *  graph, found by the post-processing "context" pass (see addRelatedContextNodes). Doesn't scale the root
+     *  and isn't a build member; shown only so the graph doesn't hide thematically close items that happen not
+     *  to feed the root directly. */
+    | "related";
 
 export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
     "money-scaler": "считается в бонусе",
@@ -792,6 +797,7 @@ export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
     indirect: "непрямая связь (через предмет вне билда)",
     "combo-ingredient": "ингредиент комбинации",
     "combo-result": "результат комбинации",
+    related: "сильно связан по механикам (не входит в билд)",
 };
 
 interface ScalingEdgeCandidate {
@@ -826,8 +832,16 @@ function findFeedersOf(
     knownIds: Set<string>
 ): ScalingEdgeCandidate[] {
     const edges: ScalingEdgeCandidate[] = [];
+    // Same (from, reason) pair can otherwise be pushed more than once — e.g. target has two mechanic rows that
+    // each independently carry the same ActivatorTag, so the activation-subject check finds the same candidate
+    // twice, once per row. Structurally that's one real connection, not two; de-duped here rather than by callers
+    // (a candidate's own row loop above is the only place that can produce this, so it's the natural chokepoint).
+    const pushed = new Set<string>();
     const push = (from: string, reason: ScalingEdgeReason) => {
         if (from === target.id) return;
+        const dedupeKey = `${from}|${reason}`;
+        if (pushed.has(dedupeKey)) return;
+        pushed.add(dedupeKey);
         edges.push({ from, reason });
     };
 
@@ -1131,6 +1145,11 @@ export interface CascadeLevelNode {
 
     /** Present only for a synthetic combo node. */
     combo?: ComboInfo;
+
+    /** True for a node added by the post-processing "strongly related but not a build member" pass (see
+     *  addRelatedContextNodes) — not a real generation edge and not a build member, shown only as extra context.
+     *  Never set unless the caller opts into it (computeCascadeLevels's includeRelatedContext). */
+    extra?: boolean;
 }
 
 export interface CascadeLevelResult {
@@ -1236,6 +1255,62 @@ function placeCombosInGraph(nodes: CascadeLevelNode[], combos: ComboInfo[]): Set
 }
 
 /**
+ * Second pass, run only when the caller opts in (computeCascadeLevels's `includeRelatedContext`) — after the main
+ * graph and combos are placed, look for other items *anywhere in the catalog*, not just this build's own members,
+ * with a real **strong** relatedItems() connection (direct id ref, upgrade chain, replace rule, produced/listened
+ * event overlap, or the same tag/color/event cascade signals build generation itself uses) to something already
+ * in the graph, that aren't part of it yet. Real motivating example: Киллер (a real member of "Билд от Банка")
+ * kills — an indiscriminate ItemRemoved producer — and plenty of *other* items structurally react to any kill;
+ * they don't scale the root and often aren't even members of this build, but seeing them next to Киллер is useful
+ * context that a flat member list wouldn't give. Marked `extra: true` so the caller can render them distinctly
+ * (see BuildTree's orange overlay) — never a build-membership change, purely a display addition.
+ *
+ * Mutates `nodes` in place. Runs once against a snapshot of the graph's own real (non-combo) members taken before
+ * the loop starts — an added node doesn't get its own second pass, so this stays a single "what else is around"
+ * note rather than another BFS that could cascade arbitrarily far from the actual build.
+ *
+ * An item can be "related" to *more than one* anchor at once (real example: Медсестра reacts to ItemRemoved, and
+ * so do Маньяк, Killer, *and* Электрический стул all independently — she's not exclusively explained by whichever
+ * one happens to be first in iteration order). The first anchor to find a given item creates its extra node; every
+ * later anchor that's also strongly related to it appends an *additional* `related` parent to that same node
+ * instead of being silently dropped — the same "keep every real edge" rule the main scaling graph's multi-parent
+ * BFS already applies (see computeScalingGraphInternal). Original (non-extra) nodes are never touched here, only
+ * read — their depth/parents already come from the real generation graph.
+ */
+function addRelatedContextNodes(
+    nodes: CascadeLevelNode[],
+    items: Item[],
+    mechanics: MechanicRow[],
+    upgradeChains: UpgradeChain[],
+    replaceRules: ReplaceRule[]
+): void {
+    const originalIds = new Set(nodes.map((node) => node.itemId));
+    const addedNodes = new Map<string, CascadeLevelNode>();
+    const anchors = nodes.filter((node) => !node.combo);
+
+    for (const anchor of anchors) {
+        for (const rel of relatedItems(anchor.itemId, items, mechanics, upgradeChains, replaceRules)) {
+            if (rel.strength !== "strong" || originalIds.has(rel.id)) continue;
+
+            const existing = addedNodes.get(rel.id);
+            if (existing) {
+                existing.parents = [...existing.parents, { itemId: anchor.itemId, reason: "related" }];
+                continue;
+            }
+
+            const node: CascadeLevelNode = {
+                itemId: rel.id,
+                depth: anchor.depth + 1,
+                parents: [{ itemId: anchor.itemId, reason: "related" }],
+                extra: true,
+            };
+            nodes.push(node);
+            addedNodes.set(rel.id, node);
+        }
+    }
+}
+
+/**
  * Classifies an *already-existing* build's own members by their depth in the same scaling graph
  * `computeCascadeBuilds` uses to decide build membership in the first place — informational/display only, does
  * not change the build. Replaces the old fixed-7-level classification (itself a replacement for an even older
@@ -1245,15 +1320,33 @@ function placeCombosInGraph(nodes: CascadeLevelNode[], combos: ComboInfo[]): Set
  * distance computeCascadeBuilds' own graph would find for it, with `parents` pointing at the real, specific
  * item(s) one depth up (a spawner points at what it spawns, not at the root) — see ScalingNode. Combo nodes are
  * folded into the same `nodes` array by `placeCombosInGraph` — see its own doc for the depth/parent rules.
+ *
+ * `options.includeRelatedContext` additionally runs addRelatedContextNodes (needs `options.upgradeChains`) —
+ * off by default since it's meaningfully more work (a relatedItems() call per node) and only the detailed tree
+ * view (BuildTree) actually wants the extra "what else is around" nodes it adds; BuildsPage's per-card depth
+ * lookup doesn't.
+ *
+ * `options.upgradeChains`, if given, also excludes upgrade tiers (+/++ — power-scaled clones of their base item,
+ * see higherTierIds) from the item/mechanic pool the graph is built over entirely, the same way GameStore's
+ * `itemsForBuildGeneration` already does for fresh generation — a tier has no business independently showing up
+ * as a lever or a context node when its base item already represents it. A build member that's itself a tier
+ * (manually added — generation never adds one) simply can't be discovered by the graph and falls through to
+ * `unclassified`, same as any other member with no real structural path.
  */
 export function computeCascadeLevels(
     build: Build,
-    items: Item[],
-    mechanics: MechanicRow[],
+    allItems: Item[],
+    allMechanics: MechanicRow[],
     replaceRules: ReplaceRule[],
-    includeMoneyValueRoots = false
+    includeMoneyValueRoots = false,
+    options: { upgradeChains?: UpgradeChain[]; includeRelatedContext?: boolean } = {}
 ): CascadeLevelResult {
     if (build.items.length === 0) return { nodes: [], unclassified: [], rootEligible: false };
+
+    const excludedTiers = higherTierIds(options.upgradeChains ?? []);
+    const items = excludedTiers.size > 0 ? allItems.filter((item) => !excludedTiers.has(item.id)) : allItems;
+    const mechanics =
+        excludedTiers.size > 0 ? allMechanics.filter((mechanic) => !excludedTiers.has(mechanic.itemId)) : allMechanics;
 
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
@@ -1263,16 +1356,23 @@ export function computeCascadeLevels(
     if (!root) return { nodes: [], unclassified: build.items, rootEligible: false };
 
     const combos = computeReplaceCombos(build, replaceRules);
+    const addContext = (nodes: CascadeLevelNode[]) => {
+        if (options.includeRelatedContext) {
+            addRelatedContextNodes(nodes, items, mechanics, options.upgradeChains ?? [], replaceRules);
+        }
+    };
 
     const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter((row) =>
         isEligiblePayoffRow(root, row, includeMoneyValueRoots)
     );
     if (payoffRows.length === 0) {
         const nodes: CascadeLevelNode[] = [{ itemId: root.id, depth: 0, parents: [] }];
-        const placed = placeCombosInGraph(nodes, combos);
+        placeCombosInGraph(nodes, combos);
+        addContext(nodes);
+        const explainedIds = new Set(nodes.map((node) => node.itemId));
         return {
             nodes,
-            unclassified: build.items.filter((id) => id !== root.id && !placed.has(id)),
+            unclassified: build.items.filter((id) => id !== root.id && !explainedIds.has(id)),
             rootEligible: false,
         };
     }
@@ -1300,9 +1400,14 @@ export function computeCascadeLevels(
         });
     }
 
-    const placed = placeCombosInGraph(nodes, combos);
+    placeCombosInGraph(nodes, combos);
+    addContext(nodes);
 
-    const unclassified = build.items.filter((id) => !graph.has(id) && !placed.has(id));
+    // Extra context nodes (added just above) can explain a build member that had no real generation edge at all
+    // — recomputed from the final `nodes` rather than the raw `graph`/`placed` sets so such a member shows up in
+    // the tree instead of also being double-listed in the flat `unclassified` chips.
+    const explainedIds = new Set(nodes.map((node) => node.itemId));
+    const unclassified = build.items.filter((id) => !explainedIds.has(id));
     return { nodes, unclassified, rootEligible: true };
 }
 

@@ -1,6 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Box, Chip, Paper, Stack, Tooltip, Typography } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { useStore } from "../hooks/useStore";
 import ItemIcon from "./ItemIcon";
 import ItemDescription from "./ItemDescription";
@@ -8,6 +9,7 @@ import DetailModal from "./DetailModal";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import {
     computeCascadeLevels,
+    computeUpgradeTierIds,
     SCALING_EDGE_REASON_LABELS,
     type CascadeLevelNode,
     type ScalingEdgeReason,
@@ -28,11 +30,21 @@ type Edge = {
     y2: number;
 };
 
-function edgeKey(parentId: string, childId: string): string {
-    return `${parentId}--${childId}`;
+/** Includes `reason` (not just the pair of ids) — the same two items can now be connected by more than one real
+ *  edge at once (e.g. both a money-scaler *and* a modifier connection), since a node keeps every real parent it
+ *  finds rather than just the first (see computeScalingGraphInternal's multi-parent BFS). Without `reason` here,
+ *  two such edges collided on the same React key. `parentId`/`childId` still come first so `.split("--")` callers
+ *  that only destructure the first two parts (see highlightedItemIds) keep working unchanged. */
+function edgeKey(parentId: string, childId: string, reason: ScalingEdgeReason): string {
+    return `${parentId}--${childId}--${reason}`;
 }
 
 const DEFAULT_EDGE_COLOR = "#5B8CFF";
+
+/** Distinct from combo orange (#ffb74d) on purpose — a "context" node (see addRelatedContextNodes) and a combo
+ *  ingredient answer different questions ("what else reacts to this" vs. "what this combines with"), so they get
+ *  visually distinguishable oranges rather than reusing the exact same one. */
+const EXTRA_NODE_COLOR = "#ff9800";
 
 /** Orange into a combo (ingredient feeding it), green out of one (the combo producing its result) — same colors
  *  the old, since-removed buildTree.ts used — everything else is plain blue. Known directly from the edge's own
@@ -40,6 +52,7 @@ const DEFAULT_EDGE_COLOR = "#5B8CFF";
 function edgeColor(reason: ScalingEdgeReason): string {
     if (reason === "combo-ingredient") return "#ffb74d";
     if (reason === "combo-result") return "#66bb6a";
+    if (reason === "related") return EXTRA_NODE_COLOR;
     return DEFAULT_EDGE_COLOR;
 }
 
@@ -48,6 +61,7 @@ function edgeColor(reason: ScalingEdgeReason): string {
 function edgeMarkerId(reason: ScalingEdgeReason): string {
     if (reason === "combo-ingredient") return "arrow-combo-ingredient";
     if (reason === "combo-result") return "arrow-combo-result";
+    if (reason === "related") return "arrow-related";
     return "arrow-default";
 }
 
@@ -162,11 +176,11 @@ function TreeNode(props: TreeNodeProps) {
                     width: 56,
                     height: 56,
                     borderRadius: 2,
-                    border: "1px solid",
-                    borderColor: "divider",
+                    border: node.extra ? "2px solid" : "1px solid",
+                    borderColor: node.extra ? EXTRA_NODE_COLOR : "divider",
                     textDecoration: "none",
                     color: "inherit",
-                    bgcolor: "background.paper",
+                    bgcolor: node.extra ? alpha(EXTRA_NODE_COLOR, 0.14) : "background.paper",
                     position: "relative",
                     opacity: dimmed ? 0.3 : 1,
                     transition: "opacity 0.15s",
@@ -242,6 +256,11 @@ function DetailPanel({ node, onOpen }: DetailPanelProps) {
             >
                 {name}
             </Typography>
+            {node.extra && (
+                <Typography variant="caption" sx={{ color: EXTRA_NODE_COLOR, fontWeight: 600 }}>
+                    Доп. контекст — не входит в билд
+                </Typography>
+            )}
             {reasonLines.length > 0 && (
                 <Stack spacing={0.5}>
                     {reasonLines.map((line) => (
@@ -278,9 +297,33 @@ function DetailPanel({ node, onOpen }: DetailPanelProps) {
 export default function BuildTree({ build }: Props) {
     const store = useStore();
 
+    // Excludes upgrade tiers (+/++) from the graph entirely — a tier is a power-scaled clone of its base item, so
+    // letting it independently show up as a lever or a context node just duplicates the base rather than adding
+    // real information. Both signals (registered CardUpgrades chain membership, and a translated name ending in
+    // "+"/"++" for tiers that were never registered — see computeUpgradeTierIds) are needed: some real tiers in
+    // this game's data (e.g. numbered ..._2/_3 ids) are only distinguishable by their display name, not by chain.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- store.itemName is a stable method on the singleton
+    const resolveName = useCallback((item: Parameters<typeof store.itemName>[0]) => store.itemName(item), []);
+    const excludedTierIds = useMemo(
+        () => computeUpgradeTierIds(store.items, store.upgradeChains, resolveName),
+        [store.items, store.upgradeChains, resolveName]
+    );
+    const generationItems = useMemo(
+        () => store.items.filter((item) => !excludedTierIds.has(item.id)),
+        [store.items, excludedTierIds]
+    );
+    const generationMechanics = useMemo(
+        () => store.mechanics.filter((mechanic) => !excludedTierIds.has(mechanic.itemId)),
+        [store.mechanics, excludedTierIds]
+    );
+
     const { nodes, unclassified, rootEligible } = useMemo(
-        () => computeCascadeLevels(build, store.items, store.mechanics, store.replaceRules),
-        [build, store.items, store.mechanics, store.replaceRules]
+        () =>
+            computeCascadeLevels(build, generationItems, generationMechanics, store.replaceRules, false, {
+                upgradeChains: store.upgradeChains,
+                includeRelatedContext: true,
+            }),
+        [build, generationItems, generationMechanics, store.replaceRules, store.upgradeChains]
     );
 
     // Grouped by depth, ascending — no gap-filling needed (unlike the old fixed 7-level grid): a depth can only
@@ -393,7 +436,7 @@ export default function BuildTree({ build }: Props) {
             return new Set(
                 edges
                     .filter((edge) => edge.parentId === hoveredItemId || edge.childId === hoveredItemId)
-                    .map((edge) => edgeKey(edge.parentId, edge.childId))
+                    .map((edge) => edgeKey(edge.parentId, edge.childId, edge.reason))
             );
         }
         if (hoveredEdgeKey) return new Set([hoveredEdgeKey]);
@@ -436,7 +479,9 @@ export default function BuildTree({ build }: Props) {
                             connection came from toward the specific item it explains — not just a plain
                             undirected line between two boxes. */}
                         <defs>
-                            {(["arrow-default", "arrow-combo-ingredient", "arrow-combo-result"] as const).map((id) => (
+                            {(
+                                ["arrow-default", "arrow-combo-ingredient", "arrow-combo-result", "arrow-related"] as const
+                            ).map((id) => (
                                 <marker
                                     key={id}
                                     id={id}
@@ -455,7 +500,9 @@ export default function BuildTree({ build }: Props) {
                                                 ? edgeColor("combo-ingredient")
                                                 : id === "arrow-combo-result"
                                                   ? edgeColor("combo-result")
-                                                  : DEFAULT_EDGE_COLOR
+                                                  : id === "arrow-related"
+                                                    ? edgeColor("related")
+                                                    : DEFAULT_EDGE_COLOR
                                         }
                                     />
                                 </marker>
@@ -463,7 +510,7 @@ export default function BuildTree({ build }: Props) {
                         </defs>
 
                         {edges.map((edge) => {
-                            const key = edgeKey(edge.parentId, edge.childId);
+                            const key = edgeKey(edge.parentId, edge.childId, edge.reason);
                             const isHighlighted = !highlightedEdgeKeys || highlightedEdgeKeys.has(key);
                             const opacity = isHighlighted ? 0.9 : 0.15;
                             return (
@@ -478,6 +525,7 @@ export default function BuildTree({ build }: Props) {
                                         y2={edge.y1}
                                         stroke={edgeColor(edge.reason)}
                                         strokeWidth={isHighlighted ? 2.5 : 1.5}
+                                        strokeDasharray={edge.reason === "related" ? "5 4" : undefined}
                                         opacity={opacity}
                                         markerEnd={`url(#${edgeMarkerId(edge.reason)})`}
                                         style={{ pointerEvents: "none", transition: "opacity 0.15s" }}

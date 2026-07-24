@@ -1114,3 +1114,219 @@ describe("computeCascadeLevels", () => {
         ]);
     });
 });
+
+/**
+ * Regression coverage for the 2026-07-24 "context nodes" polish: real motivating example — Киллер (a real member
+ * of "Билд от Банка") kills indiscriminately, and other items that react to *any* kill are thematically relevant
+ * even though they don't scale the root and often aren't build members at all. Off by default (BuildsPage's bulk
+ * per-card depth lookup doesn't need it); BuildTree opts in via `options.includeRelatedContext`.
+ */
+describe("computeCascadeLevels context nodes (options.includeRelatedContext)", () => {
+    function killerListenerFixture() {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const killer = makeItem("killer"); // real build member — kills indiscriminately, feeds root
+        const listener = makeItem("listener"); // NOT a build member — reacts to any kill, same as killer's victims
+        const items = [root, killer, listener];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorType: "ItemRemoved", ActivatorTag: "" }),
+            {
+                id: "killer-kill",
+                table: "MechAddItem",
+                itemId: killer.id,
+                fields: { ActivatorType: "BallPass", ItemMech: "удалить" },
+            },
+            {
+                id: "listener-reacts",
+                table: "MechAddValue",
+                itemId: listener.id,
+                fields: {
+                    ActivatorType: "ItemRemoved",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = { id: "bank", name: "Билд от Банка", items: [root.id, killer.id], auto: true };
+        return { root, killer, listener, items, mechanics, build };
+    }
+
+    it("is off by default — a strongly-related non-member never appears", () => {
+        const { listener, items, mechanics, build } = killerListenerFixture();
+        const result = computeCascadeLevels(build, items, mechanics, []);
+        expect(result.nodes.some((n) => n.itemId === listener.id)).toBe(false);
+    });
+
+    it("adds a strongly-related non-member as an extra node, one hop past its anchor, marked extra:true", () => {
+        const { root, killer, listener, items, mechanics, build } = killerListenerFixture();
+        const originalItems = [...build.items];
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const killerNode = result.nodes.find((n) => n.itemId === killer.id);
+        const listenerNode = result.nodes.find((n) => n.itemId === listener.id);
+        expect(killerNode?.depth).toBe(1);
+        expect(listenerNode).toMatchObject({
+            depth: 2,
+            extra: true,
+            parents: [{ itemId: killer.id, reason: "related" }],
+        });
+        // Never a build-membership change — listener was never a build member and stays out of unclassified, and
+        // the build's own item list is untouched by this call.
+        expect(result.unclassified).toEqual([]);
+        expect(build.items).toEqual(originalItems);
+        expect(build.items).toEqual([root.id, killer.id]);
+    });
+
+    it("a build member explained only via context isn't double-listed in unclassified", () => {
+        // sidekick is a real build member with no structural generation edge of its own to the root, but it *is*
+        // strongly related to killer (shares the same ItemRemoved reaction) — should show as an extra node in the
+        // tree instead of also sitting in the flat unclassified chip list.
+        const { root, killer, items: baseItems, mechanics: baseMechanics, build } = killerListenerFixture();
+        const sidekick = makeItem("sidekick");
+        const items = [...baseItems, sidekick];
+        const mechanics: MechanicRow[] = [
+            ...baseMechanics,
+            {
+                id: "sidekick-reacts",
+                table: "MechAddValue",
+                itemId: sidekick.id,
+                fields: {
+                    ActivatorType: "ItemRemoved",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        build.items = [root.id, killer.id, sidekick.id];
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const sidekickNode = result.nodes.find((n) => n.itemId === sidekick.id);
+        expect(sidekickNode?.extra).toBe(true);
+        expect(result.unclassified).toEqual([]);
+    });
+
+    it("an item strongly related to several real anchors at once keeps a parent for every one of them, not just the first found", () => {
+        // Real motivating example: Медсестра reacts to ItemRemoved the same way Маньяк, Killer, and Электрический
+        // стул all independently produce it — she shouldn't end up attached to only whichever one the anchor loop
+        // happens to reach first.
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const killer1 = makeItem("killer1");
+        const killer2 = makeItem("killer2");
+        const nurse = makeItem("nurse"); // not a build member — reacts to any kill, same as both killers' victims
+        const items = [root, killer1, killer2, nurse];
+        const killRow = (id: string, itemId: string) => ({
+            id,
+            table: "MechAddItem" as const,
+            itemId,
+            fields: { ActivatorType: "BallPass", ItemMech: "удалить" },
+        });
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorType: "ItemRemoved", ActivatorTag: "" }),
+            killRow("killer1-kill", killer1.id),
+            killRow("killer2-kill", killer2.id),
+            {
+                id: "nurse-reacts",
+                table: "MechAddValue",
+                itemId: nurse.id,
+                fields: {
+                    ActivatorType: "ItemRemoved",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = { id: "b", name: "Билд", items: [root.id, killer1.id, killer2.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const nurseNode = result.nodes.find((n) => n.itemId === nurse.id);
+        expect(nurseNode?.extra).toBe(true);
+        expect(nurseNode?.parents).toEqual(
+            expect.arrayContaining([
+                { itemId: killer1.id, reason: "related" },
+                { itemId: killer2.id, reason: "related" },
+            ])
+        );
+        expect(nurseNode?.parents.length).toBe(2);
+    });
+});
+
+/**
+ * Regression coverage for excluding upgrade tiers (+/++) from the graph entirely when `options.upgradeChains` is
+ * given — a tier is just a power-scaled clone of its base item, and letting it independently show up as a lever
+ * or a context node duplicates the base rather than adding real information. Mirrors GameStore's
+ * `itemsForBuildGeneration`, which already does the same for fresh generation.
+ */
+describe("computeCascadeLevels excludes upgrade tiers when options.upgradeChains is given", () => {
+    function tierFixture() {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5, tags: ["Bum"] });
+        const feeder = makeItem("feeder", { tags: ["Bum"] }); // base tier — a real activation-subject feeder
+        const feederPlus = makeItem("feeder_plus", { tags: ["Bum"] }); // "+" tier of the same item, same tag
+        const items = [root, feeder, feederPlus];
+        const mechanics: MechanicRow[] = [makeMainValuePayoff(root.id, { ActivatorTag: "Bum" })];
+        const upgradeChains = [{ id: "chain1", itemIds: [feeder.id, feederPlus.id] }];
+        const build = { id: "bt", name: "Билд", items: [root.id, feeder.id, feederPlus.id], auto: true };
+        return { root, feeder, feederPlus, items, mechanics, upgradeChains, build };
+    }
+
+    it("without upgradeChains, the tier is discovered like any other item (baseline)", () => {
+        const { feeder, feederPlus, items, mechanics, build } = tierFixture();
+        const result = computeCascadeLevels(build, items, mechanics, []);
+        expect(result.nodes.some((n) => n.itemId === feeder.id)).toBe(true);
+        expect(result.nodes.some((n) => n.itemId === feederPlus.id)).toBe(true);
+        expect(result.unclassified).toEqual([]);
+    });
+
+    it("with upgradeChains, the tier never becomes a node and falls through to unclassified", () => {
+        const { feeder, feederPlus, items, mechanics, upgradeChains, build } = tierFixture();
+        const result = computeCascadeLevels(build, items, mechanics, [], false, { upgradeChains });
+        expect(result.nodes.some((n) => n.itemId === feeder.id)).toBe(true);
+        expect(result.nodes.some((n) => n.itemId === feederPlus.id)).toBe(false);
+        expect(result.unclassified).toEqual([feederPlus.id]);
+    });
+
+    it("with upgradeChains, a tier is also never added as a context/extra node", () => {
+        // feederPlus is deliberately NOT a build member here — only real items should ever be pulled in as
+        // "related" context (see addRelatedContextNodes), and a tier must be excluded from that pool too.
+        const { root, feeder, feederPlus, mechanics: baseMechanics, upgradeChains } = tierFixture();
+        const stranger = makeItem("stranger", { tags: ["Loud"] }); // strongly related to feeder via cascade-style tag link
+        const items = [root, feeder, feederPlus, stranger];
+        const mechanics: MechanicRow[] = [
+            ...baseMechanics,
+            {
+                id: "feeder-loud",
+                table: "MechAddValue",
+                itemId: feeder.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTag: "Loud",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = { id: "bt2", name: "Билд", items: [root.id, feeder.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains,
+            includeRelatedContext: true,
+        });
+
+        expect(result.nodes.some((n) => n.itemId === feederPlus.id)).toBe(false);
+        expect(result.nodes.some((n) => n.itemId === stranger.id && n.extra)).toBe(true);
+    });
+});
