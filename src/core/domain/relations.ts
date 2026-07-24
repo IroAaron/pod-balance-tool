@@ -346,10 +346,25 @@ interface CascadeIndex {
     /** "event|tag" -> items whose mechanic structurally produces that event *specifically for something carrying
      *  that tag* — e.g. "ItemPlaced|Crazy" is items that place a Crazy-tagged item (not just items that place
      *  *something*). For MechAddItem "поставить" rows this looks up the placed item's own static tags; for
-     *  "удалить" rows the row's own TargetTag field already names the tag of what's removed. Lets a payoff row
-     *  combining ActivatorType+ActivatorTag (e.g. Дурка: ItemPlaced+Crazy) match only the placers of that
-     *  specific tag instead of every placer of anything (see producedActivatorType's plain event bucket above). */
+     *  "удалить"/MechChangeColor rows the row's own TargetTag field already names the tag of what's affected.
+     *  Lets a payoff row combining ActivatorType+ActivatorTag (e.g. Дурка: ItemPlaced+Crazy) match only the
+     *  producers of that specific tag — see indiscriminateProducersOfEvent for the complementary "no tag named
+     *  at all, can't be ruled out" pool used alongside this one. */
     itemIdsByProducedTaggedEvent: Map<string, Set<string>>;
+
+    /**
+     * event -> items whose mechanic structurally produces that event with **no tag narrowing at all** (e.g.
+     * Маньяк/Killer kill nearby cards with no TargetTag filter — could hit anything). Real example: Чёрный рынок
+     * listens for ItemRemoved+Bum; Маньяк/Killer don't name a tag, so they can't be *proven* to miss Bum either —
+     * per the user's explicit rule, "no tag" is a candidate, not an exclusion (only a producer that names a
+     * *different, concrete* tag is excluded — that producer simply never appears under this event's key here,
+     * it lands under itemIdsByProducedTaggedEvent's "event|thatOtherTag" key instead). Board Place (Near/
+     * SameSide/OppositeCard/MyPosition/...) is never used to exclude either, for the same reason — see the
+     * module-level note by RELATIVE_COLOR_VALUES: any item can be placed on any of the 4 sides, so a
+     * self-relative Place filter on the produced side can always be reconciled with the root's own Place filter
+     * by choosing where to put things; it's never a proof of incompatibility.
+     */
+    indiscriminateProducersOfEvent: Map<string, Set<string>>;
 
     /** tag -> items whose MechAddTag row grants that tag to something else. */
     itemIdsByGrantedTag: Map<string, Set<string>>;
@@ -373,12 +388,24 @@ interface CascadeIndex {
      * tag -> items whose MechActivate row's own TargetTag filter (not a specific id) fires an extra activation of
      * anything with that tag. The "activates" counterpart to itemIdsByTargetedTag. Real example: Тренер
      * (`c_chel_activate_sport_same_color_for_ball_pass_1`, TargetTag=Sport, no UseTargetIds) activates any
-     * Sport-tagged card when the ball passes it — this is what lets level 6 find him as a second-order lever for
+     * Sport-tagged card when the ball passes it — this is what lets level 4 find him as a second-order lever for
      * Гонщик (tagged Sport), who has no PlayerScore payoff of his own and only enters a build as a level-3
-     * activator (see producedActivatorType's LoopComplitedCounter case).
+     * event producer (see producedActivatorType's LoopComplitedCounter case).
      */
     itemIdsByActivatedTag: Map<string, Set<string>>;
 }
+
+/**
+ * ⚠️ Deliberately NOT an index here: a "boosts/activates any nearby Card/House/Artefact of type X, no tag, no id"
+ * signal was tried (2026-07-23) and reverted the same day — real example: Эстакада (any nearby House) and Робот
+ * (any nearby House) both connected to "Билд от Черного рынка" this way, alongside Мошенник and Меценат, neither
+ * of which has anything to do with Чёрный рынок thematically. The type-only match has no concrete tag or id to
+ * anchor it to a *specific* item — it's true of the entire category, not evidence of a real connection to any one
+ * root. (Мошенник's appearance was compounded by a genuine bug — his row's `TargetPlace=MyPosition` means he only
+ * ever affects himself, and the old code didn't check Place before indexing him as a generic booster at all — but
+ * even after fixing that, Меценат's case is not a bug, just this signal being too weak by design.) See
+ * computeScalingGraph's doc for the replacement model: only Id/tag/event/replace-rule signals count as real edges.
+ */
 
 function buildCascadeIndex(
     items: Item[],
@@ -392,6 +419,7 @@ function buildCascadeIndex(
     const allRecolorers = new Set<string>();
     const itemIdsByProducedEvent = new Map<string, Set<string>>();
     const itemIdsByProducedTaggedEvent = new Map<string, Set<string>>();
+    const indiscriminateProducersOfEvent = new Map<string, Set<string>>();
     const itemIdsByGrantedTag = new Map<string, Set<string>>();
     const itemIdsByTag = new Map<string, Set<string>>();
     const itemIdsByType = new Map<string, Set<string>>();
@@ -420,9 +448,11 @@ function buildCascadeIndex(
                 ].filter((token) => knownIds.has(token));
                 for (const token of targetIds) addTo(targetersOf, token, itemId);
 
-                // No concrete target id — the row applies its effect via a Tag filter instead (e.g. "any nearby
-                // Card with tag=Sport"), which is just as real a "boosts X" connection as a direct id reference.
                 if (targetIds.length === 0) {
+                    // No concrete target id — the row applies its effect via a Tag filter instead (e.g. "any
+                    // nearby Card with tag=Sport"), which is just as real a "boosts X" connection as a direct id.
+                    // No tag either means the row's effect is too generic to anchor to any specific item — see the
+                    // module note above CascadeIndex for why that's deliberately not indexed as a connection at all.
                     for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(itemIdsByTargetedTag, tag, itemId);
                 }
             }
@@ -431,32 +461,46 @@ function buildCascadeIndex(
                 const targetIds = splitList(row.fields.UseTargetIds ?? "").filter((token) => knownIds.has(token));
                 for (const token of targetIds) addTo(activatorsOf, token, itemId);
 
-                // No concrete target id — the row fires its extra activation via a Tag filter instead, same
-                // "no id ref needed" case as itemIdsByTargetedTag above, just for the "activates" relationship.
                 if (targetIds.length === 0) {
+                    // Same "no id ref needed" case as itemIdsByTargetedTag above, for the "activates" relationship.
                     for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(itemIdsByActivatedTag, tag, itemId);
                 }
             }
 
             if (row.table === "MechAddItem" && row.fields.ItemMech === "поставить") {
                 const target = row.fields.NewItemId;
-                if (target && knownIds.has(target)) {
-                    addTo(spawnersOf, target, itemId);
-                    for (const tag of tagsById.get(target) ?? []) {
-                        addTo(itemIdsByProducedTaggedEvent, `ItemPlaced|${tag}`, itemId);
-                    }
+                const placedTags = target && knownIds.has(target) ? tagsById.get(target) ?? [] : undefined;
+                if (target && knownIds.has(target)) addTo(spawnersOf, target, itemId);
+                if (placedTags && placedTags.length > 0) {
+                    for (const tag of placedTags) addTo(itemIdsByProducedTaggedEvent, `ItemPlaced|${tag}`, itemId);
+                } else {
+                    // Places nothing we can resolve tags for (unknown id), or places something with no tags at
+                    // all — can't rule out that it's ever a match, so it's a candidate, not excluded.
+                    addTo(indiscriminateProducersOfEvent, "ItemPlaced", itemId);
                 }
             }
 
             if (row.table === "MechAddItem" && row.fields.ItemMech === "удалить") {
-                for (const tag of splitList(row.fields.TargetTag ?? "")) {
-                    addTo(itemIdsByProducedTaggedEvent, `ItemRemoved|${tag}`, itemId);
+                const removedTags = splitList(row.fields.TargetTag ?? "");
+                if (removedTags.length > 0) {
+                    for (const tag of removedTags) addTo(itemIdsByProducedTaggedEvent, `ItemRemoved|${tag}`, itemId);
+                } else {
+                    // Kills indiscriminately (no TargetTag) — e.g. Маньяк/Киллер. Could hit anything, so it's a
+                    // candidate for any tag-qualified ItemRemoved listener, not excluded.
+                    addTo(indiscriminateProducersOfEvent, "ItemRemoved", itemId);
                 }
             }
 
             if (row.table === "MechChangeColor" && row.fields.NewColor) {
                 addTo(itemIdsByProducedColor, row.fields.NewColor, itemId);
                 allRecolorers.add(itemId);
+
+                const recoloredTags = splitList(row.fields.TargetTag ?? "");
+                if (recoloredTags.length > 0) {
+                    for (const tag of recoloredTags) addTo(itemIdsByProducedTaggedEvent, `ColorChange|${tag}`, itemId);
+                } else {
+                    addTo(indiscriminateProducersOfEvent, "ColorChange", itemId);
+                }
             }
 
             if (row.table === "MechAddTag") {
@@ -464,7 +508,15 @@ function buildCascadeIndex(
             }
 
             const event = producedActivatorType(row);
-            if (event) addTo(itemIdsByProducedEvent, event, itemId);
+            if (event) {
+                addTo(itemIdsByProducedEvent, event, itemId);
+                // ItemPlaced/ItemRemoved/ColorChange already got their own tagged-vs-indiscriminate treatment
+                // above (they have a real TargetTag concept); anything else producedActivatorType might ever
+                // return (e.g. LoopCompleted) has no tag concept at all, so it's always indiscriminate.
+                if (event !== "ItemPlaced" && event !== "ItemRemoved" && event !== "ColorChange") {
+                    addTo(indiscriminateProducersOfEvent, event, itemId);
+                }
+            }
         }
     }
 
@@ -495,6 +547,7 @@ function buildCascadeIndex(
         allRecolorers,
         itemIdsByProducedEvent,
         itemIdsByProducedTaggedEvent,
+        indiscriminateProducersOfEvent,
         itemIdsByGrantedTag,
         itemIdsByTargetedTag,
         activatorsOf,
@@ -541,24 +594,6 @@ function recolorerMatchesTagFilter(
     return requiredTags.some((tag) => ownTags.includes(tag));
 }
 
-/** Union-of-matches filter (any populated field is independently sufficient) — used for level 3's Activator
- *  filter, where tag/color describe alternative ways an item could plausibly be "the thing that triggered this". */
-function collectByFilter(
-    index: CascadeIndex,
-    fields: { tag?: string; type?: string; color?: string },
-    into: Set<string>
-): void {
-    for (const tag of splitList(fields.tag ?? "")) {
-        for (const id of index.itemIdsByTag.get(tag) ?? []) into.add(id);
-    }
-    for (const type of splitList(fields.type ?? "")) {
-        for (const id of index.itemIdsByType.get(type) ?? []) into.add(id);
-    }
-    for (const color of splitList(fields.color ?? "")) {
-        for (const id of recolorersForColor(index, color)) into.add(id);
-    }
-}
-
 /**
  * Intersection-of-matches filter (every populated field must hold at once) — used for level 2's Bonus filter,
  * where tag+type together describe ONE compound condition on the same counted thing (e.g. Бухгалтер: "a Card
@@ -590,49 +625,58 @@ function collectScalers(index: CascadeIndex, fields: { tag?: string; type?: stri
 }
 
 /**
- * Draft one build per item that earns PlayerScore (a MechAddValue row with TargetType=PlayerScore), following a
- * fixed, shallow structure — deliberately NOT an open-ended recursive cascade, per the user's explicit request
- * (though see level 6 below — one further fixed hop was added later, still not open recursion):
+ * Draft one build per item that earns PlayerScore (a MechAddValue row with TargetType=PlayerScore). 7 fixed,
+ * named levels, each computed straight from the root's own identity (levels 5 and 7's "activates an activator"
+ * branch additionally read level-3's own identity) — deliberately not an open-ended recursive cascade.
+ * Named/redefined by the user 2026-07-23, correcting an earlier round that conflated two different relationships
+ * into one bucket:
+ *
  *   1. Root — the item whose MechAddValue row earns PlayerScore; the build exists because of it.
- *   2. Scalers — items matching that row's Bonus filter, i.e. what's actually being counted to scale the root's
- *      income. Tag and type together are ONE compound condition on the same counted thing (collectScalers) — a
- *      row with both BonusTargetTag=Rich and BonusTargetType=Card means "a Card tagged Rich", not "anything
- *      tagged Rich, or separately, any Card at all" (the latter reads as "nearly every item in the game").
- *   3. Activators of the root — UseActivatorIds if the row names a concrete item; else items matching the
- *      Activator tag/color filter (color treats "Same"/"NotSame"/"Random" as "any recolorer", see
- *      RELATIVE_COLOR_VALUES — these aren't real colors, so exact-string-matching them against a recolorer's own
- *      NewColor only coincidentally works when both happen to use the same placeholder); plus items structurally
- *      producing the row's ActivatorType event — narrowed to producers of that event *for the row's own
- *      ActivatorTag specifically* when one is set (itemIdsByProducedTaggedEvent), not every producer of that
- *      event type regardless of tag (e.g. Дурка wants placers of a Crazy-tagged item, not every "поставить" row
- *      in the game).
- *   4. Spawners of the root — items placing it via MechAddItem, or the itemIdToReplace side of a
- *      ReplaceItem/ReplaceOnTrigger rule that turns into it.
- *   5. Spawners of the level-2 scalers and level-3 activators; recolorers matching the root's Bonus color (same
- *      relative-placeholder handling as level 3); tag-granters producing a tag the root's own filters need; and
- *      anything that *boosts* the root — either directly by id, or via a Tag filter matching one of the root's
- *      own static tags (e.g. an item that adds Value to any nearby Card tagged "Sport" reaches a root that
- *      happens to carry that tag, with no id reference at all) — but only from MechAddValue rows (targetersOf/
- *      itemIdsByTargetedTag), since only those actually raise a Value/MoneyValue/etc property; a mechanic from
- *      any other table that merely *names* the root's id or tag (kills it, recolors it, retags it, ...) is a
- *      different kind of relationship and isn't folded in here as if it were a boost.
- *   6. Activators of the level-2 scalers and level-3 activators — items whose MechActivate row fires an extra
- *      activation of one of those specific members, either by id (UseTargetIds) or via a TargetTag filter
- *      matching the member's own static tag (activatorsOf/itemIdsByActivatedTag) — the "activates" counterpart
- *      to level 5's "spawns/boosts". Added for a real gap: a member that only enters the build at level 3 by
- *      *producing* an event (e.g. Гонщик, who has no PlayerScore payoff of his own) had nothing asking what
- *      activates *him* — Тренер does, via TargetTag=Sport, with no id reference at all.
- *   6b. Recolorers feeding a level-6 activator's own TargetColor filter — same relative-placeholder handling as
- *      level 5's BonusTargetColor (RELATIVE_COLOR_VALUES), but additionally filtered by recolorerMatchesTagFilter
- *      when the row also has a TargetTag (a compound "tag AND color" condition, same principle as level 2's
- *      Bonus filter): a recolorer only counts if it could plausibly produce a card carrying that tag — either it
- *      repaints something other than itself, or it repaints only itself but already carries the tag. Real
- *      example: Тренер's row is TargetTag=Sport *and* TargetColor=Same — Сумасшедший repaints only himself and
- *      isn't Sport-tagged, so he can never become a matching target and is correctly excluded, unlike
- *      Сумасшедший+ (also repaints nearby cards) or a hypothetical self-recoloring Sport character.
- * No further recursion past level 6 — each level is computed straight from the root/level-2/level-3 identities
- * (level 6 additionally reads level-2/level-3's own identities, but does not recurse into whatever it itself
- * discovers).
+ *   2. **Скейлеры денег** — items matching the Bonus filter's compound tag+type condition (collectScalers — "a
+ *      Card tagged Rich", not "anything tagged Rich OR any Card"). Strictly the Bonus* columns
+ *      (BonusCountingType/BonusTargetPlace/BonusTargetTag/...) — if the root's payoff row has none of them (just
+ *      reads its own flat MainValue), this level is legitimately empty. Deliberately *not* the Activator filter
+ *      at all anymore — that conflated "what's counted" with "what could satisfy the trigger", a real correction
+ *      from an earlier round.
+ *   3. **Скейлеры активаций** — items structurally producing the exact event the root's payoff listens for
+ *      (producedActivatorType), filtered by tag compatibility: a producer naming a concrete *different* tag is
+ *      excluded (provably can't match); a producer with **no** tag filter at all is a candidate, never excluded
+ *      (indiscriminateProducersOfEvent) — real example: Гробовщик listens for *any* kill (doesn't care who died),
+ *      so Маньяк/Killer (who kill with no TargetTag) are candidates. Board Place (Near/SameSide/OppositeCard/...)
+ *      is never used to exclude either — any item can be placed on any of the 4 sides, so a self-relative Place
+ *      filter can always be reconciled with the root's own Place filter by choosing where to put things; it's
+ *      never proof of incompatibility. Also includes the item(s) *statically matching* the Activator filter's own
+ *      tag with no id (itemIdsByTag) — not a producer, but the concrete thing the filter names (real example:
+ *      Бездомный is level 3 for Чёрный рынок purely via ActivatorTag=Bum, even with zero Bonus fields on the
+ *      root) — kept here deliberately even though it isn't literally "emitting" anything, since without it
+ *      Бездомный (and everything that spawns him — see level 4) would silently vanish from this exact validated
+ *      example; flag if this reads wrong, the alternative is a level of its own.
+ *   4. **Спавнеры** — items placing the root (MechAddItem/ReplaceItem/ReplaceOnTrigger); items placing the
+ *      level-2/3 members; and tag-granters producing a tag the root's own filters need. Purely about *placing*
+ *      things onto the board — "activates the activators" moved to level 7 (a different verb, doesn't belong
+ *      under a level literally named Spawners).
+ *   5. **Перекрасивальщики** — a candidate lever wherever a color filter (root's own Bonus/Activator color, or a
+ *      level-7 "activates an activator" member's own TargetColor — e.g. Тренер) can't rule out any literal color
+ *      (RELATIVE_COLOR_VALUES) or names one explicitly. Tag-aware throughout via recolorerMatchesTagFilter (a
+ *      self-only recolorer only counts if it's already the required tag — see Сумасшедший vs Сумасшедший+).
+ *      Skipped for the root's own Activator color specifically when a *more specific* signal already resolved
+ *      it precisely — a concrete UseActivatorIds, or ActivatorType=ColorChange (level 3 already finds the exact
+ *      ColorChange producers). No such shortcut exists for the Bonus color (Bonus has no equivalent event).
+ *   6. **Модификаторы** — items influencing the root's own parameters, most often MainValue: by id (targetersOf),
+ *      by a tag matching root's own static tags (itemIdsByTargetedTag), or — generically — by type+position with
+ *      no narrowing filter at all (genericValueBoostersByType). Real example: Эстакада boosts *any* nearby
+ *      House's MainValue, Чёрный рынок included. Deliberately broad — safe specifically *because* it's the
+ *      outermost level: it reads as a weak, wide-net connection, not a claim of the same strength as levels 2-4
+ *      (unlike the same idea tried once as a standalone signal with no level structure around it — see
+ *      relatedItems' history — which really did connect nearly everything to everything and was rejected for it).
+ *   7. **Другие** — items that *activate* (not merely produce the event for) either a level-3 member or the root
+ *      itself directly: by id, by tag, or — for the root specifically — generically by type+position
+ *      (activatorsOf/itemIdsByActivatedTag/genericActivatorsByType). The "activates a level-3 member" case is a
+ *      genuinely different relationship from level 3's "produces the event" (Тренер doesn't produce LoopCompleted
+ *      — he fires an *extra* activation of Гонщик, who does); the "activates the root directly" case is a
+ *      genuinely new relationship never modeled before this whole round at all (previously the only way to reach
+ *      root was via level 3). Real example: Робот activates 2 random nearby Houses via MechActivate with no
+ *      tag/id filter at all.
  *
  * A PlayerScore payoff row is only root-eligible when it modifies MainValue *and* the item has a real ValueMin/
  * ValueMax range configured (see isEligiblePayoffRow/hasNoRealMainValueRange) — a MoneyValue payoff (e.g. the
@@ -641,6 +685,250 @@ function collectScalers(index: CascadeIndex, fields: { tag?: string; type?: stri
  * all — e.g. Бездомный/Заключенный/Уличный музыкант) are both baseline stats, not thematic payoffs, so both are
  * excluded by default. `includeMoneyValueRoots` opts back into both at once.
  */
+/** The 7 level sets a root produces (see computeCascadeBuilds's doc for the full rule of each) — factored out of
+ *  computeCascadeBuilds so computeCascadeLevels (per-build display, "Дерево связей") can compute the exact same
+ *  classification for an *already-existing* build's root without duplicating this logic. */
+/**
+ * Every kind of "A helps B score more" relationship this app has validated against real data — now a single flat
+ * enum instead of 7 fixed named categories, since (2026-07-24 redesign) the category a connection came through
+ * matters less than *how far the connection is from the root*. Kept purely as a per-edge label for display
+ * ("why is this connected"), not as the primary grouping axis anymore — see computeScalingGraph's doc.
+ */
+export type ScalingEdgeReason =
+    | "money-scaler"
+    | "activation-subject"
+    | "event-producer"
+    | "spawner"
+    | "tag-granter"
+    | "activator"
+    | "modifier"
+    | "recolorer"
+    /** The item's *real* parent (from computeScalingGraph) isn't itself a member of this particular build — a
+     *  manually-curated build can be a subset of what fresh generation would find — so computeCascadeLevels falls
+     *  back to drawing a line straight to the root instead of leaving the node with nowhere to point. Rare. */
+    | "indirect";
+
+export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
+    "money-scaler": "считается в бонусе",
+    "activation-subject": "то, что должно произойти (объект события)",
+    "event-producer": "производит нужное событие",
+    spawner: "спавнит/заменяет",
+    "tag-granter": "даёт нужный тег",
+    activator: "даёт доп. активацию",
+    modifier: "напрямую повышает значение",
+    recolorer: "перекрашивает под нужный цвет",
+    indirect: "непрямая связь (через предмет вне билда)",
+};
+
+interface ScalingEdgeCandidate {
+    from: string;
+    reason: ScalingEdgeReason;
+}
+
+/**
+ * Finds everything that structurally feeds into `target` — the generalized, recursive replacement for the old
+ * per-root-only level computation. Applies uniformly to *any* item in the graph, root or not, using every one of
+ * `targetRows` (target's own mechanic rows — an eligible PlayerScore payoff row for the root specifically, see
+ * computeScalingGraph; every row it has for a non-root node, since a non-root node has no "payoff" concept to
+ * restrict to). Checks every relationship kind this app has validated: counted in a Bonus filter, the concrete
+ * tagged subject an Activator filter names, structurally producing the listened-for event (tag-checked — a
+ * producer naming a *different* concrete tag is excluded, one naming no tag at all is a candidate), granting a
+ * needed tag, spawning/replacing, firing an extra activation, directly raising a value, recoloring to satisfy a
+ * tag+color filter (self-only recolorers only count if already the required tag — recolorerMatchesTagFilter).
+ * Deliberately does NOT include "boosts/activates any nearby Card/House/Artefact, no tag, no id at all" — see the
+ * module note by CascadeIndex for why that signal was tried and reverted.
+ */
+function findFeedersOf(
+    target: Item,
+    targetRows: MechanicRow[],
+    index: CascadeIndex,
+    itemsById: Map<string, Item>,
+    mechanicsByItem: Map<string, MechanicRow[]>,
+    knownIds: Set<string>
+): ScalingEdgeCandidate[] {
+    const edges: ScalingEdgeCandidate[] = [];
+    const push = (from: string, reason: ScalingEdgeReason) => {
+        if (from === target.id) return;
+        edges.push({ from, reason });
+    };
+
+    for (const row of targetRows) {
+        for (const id of collectScalers(index, { tag: row.fields.BonusTargetTag, type: row.fields.BonusTargetType })) {
+            push(id, "money-scaler");
+        }
+
+        for (const tag of splitList(row.fields.ActivatorTag ?? "")) {
+            for (const id of index.itemIdsByTag.get(tag) ?? []) push(id, "activation-subject");
+        }
+
+        for (const tag of [...splitList(row.fields.BonusTargetTag ?? ""), ...splitList(row.fields.ActivatorTag ?? "")]) {
+            for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) push(id, "tag-granter");
+        }
+
+        const activatorIds = splitList(row.fields.UseActivatorIds ?? "").filter((id) => knownIds.has(id));
+        if (activatorIds.length > 0) {
+            for (const id of activatorIds) push(id, "event-producer");
+        } else if (row.fields.ActivatorType) {
+            const activatorTags = splitList(row.fields.ActivatorTag ?? "");
+            if (activatorTags.length > 0) {
+                for (const tag of activatorTags) {
+                    for (const id of index.itemIdsByProducedTaggedEvent.get(`${row.fields.ActivatorType}|${tag}`) ?? []) {
+                        push(id, "event-producer");
+                    }
+                    for (const id of index.indiscriminateProducersOfEvent.get(row.fields.ActivatorType) ?? []) {
+                        push(id, "event-producer");
+                    }
+                }
+            } else {
+                for (const id of index.itemIdsByProducedEvent.get(row.fields.ActivatorType) ?? []) push(id, "event-producer");
+            }
+        }
+
+        const bonusTags = splitList(row.fields.BonusTargetTag ?? "");
+        for (const color of splitList(row.fields.BonusTargetColor ?? "")) {
+            for (const id of recolorersForColor(index, color)) {
+                if (recolorerMatchesTagFilter(id, bonusTags, itemsById, mechanicsByItem)) push(id, "recolorer");
+            }
+        }
+
+        // Activator color skipped when a more specific signal already resolves it — a concrete UseActivatorIds,
+        // or ActivatorType=ColorChange (already exact via the event-producer branch above).
+        const alreadyResolvedByEvent = row.fields.ActivatorType === "ColorChange";
+        if (activatorIds.length === 0 && !alreadyResolvedByEvent) {
+            const activatorTags = splitList(row.fields.ActivatorTag ?? "");
+            for (const color of splitList(row.fields.ActivatorColor ?? "")) {
+                for (const id of recolorersForColor(index, color)) {
+                    if (recolorerMatchesTagFilter(id, activatorTags, itemsById, mechanicsByItem)) push(id, "recolorer");
+                }
+            }
+        }
+
+        // MechActivate's own Target color+tag (e.g. Тренер: TargetTag=Sport + TargetColor=Same) — recolorers that
+        // could satisfy *this row's own* targeting condition, letting Тренер actually reach a matching target.
+        if (row.table === "MechActivate") {
+            const requiredTags = splitList(row.fields.TargetTag ?? "");
+            for (const color of splitList(row.fields.TargetColor ?? "")) {
+                for (const id of recolorersForColor(index, color)) {
+                    if (recolorerMatchesTagFilter(id, requiredTags, itemsById, mechanicsByItem)) push(id, "recolorer");
+                }
+            }
+        }
+    }
+
+    for (const id of index.spawnersOf.get(target.id) ?? []) push(id, "spawner");
+
+    for (const id of index.activatorsOf.get(target.id) ?? []) push(id, "activator");
+    for (const tag of target.tags) {
+        for (const id of index.itemIdsByActivatedTag.get(tag) ?? []) push(id, "activator");
+    }
+
+    for (const id of index.targetersOf.get(target.id) ?? []) push(id, "modifier");
+    for (const tag of target.tags) {
+        for (const id of index.itemIdsByTargetedTag.get(tag) ?? []) push(id, "modifier");
+    }
+
+    return edges;
+}
+
+export interface ScalingNode {
+    itemId: string;
+
+    /** 0 = root; deeper = a more indirect, weaker lever on the root's score — it scales something that scales
+     *  something (…) that scales the root, rather than scaling the root directly. */
+    depth: number;
+
+    /** The specific item(s) exactly one depth up that this node feeds into, and *why* (e.g. "spawns Маньяк",
+     *  reason=spawner — not a flat "connects to root somehow"). Empty for the root. Multiple entries when the
+     *  same item was independently discovered via more than one parent in the same BFS round. */
+    parents: { itemId: string; reason: ScalingEdgeReason }[];
+}
+
+const DEFAULT_MAX_SCALING_DEPTH = 6;
+
+/** The actual BFS, factored out so computeCascadeBuilds (many roots, one shared index) and computeCascadeLevels
+ *  (one root, needs the index for other things too) don't each rebuild buildCascadeIndex per call. */
+function computeScalingGraphInternal(
+    rootId: string,
+    knownIds: Set<string>,
+    itemsById: Map<string, Item>,
+    mechanicsByItem: Map<string, MechanicRow[]>,
+    index: CascadeIndex,
+    includeMoneyValueRoots: boolean,
+    maxDepth: number
+): Map<string, ScalingNode> {
+    const nodes = new Map<string, ScalingNode>();
+    const root = itemsById.get(rootId);
+    if (!root) return nodes;
+    nodes.set(rootId, { itemId: rootId, depth: 0, parents: [] });
+
+    let frontier = [rootId];
+    for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
+        const discovered = new Map<string, { itemId: string; reason: ScalingEdgeReason }[]>();
+
+        for (const parentId of frontier) {
+            const parentItem = itemsById.get(parentId);
+            if (!parentItem) continue;
+            const rows =
+                parentId === rootId
+                    ? (mechanicsByItem.get(rootId) ?? []).filter((row) =>
+                          isEligiblePayoffRow(root, row, includeMoneyValueRoots)
+                      )
+                    : mechanicsByItem.get(parentId) ?? [];
+
+            for (const edge of findFeedersOf(parentItem, rows, index, itemsById, mechanicsByItem, knownIds)) {
+                if (nodes.has(edge.from) || !knownIds.has(edge.from)) continue;
+                if (!discovered.has(edge.from)) discovered.set(edge.from, []);
+                discovered.get(edge.from)!.push({ itemId: parentId, reason: edge.reason });
+            }
+        }
+
+        if (discovered.size === 0) break;
+
+        const nextFrontier: string[] = [];
+        for (const [itemId, parents] of discovered) {
+            nodes.set(itemId, { itemId, depth, parents });
+            nextFrontier.push(itemId);
+        }
+        frontier = nextFrontier;
+    }
+
+    return nodes;
+}
+
+/**
+ * Recursively finds everything that scales `rootId`'s score, directly or by scaling something that itself scales
+ * it — the 2026-07-24 redesign, replacing the earlier fixed 7-level model per the user's explicit design: "чем
+ * ниже предмет, тем меньше он скейлит корень, но при этом они могут скейлить другие предметы, которые скейлят
+ * корень". BFS outward from the root (see computeScalingGraphInternal): depth 1 = items with a real structural
+ * edge (findFeedersOf) straight to the root's own eligible PlayerScore payoff row(s); depth 2 = items feeding
+ * into a depth-1 item; and so on, capped at `maxDepth` purely as a safety valve against pathological/cyclic data
+ * — real chains in the actual game bottom out within a few hops (e.g. Тренер feeding Гонщик feeding
+ * Дальнобойщик is depth 2).
+ *
+ * Real example that motivated the redesign: the previous model's "boosts/activates any nearby Card/House/
+ * Artefact, no tag, no id at all" signal (tried as a supposedly-safe outermost level) pulled Мошенник (drains
+ * value from nearby Rich cards — nothing to do with killing) and Меценат (boosts any nearby card's value,
+ * scaled by nearby Bum count — also nothing to do with killing) into "Билд от Гробовщика", alongside Эстакада
+ * and Робот, purely because they share a board-slot category with the real feeders — no tag, no id, no actual
+ * structural link. That signal is gone entirely now; only real edges (id/tag/event/replace-rule/tag-checked
+ * recolor) are ever followed, so an item with no real connection to the root — direct or via a chain — simply
+ * never appears, instead of appearing at a nominally "weak" outer level that still claimed a connection.
+ */
+export function computeScalingGraph(
+    rootId: string,
+    items: Item[],
+    mechanics: MechanicRow[],
+    replaceRules: ReplaceRule[],
+    includeMoneyValueRoots = false,
+    maxDepth = DEFAULT_MAX_SCALING_DEPTH
+): Map<string, ScalingNode> {
+    const knownIds = new Set(items.map((item) => item.id));
+    const mechanicsByItem = groupByItemId(mechanics);
+    const itemsById = new Map(items.map((item) => [item.id, item]));
+    const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
+    return computeScalingGraphInternal(rootId, knownIds, itemsById, mechanicsByItem, index, includeMoneyValueRoots, maxDepth);
+}
+
 export function computeCascadeBuilds(
     items: Item[],
     mechanics: MechanicRow[],
@@ -651,8 +939,8 @@ export function computeCascadeBuilds(
 ): Build[] {
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
-    const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
     const itemsById = new Map(items.map((item) => [item.id, item]));
+    const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
 
     const roots = items.filter((item) =>
         (mechanicsByItem.get(item.id) ?? []).some((row) => isEligiblePayoffRow(item, row, includeMoneyValueRoots))
@@ -662,116 +950,19 @@ export function computeCascadeBuilds(
     const drafts: Build[] = [];
 
     for (const root of roots) {
-        const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter((row) =>
-            isEligiblePayoffRow(root, row, includeMoneyValueRoots)
+        const graph = computeScalingGraphInternal(
+            root.id,
+            knownIds,
+            itemsById,
+            mechanicsByItem,
+            index,
+            includeMoneyValueRoots,
+            DEFAULT_MAX_SCALING_DEPTH
         );
 
-        const buildItems = new Set<string>([root.id]);
+        const clusterItems = [...graph.keys()];
+        if (clusterItems.length < 2) continue;
 
-        // Level 2 — scalers: items matching the payoff's own compound Bonus filter (tag AND type together).
-        const scalers = new Set<string>();
-        for (const row of payoffRows) {
-            for (const id of collectScalers(index, { tag: row.fields.BonusTargetTag, type: row.fields.BonusTargetType })) {
-                scalers.add(id);
-            }
-        }
-        scalers.delete(root.id);
-        for (const id of scalers) buildItems.add(id);
-
-        // Level 3 — activators of the root.
-        const activatorsAll = new Set<string>();
-        for (const row of payoffRows) {
-            const activatorIds = splitList(row.fields.UseActivatorIds ?? "").filter((id) => knownIds.has(id));
-            if (activatorIds.length > 0) {
-                for (const id of activatorIds) activatorsAll.add(id);
-                continue;
-            }
-            const activators = new Set<string>();
-            collectByFilter(index, { tag: row.fields.ActivatorTag, color: row.fields.ActivatorColor }, activators);
-            if (row.fields.ActivatorType) {
-                const activatorTags = splitList(row.fields.ActivatorTag ?? "");
-                if (activatorTags.length > 0) {
-                    for (const tag of activatorTags) {
-                        for (const id of index.itemIdsByProducedTaggedEvent.get(`${row.fields.ActivatorType}|${tag}`) ?? []) {
-                            activators.add(id);
-                        }
-                    }
-                } else {
-                    for (const id of index.itemIdsByProducedEvent.get(row.fields.ActivatorType) ?? []) activators.add(id);
-                }
-            }
-            activators.delete(root.id);
-            for (const id of activators) activatorsAll.add(id);
-        }
-        for (const id of activatorsAll) buildItems.add(id);
-
-        // Level 4 — spawners of the root.
-        for (const id of index.spawnersOf.get(root.id) ?? []) buildItems.add(id);
-
-        // Level 5 — spawners of the level-2 scalers and level-3 activators, plus recolorers/tag-granters/boosters.
-        for (const scalerId of scalers) {
-            for (const id of index.spawnersOf.get(scalerId) ?? []) buildItems.add(id);
-        }
-        for (const activatorId of activatorsAll) {
-            for (const id of index.spawnersOf.get(activatorId) ?? []) buildItems.add(id);
-        }
-        for (const row of payoffRows) {
-            for (const color of splitList(row.fields.BonusTargetColor ?? "")) {
-                for (const id of recolorersForColor(index, color)) buildItems.add(id);
-            }
-            for (const tag of [...splitList(row.fields.BonusTargetTag ?? ""), ...splitList(row.fields.ActivatorTag ?? "")]) {
-                for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) buildItems.add(id);
-            }
-        }
-        for (const id of index.targetersOf.get(root.id) ?? []) buildItems.add(id);
-        // Same idea as targetersOf, but for effects that boost root via a Tag filter rather than its specific id
-        // (e.g. "add Value to any nearby Card with tag=Sport" reaching a Sport-tagged root).
-        for (const tag of root.tags) {
-            for (const id of index.itemIdsByTargetedTag.get(tag) ?? []) buildItems.add(id);
-        }
-
-        // Level 6 — activators of the level-2 scalers and level-3 activators: items that fire an *extra*
-        // activation of one of those members specifically (MechActivate), either by naming its id directly or via
-        // a TargetTag filter matching its own static tag — the "activates" counterpart to level 5's
-        // spawns/boosts. Real example: Гонщик enters the build at level 3 (he structurally produces LoopCompleted
-        // for a Дальнобойщик/Банк root), but has no PlayerScore payoff of his own, so nothing before this level
-        // ever asked what activates *him*. Тренер does, via TargetTag=Sport matching Гонщик's own static tag —
-        // without level 6 that second-order scaling lever stayed invisible. One fixed hop past level 5, computed
-        // straight from the level-2/level-3 identities already found — not a further recursive cascade.
-        const level6Activators = new Set<string>();
-        for (const memberId of [...scalers, ...activatorsAll]) {
-            for (const id of index.activatorsOf.get(memberId) ?? []) level6Activators.add(id);
-            for (const tag of itemsById.get(memberId)?.tags ?? []) {
-                for (const id of index.itemIdsByActivatedTag.get(tag) ?? []) level6Activators.add(id);
-            }
-        }
-        for (const id of level6Activators) buildItems.add(id);
-
-        // Level 6b — recolorers feeding a level-6 activator's own TargetColor filter (relative placeholders —
-        // Same/NotSame/Random — treated as "any recolorer", same as level 5's BonusTargetColor handling; see
-        // RELATIVE_COLOR_VALUES). Real example: Тренер's own row is TargetTag=Sport *and* TargetColor=Same — he
-        // only activates same-color Sport cards, so a recolorer that can shift something into matching color
-        // (or repaint Тренер himself) is a genuine lever for reaching that activation at all, not just Тренер's
-        // mere presence in the build. But TargetTag+TargetColor together is ONE compound condition, same as
-        // level 2's Bonus filter — a recolorer only counts when it could plausibly produce a *Sport* card of that
-        // color, not any recolorer whatsoever (see recolorerMatchesTagFilter: Сумасшедший repaints only himself
-        // and isn't Sport-tagged, so he can never satisfy this specific filter, unlike Сумасшедший+ who also
-        // repaints nearby cards).
-        for (const activatorId of level6Activators) {
-            for (const row of mechanicsByItem.get(activatorId) ?? []) {
-                if (row.table !== "MechActivate") continue;
-                const requiredTags = splitList(row.fields.TargetTag ?? "");
-                for (const color of splitList(row.fields.TargetColor ?? "")) {
-                    for (const id of recolorersForColor(index, color)) {
-                        if (recolorerMatchesTagFilter(id, requiredTags, itemsById, mechanicsByItem)) buildItems.add(id);
-                    }
-                }
-            }
-        }
-
-        if (buildItems.size < 2) continue;
-
-        const clusterItems = [...buildItems];
         const alreadyCovered = existingItemSets.some(
             (existing) => existing.size === clusterItems.length && clusterItems.every((id) => existing.has(id))
         );
@@ -788,14 +979,159 @@ export function computeCascadeBuilds(
     return drafts;
 }
 
+export interface CascadeLevelNode {
+    itemId: string;
+
+    /** 0 = the build's head item; deeper = a more indirect lever on the root's score (see ScalingNode). */
+    depth: number;
+
+    /** The specific member(s) one depth up that explain this node's presence, and why (see ScalingEdgeReason).
+     *  Always `[]` for the root. Filtered to ids that are actually build members — a real parent that isn't
+     *  itself curated into this particular build falls back to `[{itemId: rootId, reason: "indirect"}]`. */
+    parents: { itemId: string; reason: ScalingEdgeReason }[];
+}
+
+export interface ComboInfo {
+    ruleId: string;
+
+    /** itemIdToReplace + NeededItem — real build members, at least 2 of them. */
+    ingredientIds: string[];
+
+    /** The item the ingredients combine into (ReplaceItem's replacementItem). */
+    resultId: string;
+}
+
+export interface CascadeComboNode {
+    /** Synthetic id, `combo:<ruleId>` — never a real Item.id. */
+    id: string;
+
+    combo: ComboInfo;
+}
+
+export interface CascadeLevelResult {
+    nodes: CascadeLevelNode[];
+
+    /** ReplaceItem combinations (2+ ingredients producing a result, all build members) — see computeReplaceCombos. */
+    combos: CascadeComboNode[];
+
+    /** Build members with no real path to the root at all (via computeScalingGraph), and not explained by a combo
+     *  either — not explained by generation at all (e.g. manually added, or added by the separate tag/id-based
+     *  computeSuggestedBuilds algorithm instead). */
+    unclassified: string[];
+
+    /** False when the build's head item has no PlayerScore-earning row at all (isEligiblePayoffRow) — there's no
+     *  meaningful scaling graph without a real root, so every other member is reported as unclassified. */
+    rootEligible: boolean;
+}
+
 /**
- * itemId -> ids of other items it structurally connects to via the same signals `computeCascadeBuilds` already
- * uses to pull members into a cascade build (tag filters, relative-color-aware recolor matching, tagged events) —
- * but computed generically for *any* mechanic row belonging to the item, not just a PlayerScore payoff row.
- * `relatedItems`/`computeBuildTree` previously only recognized id refs/chains/replace-rules/plain produced-events
- * as "strong" — real example that exposed the gap: Фермер (`BonusTargetTag=Farmer`) and Ферма (statically tagged
- * `Farmer`) are exactly why Ферма ends up a member of "Билд от Фермера" via cascade's level-2 scaler matching, but
- * the build's connection tree showed them as unrelated, since that tag-filter signal didn't exist here at all.
+ * ReplaceItem rules where the item this build already exists to explain (the replacementItem) — or one of its
+ * ingredients — is a build member, and at least 2 of {itemIdToReplace, NeededItem} are *also* build members. Real
+ * example: Уличный музыкант + Продюсер (NeededItem) both being present is what turns him into Рок музыкант — a
+ * genuine two-ingredient combination, not just "these two happen to be linked by a replace rule". Ported from the
+ * now-deleted `buildTree.ts` unchanged — independent of the scaling graph, just needs build membership.
+ */
+function computeReplaceCombos(build: Build, replaceRules: ReplaceRule[]): ComboInfo[] {
+    const memberIds = new Set(build.items);
+    const combos: ComboInfo[] = [];
+    const seenCombos = new Set<string>();
+
+    for (const rule of replaceRules) {
+        if (!memberIds.has(rule.replacementItem)) continue;
+
+        const ingredientIds = [...new Set([rule.itemIdToReplace, rule.fields.NeededItem])]
+            .filter((id): id is string => Boolean(id))
+            .filter((id) => memberIds.has(id) && id !== rule.replacementItem);
+
+        if (ingredientIds.length >= 2) {
+            const comboKey = `${[...ingredientIds].sort().join(",")}->${rule.replacementItem}`;
+            if (seenCombos.has(comboKey)) continue;
+            seenCombos.add(comboKey);
+            combos.push({ ruleId: rule.id, ingredientIds, resultId: rule.replacementItem });
+        }
+    }
+
+    return combos;
+}
+
+/**
+ * Classifies an *already-existing* build's own members by their depth in the same scaling graph
+ * `computeCascadeBuilds` uses to decide build membership in the first place — informational/display only, does
+ * not change the build. Replaces the old fixed-7-level classification (itself a replacement for an even older
+ * BFS+item-type tiering, `computeBuildTree`) — see computeScalingGraph's doc for why depth replaced categories.
+ *
+ * Reuses `computeScalingGraphInternal` directly, so a member here is at depth N if and only if that's exactly the
+ * distance computeCascadeBuilds' own graph would find for it, with `parents` pointing at the real, specific
+ * item(s) one depth up (a spawner points at what it spawns, not at the root) — see ScalingNode. Combo detection
+ * is layered on top, independent of the scaling graph, exactly as it worked in the deleted `buildTree.ts`: a
+ * combo participant that would otherwise be `unclassified` is explained by the combo instead.
+ */
+export function computeCascadeLevels(
+    build: Build,
+    items: Item[],
+    mechanics: MechanicRow[],
+    replaceRules: ReplaceRule[],
+    includeMoneyValueRoots = false
+): CascadeLevelResult {
+    if (build.items.length === 0) return { nodes: [], combos: [], unclassified: [], rootEligible: false };
+
+    const knownIds = new Set(items.map((item) => item.id));
+    const mechanicsByItem = groupByItemId(mechanics);
+    const itemsById = new Map(items.map((item) => [item.id, item]));
+    const rootId = build.items[0];
+    const root = itemsById.get(rootId);
+    if (!root) return { nodes: [], combos: [], unclassified: build.items, rootEligible: false };
+
+    const combos = computeReplaceCombos(build, replaceRules).map((combo) => ({ id: `combo:${combo.ruleId}`, combo }));
+    const explainedByCombo = new Set(combos.flatMap((c) => [...c.combo.ingredientIds, c.combo.resultId]));
+
+    const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter((row) =>
+        isEligiblePayoffRow(root, row, includeMoneyValueRoots)
+    );
+    if (payoffRows.length === 0) {
+        return {
+            nodes: [{ itemId: root.id, depth: 0, parents: [] }],
+            combos,
+            unclassified: build.items.filter((id) => id !== root.id && !explainedByCombo.has(id)),
+            rootEligible: false,
+        };
+    }
+
+    const index = buildCascadeIndex(items, mechanicsByItem, replaceRules, knownIds);
+    const graph = computeScalingGraphInternal(
+        rootId,
+        knownIds,
+        itemsById,
+        mechanicsByItem,
+        index,
+        includeMoneyValueRoots,
+        DEFAULT_MAX_SCALING_DEPTH
+    );
+
+    const memberIds = new Set(build.items);
+    const nodes: CascadeLevelNode[] = [];
+    for (const [itemId, scalingNode] of graph) {
+        if (!memberIds.has(itemId)) continue;
+        const realParents = scalingNode.parents.filter((p) => p.itemId === rootId || memberIds.has(p.itemId));
+        nodes.push({
+            itemId,
+            depth: scalingNode.depth,
+            parents: itemId === rootId ? [] : realParents.length > 0 ? realParents : [{ itemId: rootId, reason: "indirect" }],
+        });
+    }
+
+    const unclassified = build.items.filter((id) => !graph.has(id) && !explainedByCombo.has(id));
+    return { nodes, combos, unclassified, rootEligible: true };
+}
+
+/**
+ * itemId -> ids of other items it structurally connects to via the same signals `computeCascadeBuilds`/
+ * `computeScalingGraph` use (tag filters, tag-aware recolor matching, tagged/indiscriminate event producers) —
+ * but computed generically for *any* mechanic row belonging to the item, not just a PlayerScore payoff row. Kept
+ * in lockstep on purpose — `relatedItems`/`relatedBuilds`/`computeBuildConnections` (graph) all read this, and a
+ * signal that generates a build but isn't visible here reads as a bug (real example that originally motivated
+ * this whole function: Фермер/Ферма — see below). Deliberately does NOT include a generic "no tag, no id, just
+ * type+position" match — see the module note by CascadeIndex for why that signal was tried and reverted.
  * Directional per row (owner -> match), callers should check both directions for an unordered "are these
  * connected" question, same as the existing direct-id-ref check does.
  */
@@ -803,6 +1139,7 @@ function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): 
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
     const index = buildCascadeIndex(items, mechanicsByItem, [], knownIds);
+    const itemsById = new Map(items.map((item) => [item.id, item]));
 
     const connections = new Map<string, Set<string>>();
     const connect = (a: string, b: string) => {
@@ -822,37 +1159,60 @@ function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): 
                     for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
                     for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) connect(itemId, id);
                 }
-                for (const color of [
-                    ...splitList(row.fields.ActivatorColor ?? ""),
-                    ...splitList(row.fields.BonusTargetColor ?? ""),
-                ]) {
-                    for (const id of recolorersForColor(index, color)) connect(itemId, id);
+
+                // Bonus color — tag-aware (recolorerMatchesTagFilter), same as computeCascadeBuilds' level 5.
+                const bonusTags = splitList(row.fields.BonusTargetTag ?? "");
+                for (const color of splitList(row.fields.BonusTargetColor ?? "")) {
+                    for (const id of recolorersForColor(index, color)) {
+                        if (recolorerMatchesTagFilter(id, bonusTags, itemsById, mechanicsByItem)) connect(itemId, id);
+                    }
                 }
+
+                // Activator color — skipped when a more specific signal already resolves it (concrete
+                // UseActivatorIds, or ActivatorType=ColorChange, already exact via the event-producer block below).
+                const activatorIds = splitList(row.fields.UseActivatorIds ?? "").filter((id) => knownIds.has(id));
+                const alreadyResolvedByEvent = row.fields.ActivatorType === "ColorChange";
+                if (activatorIds.length === 0 && !alreadyResolvedByEvent) {
+                    const activatorTags = splitList(row.fields.ActivatorTag ?? "");
+                    for (const color of splitList(row.fields.ActivatorColor ?? "")) {
+                        for (const id of recolorersForColor(index, color)) {
+                            if (recolorerMatchesTagFilter(id, activatorTags, itemsById, mechanicsByItem)) connect(itemId, id);
+                        }
+                    }
+                }
+
             }
 
-            // MechActivate rows were previously invisible to this signal entirely — an item that fires an *extra*
-            // activation of anything carrying a tag (e.g. Тренер: TargetTag=Sport, no UseTargetIds) never
-            // connected to its targets unless it also happened to name one by id. Real example: Тренер
-            // (`c_chel_activate_sport_same_color_for_ball_pass_1`) activates any Sport-tagged card when the ball
-            // passes it — that's exactly how he reaches Гонщик (statically tagged `Sport`), with no id reference
-            // between them at all. Same tag/color-filter treatment as the MechAddValue block above, just against
-            // this table's own Activator/Target columns (MechActivate has no Bonus* fields).
+            // MechActivate rows: an item that fires an *extra* activation of anything carrying a tag (e.g.
+            // Тренер: TargetTag=Sport, no UseTargetIds) connects to its targets even with no id reference at all.
             if (row.table === "MechActivate") {
                 for (const tag of [...splitList(row.fields.ActivatorTag ?? ""), ...splitList(row.fields.TargetTag ?? "")]) {
                     for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
                     for (const id of index.itemIdsByGrantedTag.get(tag) ?? []) connect(itemId, id);
                 }
-                for (const color of [
-                    ...splitList(row.fields.ActivatorColor ?? ""),
-                    ...splitList(row.fields.TargetColor ?? ""),
-                ]) {
-                    for (const id of recolorersForColor(index, color)) connect(itemId, id);
+
+                const activatorTags = splitList(row.fields.ActivatorTag ?? "");
+                for (const color of splitList(row.fields.ActivatorColor ?? "")) {
+                    for (const id of recolorersForColor(index, color)) {
+                        if (recolorerMatchesTagFilter(id, activatorTags, itemsById, mechanicsByItem)) connect(itemId, id);
+                    }
+                }
+                const targetTags = splitList(row.fields.TargetTag ?? "");
+                for (const color of splitList(row.fields.TargetColor ?? "")) {
+                    for (const id of recolorersForColor(index, color)) {
+                        if (recolorerMatchesTagFilter(id, targetTags, itemsById, mechanicsByItem)) connect(itemId, id);
+                    }
                 }
             }
 
             if (row.fields.ActivatorType) {
                 for (const tag of splitList(row.fields.ActivatorTag ?? "")) {
                     for (const id of index.itemIdsByProducedTaggedEvent.get(`${row.fields.ActivatorType}|${tag}`) ?? []) {
+                        connect(itemId, id);
+                    }
+                    // A producer with no tag filter of its own can't be ruled out either — same relaxation as
+                    // computeCascadeBuilds' level 3 (real example: Маньяк/Killer kill with no TargetTag at all).
+                    for (const id of index.indiscriminateProducersOfEvent.get(row.fields.ActivatorType) ?? []) {
                         connect(itemId, id);
                     }
                 }
@@ -1101,27 +1461,70 @@ export interface BuildConnection {
 
     target: string;
 
-    /** 0..1 — sharedItemCount / min(itemsA, itemsB), so a big build sharing one item with a small one reads as weak. */
+    /** 0..1 — size-normalized combination of literal overlap and bridging-item overlap (see the function doc). */
     strength: number;
 
     sharedItemCount: number;
+
+    /** Items not literally shared, but strongly related to each other via the same signals `relatedBuilds`
+     *  already uses on the build detail page (id refs, chains, replace rules, tag/color/event cascade signals) —
+     *  see the function doc for why this is now part of the graph too. */
+    bridgingItemCount: number;
 
     /** True if the user explicitly linked these builds (via GameStore.linkBuilds), regardless of item overlap. */
     manual: boolean;
 }
 
 /**
- * Build <-> Build edges for the graph: builds are connected if they share at
- * least one item, or if the user manually linked them. Strength is
- * normalized against the *smaller* of the two builds' item counts, so a
- * 10-item build sharing just 1 item with another build reads as a weak
- * connection rather than as strong as two 2-item builds sharing 1.
+ * Build <-> Build edges for the graph: builds are connected if they share at least one item, if they have items
+ * that are *strongly related* to each other without being literally shared (bridging items — the same concept
+ * `relatedBuilds` already surfaces on the build detail page's "Возможно связано с" panel, now also driving the
+ * graph itself so both places agree), or if the user manually linked them.
+ *
+ * Strength combines both kinds of overlap, size-normalized against the *smaller* of the two builds' item counts
+ * (so a 10-item build sharing 1 item with a 2-item build still reads as weak) — bridging items are weighted at
+ * 0.3x a literal shared item, matching the 10:3 ratio `relatedBuilds`' own scoring already uses, so a
+ * bridging-only connection reads as visibly weaker than direct item overlap without being invisible.
  */
-export function computeBuildConnections(builds: Build[], upgradeChains: UpgradeChain[]): BuildConnection[] {
+export function computeBuildConnections(
+    builds: Build[],
+    items: Item[],
+    mechanics: MechanicRow[],
+    upgradeChains: UpgradeChain[],
+    replaceRules: ReplaceRule[]
+): BuildConnection[] {
     const excludedTiers = higherTierIds(upgradeChains);
     const itemSets = new Map(
         builds.map((build) => [build.id, new Set(build.items.filter((id) => !excludedTiers.has(id)))])
     );
+
+    // itemId -> ids strongly related to it (same signals relatedItems uses) — computed once per distinct item
+    // across all builds, not once per build pair, since the same item can appear in many builds.
+    const stronglyRelatedByItem = new Map<string, Set<string>>();
+    const stronglyRelatedTo = (itemId: string): Set<string> => {
+        const cached = stronglyRelatedByItem.get(itemId);
+        if (cached) return cached;
+        const strong = new Set(
+            relatedItems(itemId, items, mechanics, upgradeChains, replaceRules)
+                .filter((rel) => rel.strength === "strong")
+                .map((rel) => rel.id)
+        );
+        stronglyRelatedByItem.set(itemId, strong);
+        return strong;
+    };
+
+    // buildId -> union of "strongly related" ids across every item in that build — reused per pair below.
+    const bridgingPoolByBuild = new Map<string, Set<string>>();
+    const bridgingPoolOf = (buildId: string): Set<string> => {
+        const cached = bridgingPoolByBuild.get(buildId);
+        if (cached) return cached;
+        const pool = new Set<string>();
+        for (const itemId of itemSets.get(buildId) ?? []) {
+            for (const id of stronglyRelatedTo(itemId)) pool.add(id);
+        }
+        bridgingPoolByBuild.set(buildId, pool);
+        return pool;
+    };
 
     const connections: BuildConnection[] = [];
 
@@ -1133,15 +1536,20 @@ export function computeBuildConnections(builds: Build[], upgradeChains: UpgradeC
             const itemsB = itemSets.get(buildB.id)!;
 
             const sharedItemCount = [...itemsA].filter((id) => itemsB.has(id)).length;
+            const bridgingItemCount = [...itemsB].filter(
+                (id) => !itemsA.has(id) && bridgingPoolOf(buildA.id).has(id)
+            ).length;
             const manual =
                 (buildA.manualLinks ?? []).includes(buildB.id) || (buildB.manualLinks ?? []).includes(buildA.id);
 
-            if (sharedItemCount === 0 && !manual) continue;
+            if (sharedItemCount === 0 && bridgingItemCount === 0 && !manual) continue;
 
             const minSize = Math.min(itemsA.size, itemsB.size) || 1;
-            const strength = sharedItemCount > 0 ? Math.min(sharedItemCount / minSize, 1) : 1;
+            const overlapStrength =
+                sharedItemCount === 0 && bridgingItemCount === 0 ? 1 : sharedItemCount / minSize + (bridgingItemCount / minSize) * 0.3;
+            const strength = Math.min(overlapStrength, 1);
 
-            connections.push({ source: buildA.id, target: buildB.id, strength, sharedItemCount, manual });
+            connections.push({ source: buildA.id, target: buildB.id, strength, sharedItemCount, bridgingItemCount, manual });
         }
     }
 

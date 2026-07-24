@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { computeCascadeBuilds, relatedItems } from "./relations";
+import { computeBuildConnections, computeCascadeBuilds, computeCascadeLevels, relatedItems } from "./relations";
 import type { Item } from "../models/Item";
 import type { MechanicRow } from "../models/Mechanic";
 import type { ReplaceRule } from "../models/ReplaceRule";
+import type { Build } from "../models/Build";
 
 /**
  * Regression coverage for computeCascadeBuilds' root-eligibility rule, which took several failed attempts to
@@ -514,5 +515,388 @@ describe("relatedItems MechActivate tag-filter connections", () => {
 
         expect(racerRelation?.strength).toBe("strong");
         expect(related.some((rel) => rel.id === unrelated.id)).toBe(false);
+    });
+});
+
+/**
+ * Regression coverage for the 2026-07-23 7-level redesign — replaces the old "activators of the root" bucket
+ * (which conflated a passive tag-matched subject with an active event producer) with a clean split, and adds two
+ * new capabilities the user asked for by name: indiscriminate (no-tag) event producers count as candidates
+ * instead of being excluded, and a brand new "generic type+position, no tag/id at all" signal for both direct
+ * value-boosts and direct activations. Fixtures mirror the real Чёрный рынок (`h_money_for_activate_bum_same_side`)
+ * worked example the user gave, field-for-field, pulled from the real `PoD_config.zip`.
+ */
+describe("computeCascadeBuilds scaling graph (real edges only, recursive depth)", () => {
+    it("real Чёрный рынок build: passive Bum subject, indiscriminate killers, and their spawners are included; a generic type-only booster/activator is NOT", () => {
+        const blackMarket = makeItem("black_market", { valueMin: 15, valueMax: 15, itemType: "House" });
+        const homeless = makeItem("homeless", { tags: ["Bum"] }); // Бездомный — depth 1, the concrete Bum subject
+        const maniac = makeItem("maniac", { tags: ["Maniac", "Criminal"] }); // Маньяк — kills Near, no TargetTag
+        const killer = makeItem("killer", { tags: ["Man", "Criminal"] }); // Киллер — kills OppositeCard, no TargetTag
+        const cheapMotel = makeItem("cheap_motel"); // Дешевый мотель — spawns Маньяк (MechAddItem поставить)
+        const player = makeItem("player", { tags: ["Man", "Rich"] }); // Игрок — becomes Бездомный after 3 loops
+        // Эстакада/Робот-shaped: boosts/activates any nearby House, no tag, no id — the exact signal removed
+        // after the real bug report (Мошенник/Меценат wrongly appearing in "Билд от Гробовщика" this same way).
+        const overpass = makeItem("overpass", { itemType: "House" });
+        const robot = makeItem("robot", { itemType: "Card" });
+        const unrelated = makeItem("unrelated", { tags: ["Rich"], itemType: "Card" });
+        const items = [blackMarket, homeless, maniac, killer, cheapMotel, player, overpass, robot, unrelated];
+
+        const mechanics: MechanicRow[] = [
+            // Root payoff: real fields — ItemRemoved+SameSide+Bum, PlayerScore/MainValue, flat read (no Bonus*).
+            makeMainValuePayoff(blackMarket.id, {
+                ActivatorType: "ItemRemoved",
+                ActivatorPlace: "SameSide",
+                ActivatorTag: "Bum",
+            }),
+            // Маньяк: MechAddItem удалить, no TargetTag — kills indiscriminately.
+            {
+                id: "maniac-kill",
+                table: "MechAddItem",
+                itemId: maniac.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", ItemMech: "удалить", TargetPlace: "Near" },
+            },
+            // Киллер: MechAddItem удалить, no TargetTag, different Place (OppositeCard) — still a candidate, Place
+            // never excludes (any item can be placed on any of the 4 sides).
+            {
+                id: "killer-kill",
+                table: "MechAddItem",
+                itemId: killer.id,
+                fields: { ActivatorType: "LoopCompleted", ItemMech: "удалить", TargetPlace: "OppositeCard" },
+            },
+            // Дешевый мотель spawns Маньяк directly by id.
+            {
+                id: "motel-spawn-maniac",
+                table: "MechAddItem",
+                itemId: cheapMotel.id,
+                fields: { ActivatorType: "ItemRemoved", ActivatorTag: "Prostitute", ItemMech: "поставить", NewItemId: maniac.id },
+            },
+            // Игрок: has his own PlayerScore payoff (flat, not what makes him a root here) — real replace-rule
+            // link to Бездомный is supplied separately via replaceRules below.
+            makeMainValuePayoff(player.id, {}),
+            // Эстакада: MechAddValue boosting MainValue of any nearby House — no tag, no id. Real shape.
+            {
+                id: "overpass-boost",
+                table: "MechAddValue",
+                itemId: overpass.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorPlace: "Near",
+                    TargetType: "House",
+                    TargetValueType: "MainValue",
+                    TargetPlace: "Near",
+                    TargetCount: "999",
+                },
+            },
+            // Робот: MechActivate activating any 2 nearby Houses — no tag, no id. Real shape.
+            {
+                id: "robot-activate",
+                table: "MechActivate",
+                itemId: robot.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "House", TargetPlace: "Near", TargetCount: "2" },
+            },
+        ];
+
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "player-to-homeless",
+                source: "ReplaceOnTrigger",
+                itemIdToReplace: player.id,
+                replacementItem: homeless.id,
+                fields: { DurationType: "LoopCompleted", Duration: "3" },
+            },
+        ];
+
+        const drafts = computeCascadeBuilds(items, mechanics, replaceRules, [], (item) => item.id);
+        const built = new Set(drafts.find((d) => d.items[0] === blackMarket.id)?.items);
+
+        expect(built.has(homeless.id)).toBe(true); // depth 1 — the concrete Bum subject
+        expect(built.has(maniac.id)).toBe(true); // depth 1 — indiscriminate ItemRemoved producer
+        expect(built.has(killer.id)).toBe(true); // depth 1 — indiscriminate producer, different Place doesn't exclude
+        expect(built.has(cheapMotel.id)).toBe(true); // depth 2 — spawns the depth-1 Маньяк
+        expect(built.has(player.id)).toBe(true); // depth 2 — spawns the depth-1 Бездомный (via replace rule)
+        expect(built.has(overpass.id)).toBe(false); // no tag/id link at all — generic type-only match is gone
+        expect(built.has(robot.id)).toBe(false); // same — no real edge to Чёрный рынок
+        expect(built.has(unrelated.id)).toBe(false);
+    });
+
+    it("real Гробовщик shape: Мошенник and Меценат have no real edge to the root and are correctly excluded (the actual bug report)", () => {
+        // Гробовщик: ActivatorType=ItemRemoved, ActivatorPlace=All, no ActivatorTag — listens to ANY kill
+        // anywhere, no Bonus fields at all. Мошенник's own row targets himself (TargetPlace=MyPosition) with a
+        // Bonus counted from nearby Rich cards — no tag/id connection to Гробовщик. Меценат boosts any nearby
+        // card (TargetPlace=Near, no TargetTag) scaled by nearby Bum count — same story, no tag/id connection.
+        const undertaker = makeItem("undertaker", { tags: ["Man"], valueMin: 2, valueMax: 2 });
+        const maniac = makeItem("maniac", { tags: ["Maniac", "Criminal"] });
+        const scammer = makeItem("scammer", { tags: ["Criminal"] });
+        const patron = makeItem("patron", { tags: ["Man", "Rich"] });
+        const items = [undertaker, maniac, scammer, patron];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(undertaker.id, { ActivatorType: "ItemRemoved", ActivatorPlace: "All", ActivatorTag: "" }),
+            {
+                id: "maniac-kill",
+                table: "MechAddItem",
+                itemId: maniac.id,
+                fields: { ActivatorType: "BallPass", ItemMech: "удалить" },
+            },
+            {
+                id: "scammer-self-boost",
+                table: "MechAddValue",
+                itemId: scammer.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                    BonusCountingType: "ItemMoneyValue",
+                    BonusTargetType: "Card",
+                    BonusTargetPlace: "Near",
+                    BonusTargetTag: "Rich",
+                },
+            },
+            {
+                id: "patron-boost-near",
+                table: "MechAddValue",
+                itemId: patron.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "Near",
+                    BonusCountingType: "ItemMoneyValue",
+                    BonusTargetType: "Road",
+                    BonusTargetPlace: "Near",
+                    BonusTargetTag: "Bum",
+                },
+            },
+        ];
+
+        const drafts = computeCascadeBuilds(items, mechanics, [], [], (item) => item.id);
+        const built = new Set(drafts.find((d) => d.items[0] === undertaker.id)?.items);
+
+        expect(built.has(maniac.id)).toBe(true); // depth 1 — indiscriminate ItemRemoved producer, real edge
+        expect(built.has(scammer.id)).toBe(false); // Мошенник — no tag/id link to Гробовщик at all
+        expect(built.has(patron.id)).toBe(false); // Меценат — no tag/id link to Гробовщик at all
+    });
+
+    it("a concrete different tag on an otherwise-indiscriminate-shaped producer still excludes it (safety rail for the relaxed rule above)", () => {
+        // Same root as above, but this killer explicitly names TargetTag=Rich — provably NOT Bum, so unlike a
+        // producer with no tag at all, this one must stay excluded even under the relaxed "no tag = candidate"
+        // rule. A guaranteed level-2 member (Бездомный, tag=Bum) keeps the build from being dropped for being
+        // too small regardless of how richKiller is judged — otherwise a correct exclusion and "no draft at all"
+        // would be indistinguishable (see project memory on vacuous-pass test fixtures).
+        const blackMarket = makeItem("black_market", { valueMin: 15, valueMax: 15 });
+        const homeless = makeItem("homeless", { tags: ["Bum"] });
+        const richKiller = makeItem("rich_killer", { tags: ["Man"] });
+        const items = [blackMarket, homeless, richKiller];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(blackMarket.id, { ActivatorType: "ItemRemoved", ActivatorPlace: "SameSide", ActivatorTag: "Bum" }),
+            {
+                id: "rich-killer-kill",
+                table: "MechAddItem",
+                itemId: richKiller.id,
+                fields: { ActivatorType: "BallPass", ItemMech: "удалить", TargetTag: "Rich" },
+            },
+        ];
+
+        const drafts = computeCascadeBuilds(items, mechanics, [], [], (item) => item.id);
+        const built = new Set(drafts.find((d) => d.items[0] === blackMarket.id)?.items);
+
+        expect(built.has(homeless.id)).toBe(true);
+        expect(built.has(richKiller.id)).toBe(false);
+    });
+});
+
+/**
+ * Regression coverage for wiring the same cascade-style/tag-aware/generic-type signals into computeBuildConnections
+ * (the build<->build graph on GraphPage) — previously this only ever looked at literally shared items, so two
+ * builds connected only through a cascade-style signal (e.g. one build has Тренер, another has Гонщик, tag=Sport
+ * on both sides but no shared item at all) showed no edge at all, even though the exact same pair would already
+ * show up as "Возможно связано с" on the build detail page via relatedBuilds (which already used relatedItems).
+ */
+function makeBuild(id: string, items: string[], overrides: Partial<Build> = {}): Build {
+    return { id, name: id, items, auto: false, ...overrides };
+}
+
+describe("computeBuildConnections bridging items", () => {
+    it("connects two builds with no shared items but a strong cascade-style link between an item in each (real Тренер/Гонщик shape)", () => {
+        const trainer = makeItem("trainer");
+        const racer = makeItem("racer", { tags: ["Sport"] });
+        const unrelated = makeItem("unrelated", { tags: ["Bum"] });
+        const items = [trainer, racer, unrelated];
+        const mechanics: MechanicRow[] = [
+            {
+                id: "trainer-activate",
+                table: "MechActivate",
+                itemId: trainer.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Sport" },
+            },
+        ];
+        const buildA = makeBuild("build-a", [trainer.id]);
+        const buildB = makeBuild("build-b", [racer.id]);
+        const buildC = makeBuild("build-c", [unrelated.id]);
+        const builds = [buildA, buildB, buildC];
+
+        const connections = computeBuildConnections(builds, items, mechanics, [], []);
+
+        const aToB = connections.find(
+            (c) => (c.source === buildA.id && c.target === buildB.id) || (c.source === buildB.id && c.target === buildA.id)
+        );
+        const aToC = connections.find(
+            (c) => (c.source === buildA.id && c.target === buildC.id) || (c.source === buildC.id && c.target === buildA.id)
+        );
+
+        expect(aToB).toBeDefined();
+        expect(aToB?.sharedItemCount).toBe(0);
+        expect(aToB?.bridgingItemCount).toBe(1);
+        expect(aToB?.strength).toBeGreaterThan(0);
+        expect(aToC).toBeUndefined();
+    });
+
+    it("literal shared items still connect builds as before, weighted higher than a bridging-only pair", () => {
+        const shared = makeItem("shared");
+        const buildA = makeBuild("build-a", [shared.id, "solo-a"]);
+        const buildB = makeBuild("build-b", [shared.id, "solo-b"]);
+
+        const connections = computeBuildConnections([buildA, buildB], [shared], [], [], []);
+        const connection = connections[0];
+
+        expect(connection.sharedItemCount).toBe(1);
+        expect(connection.bridgingItemCount).toBe(0);
+        expect(connection.strength).toBeCloseTo(0.5, 5); // 1 shared / minSize(2)
+    });
+});
+
+/**
+ * Regression coverage for computeCascadeLevels — replaces the old BFS+item-type "Дерево связей" tiering with a
+ * per-member classification into the same 7 named levels computeCascadeBuilds itself uses, on the user's
+ * explicit request after the old tree's tier 1/2 labels ("прямая связь Card"/"House-Artefact") were confusing
+ * next to the new level names and had nothing to do with them.
+ */
+describe("computeCascadeLevels", () => {
+    it("real Дальнобойщик shape: Гонщик is depth 1 (a direct feeder of the root's own payoff)", () => {
+        // Дальнобойщик reads its own flat MainValue on LoopCompleted. Гонщик produces LoopCompleted directly for
+        // that payoff row, so he's exactly one hop from the root — depth 1, same as any other direct feeder,
+        // regardless of *which* kind of relationship (event-producer here) explains him.
+        const trucker = makeItem("trucker", { valueMin: 15, valueMax: 15 });
+        const racer = makeItem("racer", { tags: ["Sport"] });
+        const items = [trucker, racer];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(trucker.id, { ActivatorType: "LoopCompleted" }),
+            {
+                id: "racer-loop-counter",
+                table: "MechAddValue",
+                itemId: racer.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTargetType: "Road",
+                    ActivatorPlace: "MyPosition",
+                    TargetType: "LoopComplitedCounter",
+                    TargetCount: "1",
+                },
+            },
+        ];
+        const build = { id: "b1", name: "Билд от Дальнобойщика", items: [trucker.id, racer.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, []);
+
+        expect(result.rootEligible).toBe(true);
+        const racerNode = result.nodes.find((n) => n.itemId === racer.id);
+        expect(racerNode?.depth).toBe(1);
+        expect(racerNode?.parents).toEqual([{ itemId: trucker.id, reason: "event-producer" }]);
+        expect(result.nodes.some((n) => n.itemId === trucker.id && n.depth === 0)).toBe(true);
+        expect(result.unclassified).toEqual([]);
+    });
+
+    it("a build member that doesn't match any level under the current root shows as unclassified, not silently dropped or mis-leveled", () => {
+        const trucker = makeItem("trucker", { valueMin: 15, valueMax: 15 });
+        const stranger = makeItem("stranger", { tags: ["Nothing"] });
+        const items = [trucker, stranger];
+        const mechanics: MechanicRow[] = [makeMainValuePayoff(trucker.id, { ActivatorType: "LoopCompleted" })];
+        const build = { id: "b2", name: "Билд от Дальнобойщика", items: [trucker.id, stranger.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, []);
+
+        expect(result.unclassified).toEqual([stranger.id]);
+        expect(result.nodes.some((n) => n.itemId === stranger.id)).toBe(false);
+    });
+
+    it("root with no PlayerScore payoff at all reports rootEligible=false and every other member unclassified", () => {
+        const manual1 = makeItem("manual1");
+        const manual2 = makeItem("manual2");
+        const build = { id: "b3", name: "Ручной билд", items: [manual1.id, manual2.id], auto: false };
+
+        const result = computeCascadeLevels(build, [manual1, manual2], [], []);
+
+        expect(result.rootEligible).toBe(false);
+        expect(result.unclassified).toEqual([manual2.id]);
+    });
+
+    it("Тренер is depth 2 and parents to Гонщик specifically, not straight to the root (real Дальнобойщик/Гонщик/Тренер shape)", () => {
+        // Гонщик is depth 1 (produces LoopCompleted for Дальнобойщик's own payoff). Тренер activates Гонщик
+        // specifically (TargetTag=Sport matching Гонщик's own tag) — he doesn't touch Дальнобойщик's payoff at
+        // all, so he's depth 2, one hop further out, and his parent is Гонщик, not the root.
+        const trucker = makeItem("trucker", { valueMin: 15, valueMax: 15 });
+        const racer = makeItem("racer", { tags: ["Sport"] });
+        const trainer = makeItem("trainer");
+        const items = [trucker, racer, trainer];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(trucker.id, { ActivatorType: "LoopCompleted" }),
+            {
+                id: "racer-loop-counter",
+                table: "MechAddValue",
+                itemId: racer.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTargetType: "Road",
+                    ActivatorPlace: "MyPosition",
+                    TargetType: "LoopComplitedCounter",
+                    TargetCount: "1",
+                },
+            },
+            {
+                id: "trainer-activate",
+                table: "MechActivate",
+                itemId: trainer.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Sport" },
+            },
+        ];
+        const build = { id: "b4", name: "Билд от Дальнобойщика", items: [trucker.id, racer.id, trainer.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, []);
+
+        const trainerNode = result.nodes.find((n) => n.itemId === trainer.id);
+        expect(trainerNode?.depth).toBe(2);
+        expect(trainerNode?.parents).toEqual([{ itemId: racer.id, reason: "activator" }]); // parents to Гонщик, not Дальнобойщик
+    });
+
+    it("detects a ReplaceItem combination among build members and stops reporting its participants as unclassified", () => {
+        const rockMusician = makeItem("rock_musician", { valueMin: 15, valueMax: 15, tags: ["Music"] });
+        const streetMusician = makeItem("street_musician", { tags: ["Art"] });
+        const producer = makeItem("producer");
+        const items = [rockMusician, streetMusician, producer];
+        const mechanics: MechanicRow[] = [makeMainValuePayoff(rockMusician.id, {})];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "street-to-rock",
+                source: "ReplaceItem",
+                itemIdToReplace: streetMusician.id,
+                replacementItem: rockMusician.id,
+                fields: { NeededItem: producer.id, NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+        const build = {
+            id: "b5",
+            name: "Билд от Рок музыканта",
+            items: [rockMusician.id, streetMusician.id, producer.id],
+            auto: true,
+        };
+
+        const result = computeCascadeLevels(build, items, mechanics, replaceRules);
+
+        expect(result.combos).toHaveLength(1);
+        expect(result.combos[0].combo.ingredientIds.sort()).toEqual([producer.id, streetMusician.id].sort());
+        expect(result.combos[0].combo.resultId).toBe(rockMusician.id);
+        // Neither ingredient is level-classified for this root (no structural connection to rockMusician's own
+        // payoff filters), so without combo detection both would show as unclassified — the combo explains them.
+        expect(result.unclassified).toEqual([]);
     });
 });

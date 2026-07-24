@@ -133,7 +133,13 @@ export default function GraphPage() {
     }, []);
 
     const graphData = useMemo(() => {
-        const connections = computeBuildConnections(store.builds, store.upgradeChains);
+        const connections = computeBuildConnections(
+            store.builds,
+            store.items,
+            store.mechanics,
+            store.upgradeChains,
+            store.replaceRules
+        );
 
         // Same "type of the first/root item" convention as BuildsPage's own type filter — a build with no
         // determinable root type (empty build) is never hidden by this filter, only builds with a known type

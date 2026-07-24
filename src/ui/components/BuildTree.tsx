@@ -6,7 +6,12 @@ import ItemIcon from "./ItemIcon";
 import ItemDescription from "./ItemDescription";
 import DetailModal from "./DetailModal";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
-import { computeBuildTree, type BuildTreeNode, type ComboInfo } from "../../core/domain/buildTree";
+import {
+    computeCascadeLevels,
+    SCALING_EDGE_REASON_LABELS,
+    type CascadeComboNode,
+    type CascadeLevelNode,
+} from "../../core/domain/relations";
 import type { Build } from "../../core/models/Build";
 
 type Props = {
@@ -15,78 +20,26 @@ type Props = {
 
 type Edge = { parentId: string; childId: string; x1: number; y1: number; x2: number; y2: number };
 
-type Point = { x: number; y: number };
-
-interface ComboEdgeInfo {
-    color: string;
-
-    /** Where the arrowhead's tip sits — the boundary of whichever real node it's pointing at. */
-    tip: Point;
-
-    /** Direction the arrow points, in radians (atan2 convention). */
-    angle: number;
-}
-
-/**
- * Orange for an ingredient feeding a combo (arrow points at the combo), green for the combo's own result coming
- * out of it (arrow points at the result) — by the combo's actual ingredient/result roles, not by which side the
- * tree's BFS happened to record as "parent"/"child". That distinction matters for the arrow direction specifically
- * (not just the color): when a combo's result is the tree's own root (a common case — the combo is often exactly
- * why the root exists), the root is discovered *before* its ingredients and ends up as the BFS parent of the combo
- * node — i.e. the line is drawn root-to-combo — even though the arrow still needs to point combo-to-root, since
- * that's the real direction of "this combination produces the root", not the other way around.
- */
-function comboEdgeInfo(edge: Edge, comboInfoById: Map<string, ComboInfo>): ComboEdgeInfo | null {
-    const parentCombo = comboInfoById.get(edge.parentId);
-    const childCombo = comboInfoById.get(edge.childId);
-    const combo = parentCombo ?? childCombo;
-    if (!combo) return null;
-
-    const comboIsParent = Boolean(parentCombo);
-    const comboPoint: Point = comboIsParent ? { x: edge.x1, y: edge.y1 } : { x: edge.x2, y: edge.y2 };
-    const otherPoint: Point = comboIsParent ? { x: edge.x2, y: edge.y2 } : { x: edge.x1, y: edge.y1 };
-    const otherId = comboIsParent ? edge.childId : edge.parentId;
-
-    if (otherId === combo.resultId) {
-        return { color: "#66bb6a", tip: otherPoint, angle: Math.atan2(otherPoint.y - comboPoint.y, otherPoint.x - comboPoint.x) };
-    }
-    if (combo.ingredientIds.includes(otherId)) {
-        return { color: "#ffb74d", tip: comboPoint, angle: Math.atan2(comboPoint.y - otherPoint.y, comboPoint.x - otherPoint.x) };
-    }
-    return null;
-}
-
-/** A small filled triangle, tip at `info.tip`, pointing along `info.angle` — two more points at ±spread from the
- *  tip, `size` back along the line, is the standard construction for an SVG arrowhead. */
-function ArrowHead({ info, opacity }: { info: ComboEdgeInfo; opacity: number }) {
-    const size = 12;
-    const spread = Math.PI / 7;
-
-    const wing = (offset: number) => ({
-        x: info.tip.x - size * Math.cos(info.angle + offset),
-        y: info.tip.y - size * Math.sin(info.angle + offset),
-    });
-    const wing1 = wing(spread);
-    const wing2 = wing(-spread);
-
-    const points = [`${info.tip.x},${info.tip.y}`, `${wing1.x},${wing1.y}`, `${wing2.x},${wing2.y}`].join(" ");
-
-    return <polygon points={points} fill={info.color} opacity={opacity} style={{ transition: "opacity 0.15s" }} />;
-}
-
 function edgeKey(parentId: string, childId: string): string {
     return `${parentId}--${childId}`;
 }
 
-function tierLabel(tier: number): string {
-    if (tier === 0) return "Головной предмет";
-    if (tier === 1) return "1 ступень — прямая связь (Card)";
-    if (tier === 2) return "2 ступень — прямая связь (House/Artefact)";
-    return `${tier} ступень — непрямая связь`;
+/** Russian plural form for "N шаг(а/ов) от корня" — 1 шаг, 2-4 шага, 5+/11-14 шагов. */
+function stepsWord(n: number): string {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return "шаг";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "шага";
+    return "шагов";
+}
+
+function depthLabel(depth: number): string {
+    if (depth === 0) return "Головной предмет";
+    return `${depth} ${stepsWord(depth)} от корня`;
 }
 
 type TreeNodeProps = {
-    node: BuildTreeNode;
+    node: CascadeLevelNode;
     nodeRefs: React.MutableRefObject<Map<string, HTMLElement>>;
     dimmed: boolean;
     onHoverStart: () => void;
@@ -94,71 +47,32 @@ type TreeNodeProps = {
     onOpen: (itemId: string) => void;
 };
 
-/** A ReplaceItem combination — its ingredients feed in, the result comes out. Round (not square, unlike a real
- *  item node) so it reads as a mechanism rather than an item, and not a link since there's no item page for it. */
-function ComboNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNodeProps) {
-    const store = useStore();
-    const combo = node.combo!;
-
-    const nameOf = (id: string) => {
-        const item = store.getItem(id);
-        return item ? store.itemName(item) : id;
-    };
-
-    return (
-        <Tooltip
-            title={
-                <>
-                    Комбинация
-                    <br />
-                    {combo.ingredientIds.map(nameOf).join(" + ")} → {nameOf(combo.resultId)}
-                </>
-            }
-        >
-            <Box
-                ref={(el: HTMLElement | null) => {
-                    if (el) nodeRefs.current.set(node.itemId, el);
-                    else nodeRefs.current.delete(node.itemId);
-                }}
-                onMouseEnter={onHoverStart}
-                onMouseLeave={onHoverEnd}
-                sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 56,
-                    height: 56,
-                    borderRadius: "50%",
-                    border: "1px dashed",
-                    borderColor: "primary.main",
-                    bgcolor: "background.paper",
-                    opacity: dimmed ? 0.3 : 1,
-                    transition: "opacity 0.15s",
-                }}
-            >
-                <Typography sx={{ fontSize: 26 }}>⚗️</Typography>
-            </Box>
-        </Tooltip>
-    );
-}
-
-/** One tree node: item icon only (name/description live in the hover tooltip), registers itself in `nodeRefs`
- *  so the parent can measure it for edge lines. */
+/** One tree node: item icon only (name/description/connection reason live in the hover tooltip), registers
+ *  itself in `nodeRefs` so the parent can measure it for edge lines. */
 function TreeNode(props: TreeNodeProps) {
     const { node, nodeRefs, dimmed, onHoverStart, onHoverEnd, onOpen } = props;
     const store = useStore();
 
-    if (node.combo) return <ComboNode {...props} />;
-
     const item = store.getItem(node.itemId);
     const name = item ? store.itemName(item) : node.itemId;
     const description = item ? store.itemDescription(item) : "";
+
+    // Why this node is here — which specific parent(s) it feeds into, and what kind of connection that is (e.g.
+    // "спавнит/заменяет — Маньяк"), not just "connects to root somehow".
+    const reasonLines = node.parents.map((parent) => {
+        const parentItem = store.getItem(parent.itemId);
+        const parentName = parentItem ? store.itemName(parentItem) : parent.itemId;
+        return `${SCALING_EDGE_REASON_LABELS[parent.reason]} — ${parentName}`;
+    });
 
     return (
         <Tooltip
             title={
                 <>
                     {name}
+                    {reasonLines.map((line) => (
+                        <div key={line}>{line}</div>
+                    ))}
                     {item && description && (
                         <>
                             <br />
@@ -207,67 +121,121 @@ function TreeNode(props: TreeNodeProps) {
     );
 }
 
-/** Placeholder for a tier with no members — keeps the step sequence visible instead of skipping straight to the
- *  next non-empty tier. Not a real node: no link, no tooltip, no edges drawn to/from it. */
-function EmptyTierSlot() {
+
+/**
+ * One ReplaceItem combination, rendered as its own self-contained inline row (ingredient boxes → ⚗️ → result box)
+ * rather than folded into the main level grid's edge/DOM-ref system. Deliberate: a combo's ingredients/result may
+ * already have their own node elsewhere in the level grid (different DOM ref), or may have *no* level-grid node
+ * at all (a combo-only participant, not classified into any of the 7 levels) — giving this its own tiny,
+ * independent layout sidesteps both cases cleanly instead of needing a second synthetic-id scheme to avoid ref
+ * collisions with the main grid.
+ */
+function ComboRow({ comboNode, onOpen }: { comboNode: CascadeComboNode; onOpen: (itemId: string) => void }) {
+    const store = useStore();
+    const { combo } = comboNode;
+
+    const renderItem = (id: string) => {
+        const item = store.getItem(id);
+        const name = item ? store.itemName(item) : id;
+        return (
+            <Tooltip key={id} title={name}>
+                <Box
+                    component={RouterLink}
+                    to={`/items/${encodeURIComponent(id)}`}
+                    onClick={(event) => {
+                        event.preventDefault();
+                        onOpen(id);
+                    }}
+                    sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 44,
+                        height: 44,
+                        borderRadius: 2,
+                        border: "1px solid",
+                        borderColor: "divider",
+                        textDecoration: "none",
+                        color: "inherit",
+                        bgcolor: "background.paper",
+                    }}
+                >
+                    {item ? <ItemIcon item={item} size={26} /> : <Typography sx={{ fontSize: 20 }}>🧩</Typography>}
+                </Box>
+            </Tooltip>
+        );
+    };
+
     return (
-        <Box
-            sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 56,
-                height: 56,
-                borderRadius: 2,
-                border: "1px dashed",
-                borderColor: "divider",
-                color: "text.disabled",
-            }}
-        >
-            <Typography variant="caption">—</Typography>
-        </Box>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
+            {combo.ingredientIds.map((id, index) => (
+                <Stack key={id} direction="row" spacing={1} alignItems="center">
+                    {index > 0 && <Typography color="text.secondary">+</Typography>}
+                    {renderItem(id)}
+                </Stack>
+            ))}
+            <Typography color="text.secondary" sx={{ mx: 0.5 }}>
+                →
+            </Typography>
+            <Tooltip title="Комбинация (замена по правилу)">
+                <Box
+                    sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 40,
+                        height: 40,
+                        borderRadius: "50%",
+                        border: "1px dashed",
+                        borderColor: "primary.main",
+                        bgcolor: "background.paper",
+                    }}
+                >
+                    <Typography sx={{ fontSize: 20 }}>⚗️</Typography>
+                </Box>
+            </Tooltip>
+            <Typography color="text.secondary" sx={{ mx: 0.5 }}>
+                →
+            </Typography>
+            {renderItem(combo.resultId)}
+        </Stack>
     );
 }
 
 /**
- * Tiered top-to-bottom visualization of a build's own membership, per tier (see computeBuildTree): head item,
- * direct Card connections, direct House/Artefact connections, then increasingly indirect connections below.
+ * Depth-grouped top-to-bottom visualization of a build's own scaling structure (see computeCascadeLevels): head
+ * item, then each depth reached by BFS outward from it — depth 1 = items with a real, direct structural edge to
+ * the root's own payoff (money-scaler, event-producer, spawner, direct booster/activator, recolorer), depth 2 =
+ * items feeding into a depth-1 item, and so on. Deeper means a more indirect, weaker lever on the root's score —
+ * that's the whole point of grouping by depth instead of by a fixed named category (2026-07-24 redesign,
+ * replacing the earlier 7-level model): "чем ниже предмет, тем меньше он скейлит корень, но они могут скейлить
+ * другие предметы, которые скейлят корень" (the user's own framing). *Why* a node is connected (spawns, produces
+ * the listened-for event, boosts a value, ...) now lives in its hover tooltip instead of naming the row.
+ * Members with no real path to the root at all (manually added, from a different auto-build algorithm, or
+ * explained only by a combo — see below) are listed separately, not force-assigned to a depth.
  * Connector lines are computed by measuring each node's DOM position (getBoundingClientRect) rather than a
  * layout library — fine at this scale (a build's item count), recomputed via ResizeObserver so image loads and
- * window resizes don't leave stale lines.
+ * window resizes don't leave stale lines. Each non-root node's `parents` point at the *specific* other member
+ * that actually explains it (a spawner points at what it spawns, not at the root) — real provenance.
  */
 export default function BuildTree({ build }: Props) {
     const store = useStore();
 
-    const { nodes, unconnected } = useMemo(
-        () => computeBuildTree(build, store.items, store.mechanics, store.upgradeChains, store.replaceRules),
-        [build, store.items, store.mechanics, store.upgradeChains, store.replaceRules]
+    const { nodes, combos, unclassified, rootEligible } = useMemo(
+        () => computeCascadeLevels(build, store.items, store.mechanics, store.replaceRules),
+        [build, store.items, store.mechanics, store.replaceRules]
     );
 
-    const comboInfoById = useMemo(() => {
-        const map = new Map<string, ComboInfo>();
+    // Grouped by depth, ascending — no gap-filling needed (unlike the old fixed 7-level grid): a depth can only
+    // be reached at all if the depth before it had real members (BFS), so there's never a legitimate "empty middle
+    // row" the way "0 money scalers" was a real result under the old category-based model.
+    const depths = useMemo(() => {
+        const byDepth = new Map<number, CascadeLevelNode[]>();
         for (const node of nodes) {
-            if (node.combo) map.set(node.itemId, node.combo);
+            if (!byDepth.has(node.depth)) byDepth.set(node.depth, []);
+            byDepth.get(node.depth)!.push(node);
         }
-        return map;
-    }, [nodes]);
-
-    // Every tier number up to the highest one actually reached gets a row, even if nothing landed on it (e.g. no
-    // Card-type direct connection at tier 1 but a House/Artefact one at tier 2) — an empty placeholder slot keeps
-    // the step sequence visually consistent instead of silently jumping from "Головной предмет" to "2 ступень".
-    const tiers = useMemo(() => {
-        const byTier = new Map<number, BuildTreeNode[]>();
-        let maxTier = 0;
-        for (const node of nodes) {
-            if (!byTier.has(node.tier)) byTier.set(node.tier, []);
-            byTier.get(node.tier)!.push(node);
-            maxTier = Math.max(maxTier, node.tier);
-        }
-        const result: [number, BuildTreeNode[]][] = [];
-        for (let tier = 0; tier <= maxTier; tier++) {
-            result.push([tier, byTier.get(tier) ?? []]);
-        }
-        return result;
+        return [...byDepth.entries()].sort(([a], [b]) => a - b);
     }, [nodes]);
 
     // Bidirectional adjacency (parent<->child) derived from the tree's directed parent links — used for hover
@@ -279,9 +247,9 @@ export default function BuildTree({ build }: Props) {
             map.get(a)!.add(b);
         };
         for (const node of nodes) {
-            for (const parentId of node.parents) {
-                link(node.itemId, parentId);
-                link(parentId, node.itemId);
+            for (const parent of node.parents) {
+                link(node.itemId, parent.itemId);
+                link(parent.itemId, node.itemId);
             }
         }
         return map;
@@ -298,7 +266,9 @@ export default function BuildTree({ build }: Props) {
     // array reference every render even when its contents are identical — depending the effect on `nodes`
     // itself would re-run (and setEdges) every render forever. This derived string is stable across renders
     // that produce the same actual tree, which is what breaks that loop.
-    const nodesKey = nodes.map((node) => `${node.itemId}:${node.tier}:${node.parents.join(",")}`).join("|");
+    const nodesKey = nodes
+        .map((node) => `${node.itemId}:${node.depth}:${node.parents.map((p) => p.itemId).join(",")}`)
+        .join("|");
 
     useLayoutEffect(() => {
         const container = containerRef.current;
@@ -313,17 +283,15 @@ export default function BuildTree({ build }: Props) {
                 if (!childEl) continue;
                 const childRect = childEl.getBoundingClientRect();
 
-                for (const parentId of node.parents) {
+                for (const parent of node.parents) {
+                    const parentId = parent.itemId;
                     const parentEl = nodeRefs.current.get(parentId);
                     if (!parentEl) continue;
                     const parentRect = parentEl.getBoundingClientRect();
 
-                    // "Parent" doesn't reliably mean "the one visually above" — a combo participant can end up at
-                    // an earlier tier than the combo itself (placed there via a different, more direct signal;
-                    // see computeBuildTree's post-pass), so the combo's own edge to it points *upward*. Always
-                    // connect bottom-of-the-higher-box to top-of-the-lower-box (by actual on-screen position, not
-                    // by tier/parent role) — otherwise the line/arrowhead reaches for the wrong side of a box and
-                    // ends up geometrically behind it, invisible under the node's own (now higher z-index) fill.
+                    // Connect bottom-of-the-higher-box to top-of-the-lower-box by actual on-screen position (not
+                    // by depth) — a shallower node normally renders above a deeper one, but this stays a
+                    // defensive position check rather than assuming depth order always matches screen order.
                     const parentIsHigher = parentRect.top + parentRect.height / 2 <= childRect.top + childRect.height / 2;
 
                     next.push({
@@ -403,7 +371,6 @@ export default function BuildTree({ build }: Props) {
                     {edges.map((edge) => {
                         const key = edgeKey(edge.parentId, edge.childId);
                         const isHighlighted = !highlightedEdgeKeys || highlightedEdgeKeys.has(key);
-                        const combo = comboEdgeInfo(edge, comboInfoById);
                         const opacity = isHighlighted ? 0.9 : 0.15;
                         return (
                             <g key={key}>
@@ -412,12 +379,11 @@ export default function BuildTree({ build }: Props) {
                                     y1={edge.y1}
                                     x2={edge.x2}
                                     y2={edge.y2}
-                                    stroke={combo?.color ?? "#5B8CFF"}
+                                    stroke="#5B8CFF"
                                     strokeWidth={isHighlighted ? 2.5 : 1.5}
                                     opacity={opacity}
                                     style={{ pointerEvents: "none", transition: "opacity 0.15s" }}
                                 />
-                                {combo && <ArrowHead info={combo} opacity={opacity} />}
                                 {/* Wider invisible line on top, just for a comfortable hover hit-area on a 1.5px line. */}
                                 <line
                                     x1={edge.x1}
@@ -439,43 +405,54 @@ export default function BuildTree({ build }: Props) {
                 </Box>
 
                 <Stack spacing={4}>
-                    {tiers.map(([tier, tierNodes]) => (
-                        <Box key={tier}>
+                    {depths.map(([depth, depthNodes]) => (
+                        <Box key={depth}>
                             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                                {tierLabel(tier)}
+                                {depthLabel(depth)}
                             </Typography>
                             <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", justifyContent: "center" }}>
-                                {tierNodes.length === 0 ? (
-                                    <EmptyTierSlot />
-                                ) : (
-                                    tierNodes.map((node) => (
-                                        <TreeNode
-                                            key={node.itemId}
-                                            node={node}
-                                            nodeRefs={nodeRefs}
-                                            dimmed={highlightedItemIds !== null && !highlightedItemIds.has(node.itemId)}
-                                            onHoverStart={() => {
-                                                setHoveredItemId(node.itemId);
-                                                setHoveredEdgeKey(null);
-                                            }}
-                                            onHoverEnd={() => setHoveredItemId((current) => (current === node.itemId ? null : current))}
-                                            onOpen={setOpenItemId}
-                                        />
-                                    ))
-                                )}
+                                {depthNodes.map((node) => (
+                                    <TreeNode
+                                        key={node.itemId}
+                                        node={node}
+                                        nodeRefs={nodeRefs}
+                                        dimmed={highlightedItemIds !== null && !highlightedItemIds.has(node.itemId)}
+                                        onHoverStart={() => {
+                                            setHoveredItemId(node.itemId);
+                                            setHoveredEdgeKey(null);
+                                        }}
+                                        onHoverEnd={() => setHoveredItemId((current) => (current === node.itemId ? null : current))}
+                                        onOpen={setOpenItemId}
+                                    />
+                                ))}
                             </Stack>
                         </Box>
                     ))}
                 </Stack>
             </Box>
 
-            {unconnected.length > 0 && (
+            {combos.length > 0 && (
+                <Box sx={{ mt: 3 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+                        Комбинации:
+                    </Typography>
+                    <Stack spacing={1.5}>
+                        {combos.map((comboNode) => (
+                            <ComboRow key={comboNode.id} comboNode={comboNode} onOpen={setOpenItemId} />
+                        ))}
+                    </Stack>
+                </Box>
+            )}
+
+            {unclassified.length > 0 && (
                 <Box sx={{ mt: 3 }}>
                     <Typography variant="caption" color="text.secondary">
-                        Без найденной связи с головным предметом:
+                        {rootEligible
+                            ? "Не объясняется ни одним из уровней генерации:"
+                            : "Головной предмет не приносит очки игрока — уровни генерации неприменимы:"}
                     </Typography>
                     <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", mt: 1 }}>
-                        {unconnected.map((id) => {
+                        {unclassified.map((id) => {
                             const item = store.getItem(id);
                             return (
                                 <Chip
