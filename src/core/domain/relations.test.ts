@@ -1214,3 +1214,70 @@ describe("computeCascadeLevels context nodes (options.includeRelatedContext)", (
         expect(result.unclassified).toEqual([]);
     });
 });
+
+/**
+ * Regression coverage for excluding upgrade tiers (+/++) from the graph entirely when `options.upgradeChains` is
+ * given — a tier is just a power-scaled clone of its base item, and letting it independently show up as a lever
+ * or a context node duplicates the base rather than adding real information. Mirrors GameStore's
+ * `itemsForBuildGeneration`, which already does the same for fresh generation.
+ */
+describe("computeCascadeLevels excludes upgrade tiers when options.upgradeChains is given", () => {
+    function tierFixture() {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5, tags: ["Bum"] });
+        const feeder = makeItem("feeder", { tags: ["Bum"] }); // base tier — a real activation-subject feeder
+        const feederPlus = makeItem("feeder_plus", { tags: ["Bum"] }); // "+" tier of the same item, same tag
+        const items = [root, feeder, feederPlus];
+        const mechanics: MechanicRow[] = [makeMainValuePayoff(root.id, { ActivatorTag: "Bum" })];
+        const upgradeChains = [{ id: "chain1", itemIds: [feeder.id, feederPlus.id] }];
+        const build = { id: "bt", name: "Билд", items: [root.id, feeder.id, feederPlus.id], auto: true };
+        return { root, feeder, feederPlus, items, mechanics, upgradeChains, build };
+    }
+
+    it("without upgradeChains, the tier is discovered like any other item (baseline)", () => {
+        const { feeder, feederPlus, items, mechanics, build } = tierFixture();
+        const result = computeCascadeLevels(build, items, mechanics, []);
+        expect(result.nodes.some((n) => n.itemId === feeder.id)).toBe(true);
+        expect(result.nodes.some((n) => n.itemId === feederPlus.id)).toBe(true);
+        expect(result.unclassified).toEqual([]);
+    });
+
+    it("with upgradeChains, the tier never becomes a node and falls through to unclassified", () => {
+        const { feeder, feederPlus, items, mechanics, upgradeChains, build } = tierFixture();
+        const result = computeCascadeLevels(build, items, mechanics, [], false, { upgradeChains });
+        expect(result.nodes.some((n) => n.itemId === feeder.id)).toBe(true);
+        expect(result.nodes.some((n) => n.itemId === feederPlus.id)).toBe(false);
+        expect(result.unclassified).toEqual([feederPlus.id]);
+    });
+
+    it("with upgradeChains, a tier is also never added as a context/extra node", () => {
+        // feederPlus is deliberately NOT a build member here — only real items should ever be pulled in as
+        // "related" context (see addRelatedContextNodes), and a tier must be excluded from that pool too.
+        const { root, feeder, feederPlus, mechanics: baseMechanics, upgradeChains } = tierFixture();
+        const stranger = makeItem("stranger", { tags: ["Loud"] }); // strongly related to feeder via cascade-style tag link
+        const items = [root, feeder, feederPlus, stranger];
+        const mechanics: MechanicRow[] = [
+            ...baseMechanics,
+            {
+                id: "feeder-loud",
+                table: "MechAddValue",
+                itemId: feeder.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTag: "Loud",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = { id: "bt2", name: "Билд", items: [root.id, feeder.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains,
+            includeRelatedContext: true,
+        });
+
+        expect(result.nodes.some((n) => n.itemId === feederPlus.id)).toBe(false);
+        expect(result.nodes.some((n) => n.itemId === stranger.id && n.extra)).toBe(true);
+    });
+});

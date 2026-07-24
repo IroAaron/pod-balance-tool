@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import {
     Alert,
@@ -30,7 +30,7 @@ import ItemDescription from "../../components/ItemDescription";
 import BuildIcon from "../../components/BuildIcon";
 import DetailModal from "../../components/DetailModal";
 import ItemDetailPage from "../Items/ItemDetailPage";
-import { computeCascadeLevels, higherTierIds } from "../../../core/domain/relations";
+import { computeCascadeLevels, computeUpgradeTierIds } from "../../../core/domain/relations";
 import type { BuildSortKey } from "../../../core/services/BuildService";
 
 // Same three literal category names normalize.ts assigns as item.itemType for Cards/Houses/Artefacts —
@@ -66,7 +66,15 @@ export default function BuildsPage() {
     const [deleteMode, setDeleteMode] = useState(false);
     const [confirmDeleteDrafts, setConfirmDeleteDrafts] = useState(false);
 
-    const excludedTiers = useMemo(() => higherTierIds(store.upgradeChains), [store.upgradeChains]);
+    // Both signals (registered CardUpgrades chain membership, and a translated name ending in "+"/"++" for tiers
+    // that were never registered — see computeUpgradeTierIds) are needed: some real tiers in this game's data are
+    // only distinguishable by their display name, not by chain membership.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- store.itemName is a stable method on the singleton
+    const resolveName = useCallback((item: Parameters<typeof store.itemName>[0]) => store.itemName(item), []);
+    const excludedTiers = useMemo(
+        () => computeUpgradeTierIds(store.items, store.upgradeChains, resolveName),
+        [store.items, store.upgradeChains, resolveName]
+    );
 
     const filtered = useMemo(() => {
         let result = store.buildService.search(store.builds, query);
@@ -88,17 +96,30 @@ export default function BuildsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.builds, store.items, query, tagFilter, typeFilter, sortKey]);
 
+    // Same tier exclusion as excludedTiers above, pre-applied to the pool computeCascadeLevels builds its graph
+    // over — its own weaker (chain-only) fallback wouldn't catch a tier only distinguishable by display name.
+    const generationItems = useMemo(
+        () => store.items.filter((item) => !excludedTiers.has(item.id)),
+        [store.items, excludedTiers]
+    );
+    const generationMechanics = useMemo(
+        () => store.mechanics.filter((mechanic) => !excludedTiers.has(mechanic.itemId)),
+        [store.mechanics, excludedTiers]
+    );
+
     // buildId -> item id -> depth in the scaling graph (see computeCascadeLevels) — computed once per visible
     // build rather than per card render. A build with no real root (manual, or root has no PlayerScore payoff)
     // only ever classifies the root itself; every other member falls through to the card's "и ещё N" count.
     const depthByBuildAndItem = useMemo(() => {
         const map = new Map<string, Map<string, number>>();
         for (const build of filtered) {
-            const { nodes } = computeCascadeLevels(build, store.items, store.mechanics, store.replaceRules);
+            const { nodes } = computeCascadeLevels(build, generationItems, generationMechanics, store.replaceRules, false, {
+                upgradeChains: store.upgradeChains,
+            });
             map.set(build.id, new Map(nodes.map((node) => [node.itemId, node.depth])));
         }
         return map;
-    }, [filtered, store.items, store.mechanics, store.replaceRules]);
+    }, [filtered, generationItems, generationMechanics, store.replaceRules, store.upgradeChains]);
 
     const availableTags = store.paramValues.ItemTag ?? [];
     const availableTypes = BUILD_TYPE_OPTIONS;

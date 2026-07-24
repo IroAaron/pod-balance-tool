@@ -1308,16 +1308,28 @@ function addRelatedContextNodes(
  * off by default since it's meaningfully more work (a relatedItems() call per node) and only the detailed tree
  * view (BuildTree) actually wants the extra "what else is around" nodes it adds; BuildsPage's per-card depth
  * lookup doesn't.
+ *
+ * `options.upgradeChains`, if given, also excludes upgrade tiers (+/++ — power-scaled clones of their base item,
+ * see higherTierIds) from the item/mechanic pool the graph is built over entirely, the same way GameStore's
+ * `itemsForBuildGeneration` already does for fresh generation — a tier has no business independently showing up
+ * as a lever or a context node when its base item already represents it. A build member that's itself a tier
+ * (manually added — generation never adds one) simply can't be discovered by the graph and falls through to
+ * `unclassified`, same as any other member with no real structural path.
  */
 export function computeCascadeLevels(
     build: Build,
-    items: Item[],
-    mechanics: MechanicRow[],
+    allItems: Item[],
+    allMechanics: MechanicRow[],
     replaceRules: ReplaceRule[],
     includeMoneyValueRoots = false,
     options: { upgradeChains?: UpgradeChain[]; includeRelatedContext?: boolean } = {}
 ): CascadeLevelResult {
     if (build.items.length === 0) return { nodes: [], unclassified: [], rootEligible: false };
+
+    const excludedTiers = higherTierIds(options.upgradeChains ?? []);
+    const items = excludedTiers.size > 0 ? allItems.filter((item) => !excludedTiers.has(item.id)) : allItems;
+    const mechanics =
+        excludedTiers.size > 0 ? allMechanics.filter((mechanic) => !excludedTiers.has(mechanic.itemId)) : allMechanics;
 
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);

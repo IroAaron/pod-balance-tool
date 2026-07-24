@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Box, Chip, Paper, Stack, Tooltip, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
@@ -9,6 +9,7 @@ import DetailModal from "./DetailModal";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import {
     computeCascadeLevels,
+    computeUpgradeTierIds,
     SCALING_EDGE_REASON_LABELS,
     type CascadeLevelNode,
     type ScalingEdgeReason,
@@ -296,13 +297,33 @@ function DetailPanel({ node, onOpen }: DetailPanelProps) {
 export default function BuildTree({ build }: Props) {
     const store = useStore();
 
+    // Excludes upgrade tiers (+/++) from the graph entirely — a tier is a power-scaled clone of its base item, so
+    // letting it independently show up as a lever or a context node just duplicates the base rather than adding
+    // real information. Both signals (registered CardUpgrades chain membership, and a translated name ending in
+    // "+"/"++" for tiers that were never registered — see computeUpgradeTierIds) are needed: some real tiers in
+    // this game's data (e.g. numbered ..._2/_3 ids) are only distinguishable by their display name, not by chain.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- store.itemName is a stable method on the singleton
+    const resolveName = useCallback((item: Parameters<typeof store.itemName>[0]) => store.itemName(item), []);
+    const excludedTierIds = useMemo(
+        () => computeUpgradeTierIds(store.items, store.upgradeChains, resolveName),
+        [store.items, store.upgradeChains, resolveName]
+    );
+    const generationItems = useMemo(
+        () => store.items.filter((item) => !excludedTierIds.has(item.id)),
+        [store.items, excludedTierIds]
+    );
+    const generationMechanics = useMemo(
+        () => store.mechanics.filter((mechanic) => !excludedTierIds.has(mechanic.itemId)),
+        [store.mechanics, excludedTierIds]
+    );
+
     const { nodes, unclassified, rootEligible } = useMemo(
         () =>
-            computeCascadeLevels(build, store.items, store.mechanics, store.replaceRules, false, {
+            computeCascadeLevels(build, generationItems, generationMechanics, store.replaceRules, false, {
                 upgradeChains: store.upgradeChains,
                 includeRelatedContext: true,
             }),
-        [build, store.items, store.mechanics, store.replaceRules, store.upgradeChains]
+        [build, generationItems, generationMechanics, store.replaceRules, store.upgradeChains]
     );
 
     // Grouped by depth, ascending — no gap-filling needed (unlike the old fixed 7-level grid): a depth can only
