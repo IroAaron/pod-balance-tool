@@ -706,7 +706,11 @@ export type ScalingEdgeReason =
     /** The item's *real* parent (from computeScalingGraph) isn't itself a member of this particular build — a
      *  manually-curated build can be a subset of what fresh generation would find — so computeCascadeLevels falls
      *  back to drawing a line straight to the root instead of leaving the node with nowhere to point. Rare. */
-    | "indirect";
+    | "indirect"
+    /** Feeds a synthetic ReplaceItem combo node (see ComboInfo) — the ingredient side. */
+    | "combo-ingredient"
+    /** What a synthetic ReplaceItem combo node feeds into — the result side. */
+    | "combo-result";
 
 export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
     "money-scaler": "считается в бонусе",
@@ -718,6 +722,8 @@ export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
     modifier: "напрямую повышает значение",
     recolorer: "перекрашивает под нужный цвет",
     indirect: "непрямая связь (через предмет вне билда)",
+    "combo-ingredient": "ингредиент комбинации",
+    "combo-result": "результат комбинации",
 };
 
 interface ScalingEdgeCandidate {
@@ -979,18 +985,6 @@ export function computeCascadeBuilds(
     return drafts;
 }
 
-export interface CascadeLevelNode {
-    itemId: string;
-
-    /** 0 = the build's head item; deeper = a more indirect lever on the root's score (see ScalingNode). */
-    depth: number;
-
-    /** The specific member(s) one depth up that explain this node's presence, and why (see ScalingEdgeReason).
-     *  Always `[]` for the root. Filtered to ids that are actually build members — a real parent that isn't
-     *  itself curated into this particular build falls back to `[{itemId: rootId, reason: "indirect"}]`. */
-    parents: { itemId: string; reason: ScalingEdgeReason }[];
-}
-
 export interface ComboInfo {
     ruleId: string;
 
@@ -1001,18 +995,29 @@ export interface ComboInfo {
     resultId: string;
 }
 
-export interface CascadeComboNode {
-    /** Synthetic id, `combo:<ruleId>` — never a real Item.id. */
-    id: string;
+export interface CascadeLevelNode {
+    /** A real Item.id, or a synthetic `combo:<ruleId>` id when `combo` is set (see ComboInfo). */
+    itemId: string;
 
-    combo: ComboInfo;
+    /** 0 = the build's head item; deeper = a more indirect lever on the root's score (see ScalingNode). A combo
+     *  node sits one depth past its result (it *feeds* the result) and one depth before its ingredients (they
+     *  feed *it*) — see placeCombosInGraph. */
+    depth: number;
+
+    /** The specific member(s) one depth up that explain this node's presence, and why (see ScalingEdgeReason).
+     *  Always `[]` for the root. Filtered to ids that are actually build members — a real parent that isn't
+     *  itself curated into this particular build falls back to `[{itemId: rootId, reason: "indirect"}]`. A
+     *  combo participant that *also* has a real structural edge elsewhere keeps that parent too — the combo
+     *  edge is an addition, not a replacement (see placeCombosInGraph). */
+    parents: { itemId: string; reason: ScalingEdgeReason }[];
+
+    /** Present only for a synthetic combo node. */
+    combo?: ComboInfo;
 }
 
 export interface CascadeLevelResult {
+    /** Real items *and* synthetic combo nodes, all sharing one depth/parents graph — see placeCombosInGraph. */
     nodes: CascadeLevelNode[];
-
-    /** ReplaceItem combinations (2+ ingredients producing a result, all build members) — see computeReplaceCombos. */
-    combos: CascadeComboNode[];
 
     /** Build members with no real path to the root at all (via computeScalingGraph), and not explained by a combo
      *  either — not explained by generation at all (e.g. manually added, or added by the separate tag/id-based
@@ -1055,6 +1060,64 @@ function computeReplaceCombos(build: Build, replaceRules: ReplaceRule[]): ComboI
 }
 
 /**
+ * Folds combo bubbles directly into the *same* depth/parents graph the rest of the tree uses (2026-07-24 —
+ * previously combos rendered as an entirely separate, disconnected section, specifically to dodge a DOM-ref
+ * collision risk; re-integrated on request once a real per-node graph existed to integrate into cleanly).
+ * Mutates `nodes` in place (adding combo nodes, and — for an ingredient that already has its own node elsewhere —
+ * appending an *additional* parent entry to it, since a combo participant is never exclusively explained by the
+ * combo: real example — Уличный музыкант's own "Music" tag can independently match some other build member's
+ * filter at the same time his replace rule feeds a combo).
+ *
+ * A combo can only be anchored in the graph when its *result* already has a node — comboDepth = resultDepth + 1
+ * (the combo feeds the result, one hop out), ingredientDepth = comboDepth + 1 (ingredients feed the combo, one
+ * hop further). An ingredient with no node of its own yet gets a fresh one at that depth; one that's already
+ * placed (found via a real structural edge) keeps its own depth and just gains the combo as a second parent. A
+ * combo whose result has no node at all (rare — the result itself isn't reachable in the graph either) is
+ * skipped entirely; its participants are left for the caller to report as `unclassified`.
+ *
+ * Returns the set of item ids successfully explained this way, so the caller can exclude them from `unclassified`.
+ */
+function placeCombosInGraph(nodes: CascadeLevelNode[], combos: ComboInfo[]): Set<string> {
+    const nodeByItemId = new Map(nodes.map((node) => [node.itemId, node]));
+    const placed = new Set<string>();
+
+    for (const combo of combos) {
+        const resultNode = nodeByItemId.get(combo.resultId);
+        if (!resultNode) continue;
+
+        const comboItemId = `combo:${combo.ruleId}`;
+        const comboDepth = resultNode.depth + 1;
+        const comboNode: CascadeLevelNode = {
+            itemId: comboItemId,
+            depth: comboDepth,
+            parents: [{ itemId: combo.resultId, reason: "combo-result" }],
+            combo,
+        };
+        nodes.push(comboNode);
+        nodeByItemId.set(comboItemId, comboNode);
+        placed.add(combo.resultId);
+
+        for (const ingredientId of combo.ingredientIds) {
+            const existing = nodeByItemId.get(ingredientId);
+            if (existing) {
+                existing.parents = [...existing.parents, { itemId: comboItemId, reason: "combo-ingredient" }];
+            } else {
+                const ingredientNode: CascadeLevelNode = {
+                    itemId: ingredientId,
+                    depth: comboDepth + 1,
+                    parents: [{ itemId: comboItemId, reason: "combo-ingredient" }],
+                };
+                nodes.push(ingredientNode);
+                nodeByItemId.set(ingredientId, ingredientNode);
+            }
+            placed.add(ingredientId);
+        }
+    }
+
+    return placed;
+}
+
+/**
  * Classifies an *already-existing* build's own members by their depth in the same scaling graph
  * `computeCascadeBuilds` uses to decide build membership in the first place — informational/display only, does
  * not change the build. Replaces the old fixed-7-level classification (itself a replacement for an even older
@@ -1062,9 +1125,8 @@ function computeReplaceCombos(build: Build, replaceRules: ReplaceRule[]): ComboI
  *
  * Reuses `computeScalingGraphInternal` directly, so a member here is at depth N if and only if that's exactly the
  * distance computeCascadeBuilds' own graph would find for it, with `parents` pointing at the real, specific
- * item(s) one depth up (a spawner points at what it spawns, not at the root) — see ScalingNode. Combo detection
- * is layered on top, independent of the scaling graph, exactly as it worked in the deleted `buildTree.ts`: a
- * combo participant that would otherwise be `unclassified` is explained by the combo instead.
+ * item(s) one depth up (a spawner points at what it spawns, not at the root) — see ScalingNode. Combo nodes are
+ * folded into the same `nodes` array by `placeCombosInGraph` — see its own doc for the depth/parent rules.
  */
 export function computeCascadeLevels(
     build: Build,
@@ -1073,26 +1135,26 @@ export function computeCascadeLevels(
     replaceRules: ReplaceRule[],
     includeMoneyValueRoots = false
 ): CascadeLevelResult {
-    if (build.items.length === 0) return { nodes: [], combos: [], unclassified: [], rootEligible: false };
+    if (build.items.length === 0) return { nodes: [], unclassified: [], rootEligible: false };
 
     const knownIds = new Set(items.map((item) => item.id));
     const mechanicsByItem = groupByItemId(mechanics);
     const itemsById = new Map(items.map((item) => [item.id, item]));
     const rootId = build.items[0];
     const root = itemsById.get(rootId);
-    if (!root) return { nodes: [], combos: [], unclassified: build.items, rootEligible: false };
+    if (!root) return { nodes: [], unclassified: build.items, rootEligible: false };
 
-    const combos = computeReplaceCombos(build, replaceRules).map((combo) => ({ id: `combo:${combo.ruleId}`, combo }));
-    const explainedByCombo = new Set(combos.flatMap((c) => [...c.combo.ingredientIds, c.combo.resultId]));
+    const combos = computeReplaceCombos(build, replaceRules);
 
     const payoffRows = (mechanicsByItem.get(root.id) ?? []).filter((row) =>
         isEligiblePayoffRow(root, row, includeMoneyValueRoots)
     );
     if (payoffRows.length === 0) {
+        const nodes: CascadeLevelNode[] = [{ itemId: root.id, depth: 0, parents: [] }];
+        const placed = placeCombosInGraph(nodes, combos);
         return {
-            nodes: [{ itemId: root.id, depth: 0, parents: [] }],
-            combos,
-            unclassified: build.items.filter((id) => id !== root.id && !explainedByCombo.has(id)),
+            nodes,
+            unclassified: build.items.filter((id) => id !== root.id && !placed.has(id)),
             rootEligible: false,
         };
     }
@@ -1120,8 +1182,10 @@ export function computeCascadeLevels(
         });
     }
 
-    const unclassified = build.items.filter((id) => !graph.has(id) && !explainedByCombo.has(id));
-    return { nodes, combos, unclassified, rootEligible: true };
+    const placed = placeCombosInGraph(nodes, combos);
+
+    const unclassified = build.items.filter((id) => !graph.has(id) && !placed.has(id));
+    return { nodes, unclassified, rootEligible: true };
 }
 
 /**

@@ -9,8 +9,8 @@ import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import {
     computeCascadeLevels,
     SCALING_EDGE_REASON_LABELS,
-    type CascadeComboNode,
     type CascadeLevelNode,
+    type ScalingEdgeReason,
 } from "../../core/domain/relations";
 import type { Build } from "../../core/models/Build";
 
@@ -18,10 +18,27 @@ type Props = {
     build: Build;
 };
 
-type Edge = { parentId: string; childId: string; x1: number; y1: number; x2: number; y2: number };
+type Edge = {
+    parentId: string;
+    childId: string;
+    reason: ScalingEdgeReason;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+};
 
 function edgeKey(parentId: string, childId: string): string {
     return `${parentId}--${childId}`;
+}
+
+/** Orange into a combo (ingredient feeding it), green out of one (the combo producing its result) — same colors
+ *  the old, since-removed buildTree.ts used — everything else is plain blue. Known directly from the edge's own
+ *  `reason` now (combo-ingredient/combo-result), no separate combo lookup needed. */
+function edgeColor(reason: ScalingEdgeReason): string {
+    if (reason === "combo-ingredient") return "#ffb74d";
+    if (reason === "combo-result") return "#66bb6a";
+    return "#5B8CFF";
 }
 
 /** Russian plural form for "N шаг(а/ов) от корня" — 1 шаг, 2-4 шага, 5+/11-14 шагов. */
@@ -47,11 +64,62 @@ type TreeNodeProps = {
     onOpen: (itemId: string) => void;
 };
 
+/** A ReplaceItem combination — its ingredients feed in, the result comes out (see ComboInfo). Round, not square
+ *  like a real item node, so it reads as a mechanism rather than an item; not a link since there's no item page
+ *  for it. */
+function ComboNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNodeProps) {
+    const store = useStore();
+    const combo = node.combo!;
+
+    const nameOf = (id: string) => {
+        const item = store.getItem(id);
+        return item ? store.itemName(item) : id;
+    };
+
+    return (
+        <Tooltip
+            title={
+                <>
+                    Комбинация
+                    <br />
+                    {combo.ingredientIds.map(nameOf).join(" + ")} → {nameOf(combo.resultId)}
+                </>
+            }
+        >
+            <Box
+                ref={(el: HTMLElement | null) => {
+                    if (el) nodeRefs.current.set(node.itemId, el);
+                    else nodeRefs.current.delete(node.itemId);
+                }}
+                onMouseEnter={onHoverStart}
+                onMouseLeave={onHoverEnd}
+                sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 56,
+                    height: 56,
+                    borderRadius: "50%",
+                    border: "1px dashed",
+                    borderColor: "primary.main",
+                    bgcolor: "background.paper",
+                    opacity: dimmed ? 0.3 : 1,
+                    transition: "opacity 0.15s",
+                }}
+            >
+                <Typography sx={{ fontSize: 26 }}>⚗️</Typography>
+            </Box>
+        </Tooltip>
+    );
+}
+
 /** One tree node: item icon only (name/description/connection reason live in the hover tooltip), registers
  *  itself in `nodeRefs` so the parent can measure it for edge lines. */
 function TreeNode(props: TreeNodeProps) {
     const { node, nodeRefs, dimmed, onHoverStart, onHoverEnd, onOpen } = props;
     const store = useStore();
+
+    if (node.combo) return <ComboNode {...props} />;
 
     const item = store.getItem(node.itemId);
     const name = item ? store.itemName(item) : node.itemId;
@@ -121,87 +189,6 @@ function TreeNode(props: TreeNodeProps) {
     );
 }
 
-
-/**
- * One ReplaceItem combination, rendered as its own self-contained inline row (ingredient boxes → ⚗️ → result box)
- * rather than folded into the main level grid's edge/DOM-ref system. Deliberate: a combo's ingredients/result may
- * already have their own node elsewhere in the level grid (different DOM ref), or may have *no* level-grid node
- * at all (a combo-only participant, not classified into any of the 7 levels) — giving this its own tiny,
- * independent layout sidesteps both cases cleanly instead of needing a second synthetic-id scheme to avoid ref
- * collisions with the main grid.
- */
-function ComboRow({ comboNode, onOpen }: { comboNode: CascadeComboNode; onOpen: (itemId: string) => void }) {
-    const store = useStore();
-    const { combo } = comboNode;
-
-    const renderItem = (id: string) => {
-        const item = store.getItem(id);
-        const name = item ? store.itemName(item) : id;
-        return (
-            <Tooltip key={id} title={name}>
-                <Box
-                    component={RouterLink}
-                    to={`/items/${encodeURIComponent(id)}`}
-                    onClick={(event) => {
-                        event.preventDefault();
-                        onOpen(id);
-                    }}
-                    sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: 44,
-                        height: 44,
-                        borderRadius: 2,
-                        border: "1px solid",
-                        borderColor: "divider",
-                        textDecoration: "none",
-                        color: "inherit",
-                        bgcolor: "background.paper",
-                    }}
-                >
-                    {item ? <ItemIcon item={item} size={26} /> : <Typography sx={{ fontSize: 20 }}>🧩</Typography>}
-                </Box>
-            </Tooltip>
-        );
-    };
-
-    return (
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: "wrap" }}>
-            {combo.ingredientIds.map((id, index) => (
-                <Stack key={id} direction="row" spacing={1} alignItems="center">
-                    {index > 0 && <Typography color="text.secondary">+</Typography>}
-                    {renderItem(id)}
-                </Stack>
-            ))}
-            <Typography color="text.secondary" sx={{ mx: 0.5 }}>
-                →
-            </Typography>
-            <Tooltip title="Комбинация (замена по правилу)">
-                <Box
-                    sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: 40,
-                        height: 40,
-                        borderRadius: "50%",
-                        border: "1px dashed",
-                        borderColor: "primary.main",
-                        bgcolor: "background.paper",
-                    }}
-                >
-                    <Typography sx={{ fontSize: 20 }}>⚗️</Typography>
-                </Box>
-            </Tooltip>
-            <Typography color="text.secondary" sx={{ mx: 0.5 }}>
-                →
-            </Typography>
-            {renderItem(combo.resultId)}
-        </Stack>
-    );
-}
-
 /**
  * Depth-grouped top-to-bottom visualization of a build's own scaling structure (see computeCascadeLevels): head
  * item, then each depth reached by BFS outward from it — depth 1 = items with a real, direct structural edge to
@@ -212,7 +199,11 @@ function ComboRow({ comboNode, onOpen }: { comboNode: CascadeComboNode; onOpen: 
  * другие предметы, которые скейлят корень" (the user's own framing). *Why* a node is connected (spawns, produces
  * the listened-for event, boosts a value, ...) now lives in its hover tooltip instead of naming the row.
  * Members with no real path to the root at all (manually added, from a different auto-build algorithm, or
- * explained only by a combo — see below) are listed separately, not force-assigned to a depth.
+ * explained only by a combo whose result itself has no path to the root) are listed separately below, not
+ * force-assigned to a depth. ReplaceItem combinations (2+ ingredients producing a result, all build members) are
+ * synthetic ⚗️ nodes folded directly into this same depth graph (see computeCascadeLevels/placeCombosInGraph) —
+ * not a separate section — with orange/green edges (ingredient→combo/combo→result) distinguishing them from the
+ * plain blue everything else uses.
  * Connector lines are computed by measuring each node's DOM position (getBoundingClientRect) rather than a
  * layout library — fine at this scale (a build's item count), recomputed via ResizeObserver so image loads and
  * window resizes don't leave stale lines. Each non-root node's `parents` point at the *specific* other member
@@ -221,7 +212,7 @@ function ComboRow({ comboNode, onOpen }: { comboNode: CascadeComboNode; onOpen: 
 export default function BuildTree({ build }: Props) {
     const store = useStore();
 
-    const { nodes, combos, unclassified, rootEligible } = useMemo(
+    const { nodes, unclassified, rootEligible } = useMemo(
         () => computeCascadeLevels(build, store.items, store.mechanics, store.replaceRules),
         [build, store.items, store.mechanics, store.replaceRules]
     );
@@ -297,6 +288,7 @@ export default function BuildTree({ build }: Props) {
                     next.push({
                         parentId,
                         childId: node.itemId,
+                        reason: parent.reason,
                         x1: parentRect.left + parentRect.width / 2 - containerRect.left,
                         y1: (parentIsHigher ? parentRect.bottom : parentRect.top) - containerRect.top,
                         x2: childRect.left + childRect.width / 2 - containerRect.left,
@@ -379,7 +371,7 @@ export default function BuildTree({ build }: Props) {
                                     y1={edge.y1}
                                     x2={edge.x2}
                                     y2={edge.y2}
-                                    stroke="#5B8CFF"
+                                    stroke={edgeColor(edge.reason)}
                                     strokeWidth={isHighlighted ? 2.5 : 1.5}
                                     opacity={opacity}
                                     style={{ pointerEvents: "none", transition: "opacity 0.15s" }}
@@ -430,19 +422,6 @@ export default function BuildTree({ build }: Props) {
                     ))}
                 </Stack>
             </Box>
-
-            {combos.length > 0 && (
-                <Box sx={{ mt: 3 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
-                        Комбинации:
-                    </Typography>
-                    <Stack spacing={1.5}>
-                        {combos.map((comboNode) => (
-                            <ComboRow key={comboNode.id} comboNode={comboNode} onOpen={setOpenItemId} />
-                        ))}
-                    </Stack>
-                </Box>
-            )}
 
             {unclassified.length > 0 && (
                 <Box sx={{ mt: 3 }}>

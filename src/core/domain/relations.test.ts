@@ -868,7 +868,11 @@ describe("computeCascadeLevels", () => {
         expect(trainerNode?.parents).toEqual([{ itemId: racer.id, reason: "activator" }]); // parents to Гонщик, not Дальнобойщик
     });
 
-    it("detects a ReplaceItem combination among build members and stops reporting its participants as unclassified", () => {
+    it("detects a ReplaceItem combination among build members and folds the combo bubble directly into the depth graph", () => {
+        // Both ingredients (itemIdToReplace and NeededItem) are already real depth-1 spawners of the root — any
+        // ReplaceItem rule counts both as spawners, combo or not (buildCascadeIndex, unconditional). What the
+        // combo layer *adds* is a second, more specific edge through a synthetic bubble showing they combine
+        // *together* into the result, alongside (not instead of) that plain spawner edge.
         const rockMusician = makeItem("rock_musician", { valueMin: 15, valueMax: 15, tags: ["Music"] });
         const streetMusician = makeItem("street_musician", { tags: ["Art"] });
         const producer = makeItem("producer");
@@ -892,11 +896,61 @@ describe("computeCascadeLevels", () => {
 
         const result = computeCascadeLevels(build, items, mechanics, replaceRules);
 
-        expect(result.combos).toHaveLength(1);
-        expect(result.combos[0].combo.ingredientIds.sort()).toEqual([producer.id, streetMusician.id].sort());
-        expect(result.combos[0].combo.resultId).toBe(rockMusician.id);
-        // Neither ingredient is level-classified for this root (no structural connection to rockMusician's own
-        // payoff filters), so without combo detection both would show as unclassified — the combo explains them.
+        const comboNode = result.nodes.find((n) => n.combo);
+        expect(comboNode?.combo?.ingredientIds.sort()).toEqual([producer.id, streetMusician.id].sort());
+        expect(comboNode?.combo?.resultId).toBe(rockMusician.id);
+        // The combo bubble sits one hop past its result (the root, depth 0) — a real position in the same graph,
+        // not a separate section.
+        expect(comboNode?.depth).toBe(1);
+        expect(comboNode?.parents).toEqual([{ itemId: rockMusician.id, reason: "combo-result" }]);
+        const streetMusicianNode = result.nodes.find((n) => n.itemId === streetMusician.id);
+        const producerNode = result.nodes.find((n) => n.itemId === producer.id);
+        expect(streetMusicianNode?.depth).toBe(1); // kept its own real spawner depth, not moved to the combo's
+        expect(streetMusicianNode?.parents).toEqual([
+            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+        ]);
+        expect(producerNode?.depth).toBe(1);
         expect(result.unclassified).toEqual([]);
+    });
+
+    it("a combo participant with a real structural connection beyond the shared replace rule keeps all of its edges", () => {
+        // Real precedent from the deleted buildTree.ts: a combo participant isn't *exclusively* explained by the
+        // combo — every independent connection still shows too, as its own additional edge alongside the rest.
+        const rockMusician = makeItem("rock_musician", { valueMin: 15, valueMax: 15, tags: ["Music"] });
+        const streetMusician = makeItem("street_musician", { tags: ["Art", "Music"] });
+        const producer = makeItem("producer");
+        const items = [rockMusician, streetMusician, producer];
+        // rockMusician's own payoff also has a Bonus filter matching streetMusician's Music tag directly (a
+        // money-scaler connection) — independent of both the spawner edge and the combo.
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(rockMusician.id, { BonusCountingType: "CellCount", BonusTargetTag: "Music" }),
+        ];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "street-to-rock",
+                source: "ReplaceItem",
+                itemIdToReplace: streetMusician.id,
+                replacementItem: rockMusician.id,
+                fields: { NeededItem: producer.id, NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+        const build = {
+            id: "b6",
+            name: "Билд от Рок музыканта",
+            items: [rockMusician.id, streetMusician.id, producer.id],
+            auto: true,
+        };
+
+        const result = computeCascadeLevels(build, items, mechanics, replaceRules);
+
+        const comboNode = result.nodes.find((n) => n.combo);
+        const streetMusicianNode = result.nodes.find((n) => n.itemId === streetMusician.id);
+        expect(streetMusicianNode?.depth).toBe(1);
+        expect(streetMusicianNode?.parents).toEqual([
+            { itemId: rockMusician.id, reason: "money-scaler" },
+            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+        ]);
     });
 });
