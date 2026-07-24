@@ -393,6 +393,35 @@ interface CascadeIndex {
      * event producer (see producedActivatorType's LoopComplitedCounter case).
      */
     itemIdsByActivatedTag: Map<string, Set<string>>;
+
+    /** tag -> items whose MechChangeColor row's own TargetTag filter directly recolors anything with that tag.
+     *  MechChangeColor has no target-id column at all (see MECHANIC_TABLE_COLUMNS) — recoloring is always tag- or
+     *  type/place-scoped, never a specific id, so this is the only "directly recolors X" index that can exist
+     *  (contrast targetersOf/activatorsOf, which both have an id-based sibling). Distinct from
+     *  itemIdsByProducedColor/allRecolorers: those answer "who could produce color C" (for satisfying *this* row's
+     *  own color filter); this answers "who repaints *that specific other item*" as a direct edge in its own
+     *  right, regardless of what color results. */
+    recolorTargetsOf: Map<string, Set<string>>;
+
+    /** targetId -> items whose MechAddItem "удалить" row names it directly (TargetItemId) — a direct kill/removal
+     *  edge, distinct from the tag-based reverse lookup below and from itemIdsByProducedTaggedEvent/
+     *  indiscriminateProducersOfEvent (which only surface a killer when some *other* row is listening for
+     *  ActivatorType=ItemRemoved — this is the "kills this specific item" edge on its own, whether or not anything
+     *  listens for the removal). */
+    removesOf: Map<string, Set<string>>;
+
+    /** tag -> items whose "удалить" row's own TargetTag filter (no concrete TargetItemId) kills anything with that
+     *  tag — the tag-based counterpart to removesOf, populated only when the row has no id to be specific with. */
+    removesTargetsOf: Map<string, Set<string>>;
+
+    /** targetId -> items whose MechAddTag row names it directly (TargetItemId) — a direct "grants this specific
+     *  item a tag" edge. Distinct from itemIdsByGrantedTag, which answers "who produces tag T" (for satisfying
+     *  some *other* row's own tag filter) — this answers "who tags *that specific item*" directly. */
+    retagsOf: Map<string, Set<string>>;
+
+    /** tag -> items whose MechAddTag row's own TargetTag filter (no concrete TargetItemId) grants a tag to
+     *  anything already carrying that tag — the tag-based counterpart to retagsOf. */
+    retagsTargetsOf: Map<string, Set<string>>;
 }
 
 /**
@@ -426,6 +455,11 @@ function buildCascadeIndex(
     const itemIdsByTargetedTag = new Map<string, Set<string>>();
     const activatorsOf = new Map<string, Set<string>>();
     const itemIdsByActivatedTag = new Map<string, Set<string>>();
+    const recolorTargetsOf = new Map<string, Set<string>>();
+    const removesOf = new Map<string, Set<string>>();
+    const removesTargetsOf = new Map<string, Set<string>>();
+    const retagsOf = new Map<string, Set<string>>();
+    const retagsTargetsOf = new Map<string, Set<string>>();
 
     const addTo = (map: Map<string, Set<string>>, key: string, value: string) => {
         if (!map.has(key)) map.set(key, new Set());
@@ -481,9 +515,15 @@ function buildCascadeIndex(
             }
 
             if (row.table === "MechAddItem" && row.fields.ItemMech === "удалить") {
+                const removedIds = splitList(row.fields.TargetItemId ?? "").filter((token) => knownIds.has(token));
+                for (const token of removedIds) addTo(removesOf, token, itemId);
+
                 const removedTags = splitList(row.fields.TargetTag ?? "");
                 if (removedTags.length > 0) {
                     for (const tag of removedTags) addTo(itemIdsByProducedTaggedEvent, `ItemRemoved|${tag}`, itemId);
+                    if (removedIds.length === 0) {
+                        for (const tag of removedTags) addTo(removesTargetsOf, tag, itemId);
+                    }
                 } else {
                     // Kills indiscriminately (no TargetTag) — e.g. Маньяк/Киллер. Could hit anything, so it's a
                     // candidate for any tag-qualified ItemRemoved listener, not excluded.
@@ -497,7 +537,10 @@ function buildCascadeIndex(
 
                 const recoloredTags = splitList(row.fields.TargetTag ?? "");
                 if (recoloredTags.length > 0) {
-                    for (const tag of recoloredTags) addTo(itemIdsByProducedTaggedEvent, `ColorChange|${tag}`, itemId);
+                    for (const tag of recoloredTags) {
+                        addTo(itemIdsByProducedTaggedEvent, `ColorChange|${tag}`, itemId);
+                        addTo(recolorTargetsOf, tag, itemId);
+                    }
                 } else {
                     addTo(indiscriminateProducersOfEvent, "ColorChange", itemId);
                 }
@@ -505,6 +548,13 @@ function buildCascadeIndex(
 
             if (row.table === "MechAddTag") {
                 for (const tag of splitList(row.fields.NewTags ?? "")) addTo(itemIdsByGrantedTag, tag, itemId);
+
+                const retaggedIds = splitList(row.fields.TargetItemId ?? "").filter((token) => knownIds.has(token));
+                for (const token of retaggedIds) addTo(retagsOf, token, itemId);
+
+                if (retaggedIds.length === 0) {
+                    for (const tag of splitList(row.fields.TargetTag ?? "")) addTo(retagsTargetsOf, tag, itemId);
+                }
             }
 
             const event = producedActivatorType(row);
@@ -552,6 +602,11 @@ function buildCascadeIndex(
         itemIdsByTargetedTag,
         activatorsOf,
         itemIdsByActivatedTag,
+        recolorTargetsOf,
+        removesOf,
+        removesTargetsOf,
+        retagsOf,
+        retagsTargetsOf,
     };
 }
 
@@ -703,6 +758,16 @@ export type ScalingEdgeReason =
     | "activator"
     | "modifier"
     | "recolorer"
+    /** A MechChangeColor row directly recolors this item (by its own TargetTag) — distinct from "recolorer",
+     *  which is "recolors *something* to satisfy this row's own color filter". See recolorTargetsOf. */
+    | "recolors"
+    /** A MechAddItem "удалить" row directly kills/removes this item (by id or its own TargetTag) — a real
+     *  structural edge, even though its *effect* on the target is harmful rather than scaling. See removesOf/
+     *  removesTargetsOf. */
+    | "removes"
+    /** A MechAddTag row directly grants this item a tag (by id or its own TargetTag) — distinct from
+     *  "tag-granter", which is "produces a tag consumed by this row's own filter". See retagsOf/retagsTargetsOf. */
+    | "retags"
     /** The item's *real* parent (from computeScalingGraph) isn't itself a member of this particular build — a
      *  manually-curated build can be a subset of what fresh generation would find — so computeCascadeLevels falls
      *  back to drawing a line straight to the root instead of leaving the node with nowhere to point. Rare. */
@@ -721,6 +786,9 @@ export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
     activator: "даёт доп. активацию",
     modifier: "напрямую повышает значение",
     recolorer: "перекрашивает под нужный цвет",
+    recolors: "напрямую перекрашивает",
+    removes: "напрямую убирает",
+    retags: "напрямую даёт тег",
     indirect: "непрямая связь (через предмет вне билда)",
     "combo-ingredient": "ингредиент комбинации",
     "combo-result": "результат комбинации",
@@ -741,6 +809,11 @@ interface ScalingEdgeCandidate {
  * producer naming a *different* concrete tag is excluded, one naming no tag at all is a candidate), granting a
  * needed tag, spawning/replacing, firing an extra activation, directly raising a value, recoloring to satisfy a
  * tag+color filter (self-only recolorers only count if already the required tag — recolorerMatchesTagFilter).
+ * Also includes three direct Target-side edges that have no "consumed by a filter" angle at all, just "this row's
+ * owner directly affects the target" (id-based when the table has one, tag-based against the target's own static
+ * tags otherwise — same id-then-tag pattern as targetersOf/activatorsOf): a MechChangeColor row recoloring it
+ * (recolors), a MechAddItem "удалить" row killing it (removes), a MechAddTag row tagging it (retags).
+ *
  * Deliberately does NOT include "boosts/activates any nearby Card/House/Artefact, no tag, no id at all" — see the
  * module note by CascadeIndex for why that signal was tried and reverted.
  */
@@ -833,6 +906,20 @@ function findFeedersOf(
         for (const id of index.itemIdsByTargetedTag.get(tag) ?? []) push(id, "modifier");
     }
 
+    for (const tag of target.tags) {
+        for (const id of index.recolorTargetsOf.get(tag) ?? []) push(id, "recolors");
+    }
+
+    for (const id of index.removesOf.get(target.id) ?? []) push(id, "removes");
+    for (const tag of target.tags) {
+        for (const id of index.removesTargetsOf.get(tag) ?? []) push(id, "removes");
+    }
+
+    for (const id of index.retagsOf.get(target.id) ?? []) push(id, "retags");
+    for (const tag of target.tags) {
+        for (const id of index.retagsTargetsOf.get(tag) ?? []) push(id, "retags");
+    }
+
     return edges;
 }
 
@@ -851,8 +938,17 @@ export interface ScalingNode {
 
 const DEFAULT_MAX_SCALING_DEPTH = 6;
 
-/** The actual BFS, factored out so computeCascadeBuilds (many roots, one shared index) and computeCascadeLevels
- *  (one root, needs the index for other things too) don't each rebuild buildCascadeIndex per call. */
+/**
+ * The actual BFS, factored out so computeCascadeBuilds (many roots, one shared index) and computeCascadeLevels
+ * (one root, needs the index for other things too) don't each rebuild buildCascadeIndex per call.
+ *
+ * Per the user's 2026-07-24 spec: each tier is a direct edge to the previous tier — "если этих предметов ещё не
+ * было в графе [создаётся узел], если были — к ним идёт связь [ещё одна связь, узел не двигается]". So a node's
+ * *depth* is fixed at first discovery (shortest path from the root, standard BFS), but it can go on collecting
+ * additional `parents` entries from *later* rounds too — an item discovered at depth 2 that a depth-4 item also
+ * happens to structurally feed into gets that as a second, independent edge, not silently dropped. Root is the one
+ * exception: it never gains a parent, no matter what edges point at it (it has none by definition).
+ */
 function computeScalingGraphInternal(
     rootId: string,
     knownIds: Set<string>,
@@ -882,7 +978,18 @@ function computeScalingGraphInternal(
                     : mechanicsByItem.get(parentId) ?? [];
 
             for (const edge of findFeedersOf(parentItem, rows, index, itemsById, mechanicsByItem, knownIds)) {
-                if (nodes.has(edge.from) || !knownIds.has(edge.from)) continue;
+                if (!knownIds.has(edge.from)) continue;
+
+                const existing = nodes.get(edge.from);
+                if (existing) {
+                    // Already placed (this round or an earlier one) — root stays parent-less by definition; any
+                    // other node picks up this as an additional, independent edge rather than losing it.
+                    if (existing.itemId !== rootId) {
+                        existing.parents = [...existing.parents, { itemId: parentId, reason: edge.reason }];
+                    }
+                    continue;
+                }
+
                 if (!discovered.has(edge.from)) discovered.set(edge.from, []);
                 discovered.get(edge.from)!.push({ itemId: parentId, reason: edge.reason });
             }
@@ -919,6 +1026,17 @@ function computeScalingGraphInternal(
  * structural link. That signal is gone entirely now; only real edges (id/tag/event/replace-rule/tag-checked
  * recolor) are ever followed, so an item with no real connection to the root — direct or via a chain — simply
  * never appears, instead of appearing at a nominally "weak" outer level that still claimed a connection.
+ *
+ * 2026-07-24 follow-up, per the user's more precise restatement of the same idea ("прямая связь ТОЛЬКО по
+ * механикам... предмет может слушать того, кто производит событие... давать деньги... менять цвет"): every
+ * mechanic table's own Target* side is now a real edge in its own right, not just an input to the event-producer
+ * mechanism — a MechChangeColor row directly recolors whatever its TargetTag names (`recolors`), a MechAddItem
+ * "удалить" row directly kills its target by id or tag (`removes`), a MechAddTag row directly tags its target by
+ * id or tag (`retags`) — see findFeedersOf. And "если этих предметов еще не было в графе — [создаётся], если
+ * были — к ним идёт связь": a node's *depth* is still its shortest distance from the root (fixed at first
+ * discovery, standard BFS), but it keeps collecting every real `parents` edge found in *later* rounds too, instead
+ * of the first discovery being the only one that counts (see computeScalingGraphInternal) — mirroring how
+ * placeCombosInGraph already treats an ingredient that already has its own node.
  */
 export function computeScalingGraph(
     rootId: string,
@@ -1279,6 +1397,27 @@ function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): 
                     for (const id of index.indiscriminateProducersOfEvent.get(row.fields.ActivatorType) ?? []) {
                         connect(itemId, id);
                     }
+                }
+            }
+
+            // Direct Target-side edges with no "consumed by a filter" angle — same three as findFeedersOf's
+            // recolors/removes/retags (id-based when the table has one, else tag-based against the target's own
+            // static tags).
+            if (row.table === "MechChangeColor") {
+                for (const tag of splitList(row.fields.TargetTag ?? "")) {
+                    for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
+                }
+            }
+            if (row.table === "MechAddItem" && row.fields.ItemMech === "удалить") {
+                for (const id of splitList(row.fields.TargetItemId ?? "")) if (knownIds.has(id)) connect(itemId, id);
+                for (const tag of splitList(row.fields.TargetTag ?? "")) {
+                    for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
+                }
+            }
+            if (row.table === "MechAddTag") {
+                for (const id of splitList(row.fields.TargetItemId ?? "")) if (knownIds.has(id)) connect(itemId, id);
+                for (const tag of splitList(row.fields.TargetTag ?? "")) {
+                    for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
                 }
             }
         }
