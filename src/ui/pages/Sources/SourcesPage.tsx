@@ -41,6 +41,7 @@ export default function SourcesPage() {
     const [confirmingExport, setConfirmingExport] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
+    const [confirmingClearImport, setConfirmingClearImport] = useState(false);
 
     const handleDownloadConfig = () => {
         void store.importConfig(configUrl);
@@ -84,6 +85,11 @@ export default function SourcesPage() {
         if (!pendingSnapshotFile) return;
         void store.importSnapshot(pendingSnapshotFile);
         setPendingSnapshotFile(null);
+    };
+
+    const confirmClearImport = () => {
+        store.clearImportCache();
+        setConfirmingClearImport(false);
     };
 
     const confirmExport = async () => {
@@ -267,6 +273,28 @@ export default function SourcesPage() {
                 </Stack>
             </Paper>
 
+            <Paper sx={{ p: 3 }}>
+                <Stack spacing={2}>
+                    <Typography variant="h6">Очистить импортированный конфиг</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Загрузка CSV всегда объединяется с уже загруженным (по id) — предмет, удалённый из исходной
+                        таблицы, без этого остаётся на сайте навсегда. Здесь можно стереть весь загруженный конфиг и
+                        переводы в этом браузере и загрузить всё заново с чистого листа. Билды, иконки и другие общие
+                        данные в Firestore не затрагиваются.
+                    </Typography>
+                    <Box>
+                        <Button
+                            variant="outlined"
+                            color="error"
+                            onClick={() => setConfirmingClearImport(true)}
+                            disabled={store.items.length === 0 && store.translations.length === 0}
+                        >
+                            Удалить весь импортированный конфиг
+                        </Button>
+                    </Box>
+                </Stack>
+            </Paper>
+
             {import.meta.env.DEV && (
                 <Paper sx={{ p: 3 }}>
                     <Stack spacing={2}>
@@ -387,6 +415,24 @@ export default function SourcesPage() {
                     <Button onClick={() => setPendingSnapshotFile(null)}>Отмена</Button>
                     <Button color="error" onClick={confirmSnapshotImport}>
                         Импортировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={confirmingClearImport} onClose={() => setConfirmingClearImport(false)}>
+                <DialogTitle>Удалить весь импортированный конфиг?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Сотрёт все загруженные предметы, механики, цепочки прокачки, правила замены и переводы в
+                        этом браузере ({store.items.length} предметов, {store.translations.length} переводов). После
+                        этого нужно будет заново скачать конфиг или загрузить CSV. Билды и другие общие данные не
+                        затронуты. Действие необратимо.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingClearImport(false)}>Отмена</Button>
+                    <Button color="error" onClick={confirmClearImport}>
+                        Удалить
                     </Button>
                 </DialogActions>
             </Dialog>

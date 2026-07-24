@@ -417,6 +417,28 @@ export class GameStore {
         await this.runImport(() => this.importService.importCsvFiles(files), { merge: true });
     }
 
+    /**
+     * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, replaceRules,
+     * enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
+     * untouched. Exists specifically because CSV uploads always merge by id (`importCsvFiles` above) and never
+     * remove anything missing from a new file, so an item deleted from the source spreadsheet lingers on the site
+     * forever unless the whole cache is cleared first. After clearing, the next CSV upload or "Скачать
+     * конфиг"/"Скачать переводы" starts from a clean slate — no leftover ids from before this call can survive.
+     */
+    clearImportCache(): void {
+        this.allItems = [];
+        this.translations = [];
+        this.mechanics = [];
+        this.upgradeChains = [];
+        this.replaceRules = [];
+        this.enumValues = {};
+        this.rebuildDerivedCaches();
+        this.importReport = null;
+        this.importedAt = null;
+        saveImportCache(null);
+        this.notify();
+    }
+
     createBuild(name = ""): Build {
         const build: Build = {
             id: `build-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,

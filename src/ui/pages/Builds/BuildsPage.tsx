@@ -30,13 +30,27 @@ import ItemDescription from "../../components/ItemDescription";
 import BuildIcon from "../../components/BuildIcon";
 import DetailModal from "../../components/DetailModal";
 import ItemDetailPage from "../Items/ItemDetailPage";
-import { higherTierIds } from "../../../core/domain/relations";
+import { computeCascadeLevels, higherTierIds } from "../../../core/domain/relations";
 import type { BuildSortKey } from "../../../core/services/BuildService";
 
 // Same three literal category names normalize.ts assigns as item.itemType for Cards/Houses/Artefacts —
 // deliberately not store.paramValues.ItemType, which also aggregates ActivatorTargetType/TargetType/
 // BonusTargetType mechanic values (e.g. "PlayerScore") and would pollute this filter with non-categories.
 const BUILD_TYPE_OPTIONS = ["Artefact", "Card", "House"];
+
+// Root (depth 0) + the first 2 hops out (depth 1/2) — a card is a compact preview, not the full "Дерево связей";
+// deeper members are real but increasingly indirect (see computeCascadeLevels), so cutting them from the card
+// isn't hiding information the same way an arbitrary item-count cap would.
+const MAX_CARD_PREVIEW_DEPTH = 2;
+
+/** Russian plural form for "N предмет(а/ов)" — 1 предмет, 2-4 предмета, 5+/11-14 предметов. */
+function itemsWord(n: number): string {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return "предмет";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "предмета";
+    return "предметов";
+}
 
 export default function BuildsPage() {
     const store = useStore();
@@ -73,6 +87,18 @@ export default function BuildsPage() {
         // buildService/getItem are stable methods on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.builds, store.items, query, tagFilter, typeFilter, sortKey]);
+
+    // buildId -> item id -> depth in the scaling graph (see computeCascadeLevels) — computed once per visible
+    // build rather than per card render. A build with no real root (manual, or root has no PlayerScore payoff)
+    // only ever classifies the root itself; every other member falls through to the card's "и ещё N" count.
+    const depthByBuildAndItem = useMemo(() => {
+        const map = new Map<string, Map<string, number>>();
+        for (const build of filtered) {
+            const { nodes } = computeCascadeLevels(build, store.items, store.mechanics, store.replaceRules);
+            map.set(build.id, new Map(nodes.map((node) => [node.itemId, node.depth])));
+        }
+        return map;
+    }, [filtered, store.items, store.mechanics, store.replaceRules]);
 
     const availableTags = store.paramValues.ItemTag ?? [];
     const availableTypes = BUILD_TYPE_OPTIONS;
@@ -260,6 +286,14 @@ export default function BuildsPage() {
                         .map((itemId) => store.getItem(itemId))
                         .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
+                    const itemDepths = depthByBuildAndItem.get(build.id);
+                    // Not in the scaling graph at all (unclassified) counts as "beyond the preview depth" too —
+                    // it's still a real member, just not one the card has room to explain, same as a deep one.
+                    const previewItems = buildItems.filter(
+                        (item) => (itemDepths?.get(item.id) ?? Infinity) <= MAX_CARD_PREVIEW_DEPTH
+                    );
+                    const hiddenItemCount = buildItems.length - previewItems.length;
+
                     return (
                         <Card key={build.id} variant="outlined" sx={{ position: "relative" }}>
                             {deleteMode && (
@@ -297,38 +331,45 @@ export default function BuildsPage() {
                             </CardActionArea>
 
                             <CardContent sx={{ pt: 0 }}>
-                                <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.75 }}>
+                                <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.75, alignItems: "center" }}>
                                     {buildItems.length === 0 ? (
                                         <Typography variant="body2" color="text.secondary">
                                             Предметы не добавлены.
                                         </Typography>
                                     ) : (
-                                        buildItems.map((item) => {
-                                            const description = store.itemDescription(item);
-                                            return (
-                                                <Tooltip
-                                                    key={item.id}
-                                                    title={
-                                                        <>
-                                                            {store.itemName(item)}
-                                                            {description && (
-                                                                <>
-                                                                    <br />
-                                                                    <ItemDescription item={item} description={description} />
-                                                                </>
-                                                            )}
-                                                        </>
-                                                    }
-                                                >
-                                                    <Box
-                                                        onClick={() => setOpenItemId(item.id)}
-                                                        sx={{ display: "block", lineHeight: 0, cursor: "pointer" }}
+                                        <>
+                                            {previewItems.map((item) => {
+                                                const description = store.itemDescription(item);
+                                                return (
+                                                    <Tooltip
+                                                        key={item.id}
+                                                        title={
+                                                            <>
+                                                                {store.itemName(item)}
+                                                                {description && (
+                                                                    <>
+                                                                        <br />
+                                                                        <ItemDescription item={item} description={description} />
+                                                                    </>
+                                                                )}
+                                                            </>
+                                                        }
                                                     >
-                                                        <ItemIcon item={item} size={36} />
-                                                    </Box>
-                                                </Tooltip>
-                                            );
-                                        })
+                                                        <Box
+                                                            onClick={() => setOpenItemId(item.id)}
+                                                            sx={{ display: "block", lineHeight: 0, cursor: "pointer" }}
+                                                        >
+                                                            <ItemIcon item={item} size={36} />
+                                                        </Box>
+                                                    </Tooltip>
+                                                );
+                                            })}
+                                            {hiddenItemCount > 0 && (
+                                                <Typography variant="body2" color="text.secondary">
+                                                    и ещё {hiddenItemCount} {itemsWord(hiddenItemCount)}
+                                                </Typography>
+                                            )}
+                                        </>
                                     )}
                                 </Stack>
                             </CardContent>
