@@ -357,9 +357,10 @@ function applyIconTokens(parts: DescriptionPart[], context: IconTokenContext): D
                 }
             } else if (tagName !== undefined) {
                 const entry = tagIconByName.get(tagName.trim().toLowerCase());
+                const note = entry?.note?.trim() || entry?.tag;
                 pieces.push(
                     entry?.icon
-                        ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.tag }
+                        ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: entry.tag, note }
                         : { kind: "text", value: fullMatch }
                 );
             } else if (glossaryId !== undefined) {

@@ -321,7 +321,7 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
         ]);
     });
 
-    it("resolves {tag:Name} to the matching TagIcon entry, case-insensitively", () => {
+    it("resolves {tag:Name} to the matching TagIcon entry, case-insensitively, falling back to the tag name as the tooltip note", () => {
         const iconTokens = {
             items: [],
             itemIcons: {},
@@ -329,7 +329,31 @@ describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {
             glossary: [],
         };
         expect(parseItemDescription(makeItem(), "{tag:sport}", [], [], iconTokens)).toEqual([
-            { kind: "icon", src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/sport.svg`, width: 24, alt: "Sport" },
+            {
+                kind: "icon",
+                src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/sport.svg`,
+                width: 24,
+                alt: "Sport",
+                note: "Sport",
+            },
+        ]);
+    });
+
+    it("uses the TagIcon entry's own note over the tag name when one is set", () => {
+        const iconTokens = {
+            items: [],
+            itemIcons: {},
+            tagIcons: [{ id: "t1", tag: "Sport", icon: "roulette_interface/icons-tags/sport.svg", note: "Спортивные предметы" }],
+            glossary: [],
+        };
+        expect(parseItemDescription(makeItem(), "{tag:sport}", [], [], iconTokens)).toEqual([
+            {
+                kind: "icon",
+                src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/sport.svg`,
+                width: 24,
+                alt: "Sport",
+                note: "Спортивные предметы",
+            },
         ]);
     });
 

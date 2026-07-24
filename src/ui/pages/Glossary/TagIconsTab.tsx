@@ -21,16 +21,25 @@ type RowProps = {
 const TagIconRow = memo(function TagIconRow({ entry, onCommit, onDelete, onInsertAfter }: RowProps) {
     const [tag, setTag] = useState(entry.tag);
     const [icon, setIcon] = useState(entry.icon);
+    const [note, setNote] = useState(entry.note ?? "");
 
-    const commit = () => onCommit(entry.id, { tag, icon });
+    // Omits (not sets to "") a blank note — same reasoning as GlossaryRow's buildFields: an explicit `undefined`
+    // key is different from an absent one, and Firestore's setDoc rejects the former.
+    const buildFields = (iconOverride: string): Omit<TagIcon, "id"> => ({
+        tag,
+        icon: iconOverride,
+        ...(note ? { note } : {}),
+    });
+
+    const commit = () => onCommit(entry.id, buildFields(icon));
     // Explicit override, same reasoning as PhraseGlossaryTab's handleIconCommit — the icon picker's onChange
     // and onCommit run synchronously in the same handler, before setIcon's re-render lands.
-    const handleIconCommit = (nextIcon: string) => onCommit(entry.id, { tag, icon: nextIcon });
+    const handleIconCommit = (nextIcon: string) => onCommit(entry.id, buildFields(nextIcon));
 
     return (
         <Fragment>
             <Paper variant="outlined" sx={{ p: 2 }}>
-                <Box sx={{ display: "grid", gridTemplateColumns: "260px 1fr 40px", gap: 2, alignItems: "center" }}>
+                <Box sx={{ display: "grid", gridTemplateColumns: "200px 1fr 200px 40px", gap: 2, alignItems: "center" }}>
                     <TextField
                         label="Тег"
                         value={tag}
@@ -42,6 +51,16 @@ const TagIconRow = memo(function TagIconRow({ entry, onCommit, onDelete, onInser
                     />
 
                     <IconPathField value={icon} onChange={setIcon} onCommit={handleIconCommit} />
+
+                    <TextField
+                        label="Заметка"
+                        value={note}
+                        onChange={(event) => setNote(event.target.value)}
+                        onBlur={commit}
+                        size="small"
+                        placeholder="Показывается при наведении на тег"
+                        fullWidth
+                    />
 
                     <IconButton aria-label="Удалить запись" onClick={() => onDelete(entry.id)} size="small">
                         <CloseIcon fontSize="small" />

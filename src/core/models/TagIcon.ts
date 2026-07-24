@@ -13,4 +13,8 @@ export interface TagIcon {
 
     /** Relative path under public/ (e.g. "roulette_interface/icons-tags/foo.svg") — same convention as GlossaryEntry.icon. */
     icon: string;
+
+    /** Shown as a tooltip when hovering the icon a {tag:Name} token resolves to inside a rendered description
+     *  (see descriptionTemplate.ts's applyIconTokens). Same idea as GlossaryEntry.note. */
+    note?: string;
 }
