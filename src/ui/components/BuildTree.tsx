@@ -32,13 +32,23 @@ function edgeKey(parentId: string, childId: string): string {
     return `${parentId}--${childId}`;
 }
 
+const DEFAULT_EDGE_COLOR = "#5B8CFF";
+
 /** Orange into a combo (ingredient feeding it), green out of one (the combo producing its result) — same colors
  *  the old, since-removed buildTree.ts used — everything else is plain blue. Known directly from the edge's own
  *  `reason` now (combo-ingredient/combo-result), no separate combo lookup needed. */
 function edgeColor(reason: ScalingEdgeReason): string {
     if (reason === "combo-ingredient") return "#ffb74d";
     if (reason === "combo-result") return "#66bb6a";
-    return "#5B8CFF";
+    return DEFAULT_EDGE_COLOR;
+}
+
+/** One <marker> id per edge color (SVG markers can't take a dynamic color via CSS the way a stroke can, so each
+ *  color needs its own predefined arrowhead) — see the `<defs>` block below. */
+function edgeMarkerId(reason: ScalingEdgeReason): string {
+    if (reason === "combo-ingredient") return "arrow-combo-ingredient";
+    if (reason === "combo-result") return "arrow-combo-result";
+    return "arrow-default";
 }
 
 /** Russian plural form for "N шаг(а/ов) от корня" — 1 шаг, 2-4 шага, 5+/11-14 шагов. */
@@ -419,20 +429,57 @@ export default function BuildTree({ build }: Props) {
                             zIndex: -1,
                         }}
                     >
+                        {/* One arrowhead marker per edge color (see edgeMarkerId) — SVG markers can't take a
+                            dynamic stroke-linked color, so each color gets its own predefined marker referenced
+                            by id. Placed at the *parent* end of each line: a node's `parents` are what it feeds
+                            into (see ScalingNode/CascadeLevelNode), so the arrow points from the specific item a
+                            connection came from toward the specific item it explains — not just a plain
+                            undirected line between two boxes. */}
+                        <defs>
+                            {(["arrow-default", "arrow-combo-ingredient", "arrow-combo-result"] as const).map((id) => (
+                                <marker
+                                    key={id}
+                                    id={id}
+                                    viewBox="0 0 10 10"
+                                    refX="8.5"
+                                    refY="5"
+                                    markerWidth="7"
+                                    markerHeight="7"
+                                    markerUnits="userSpaceOnUse"
+                                    orient="auto-start-reverse"
+                                >
+                                    <path
+                                        d="M0,0 L10,5 L0,10 Z"
+                                        fill={
+                                            id === "arrow-combo-ingredient"
+                                                ? edgeColor("combo-ingredient")
+                                                : id === "arrow-combo-result"
+                                                  ? edgeColor("combo-result")
+                                                  : DEFAULT_EDGE_COLOR
+                                        }
+                                    />
+                                </marker>
+                            ))}
+                        </defs>
+
                         {edges.map((edge) => {
                             const key = edgeKey(edge.parentId, edge.childId);
                             const isHighlighted = !highlightedEdgeKeys || highlightedEdgeKeys.has(key);
                             const opacity = isHighlighted ? 0.9 : 0.15;
                             return (
                                 <g key={key}>
+                                    {/* Drawn from child to parent (reversed from x1/y1->x2/y2) so the marker-end
+                                        arrowhead lands on the parent — the item this connection explains — with
+                                        the tip pointing at exactly who it came from. */}
                                     <line
-                                        x1={edge.x1}
-                                        y1={edge.y1}
-                                        x2={edge.x2}
-                                        y2={edge.y2}
+                                        x1={edge.x2}
+                                        y1={edge.y2}
+                                        x2={edge.x1}
+                                        y2={edge.y1}
                                         stroke={edgeColor(edge.reason)}
                                         strokeWidth={isHighlighted ? 2.5 : 1.5}
                                         opacity={opacity}
+                                        markerEnd={`url(#${edgeMarkerId(edge.reason)})`}
                                         style={{ pointerEvents: "none", transition: "opacity 0.15s" }}
                                     />
                                     {/* Wider invisible line on top, just for a comfortable hover hit-area on a 1.5px line. */}
