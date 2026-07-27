@@ -1,7 +1,22 @@
 import { useMemo, useRef, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import { Box, Button, Chip, IconButton, Paper, Stack, TextField, Typography } from "@mui/material";
+import {
+    Box,
+    Button,
+    Chip,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogContentText,
+    DialogTitle,
+    IconButton,
+    Paper,
+    Stack,
+    TextField,
+    Typography,
+} from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
@@ -27,6 +42,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
     const [editingDescription, setEditingDescription] = useState(false);
     const [descriptionDraft, setDescriptionDraft] = useState("");
     const descriptionFieldRef = useRef<HTMLTextAreaElement | null>(null);
+    const [confirmingCopyToUpgrades, setConfirmingCopyToUpgrades] = useState(false);
 
     // Splices at the current cursor position (falling back to the end if the field never had focus) rather than
     // always appending, so inserting a second token in the middle of already-typed text lands where expected.
@@ -69,6 +85,12 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
     const builds = store.buildsForItem(item.id);
     const chain = store.chainForItem(item.id);
     const icon = store.getItemIcon(item.id) ?? "🧩";
+
+    const chainIndex = chain ? chain.itemIds.indexOf(item.id) : -1;
+    const upgradeTierItems =
+        chain && chainIndex !== -1
+            ? chain.itemIds.slice(chainIndex + 1).map((tierId) => store.getItem(tierId) ?? tierId)
+            : [];
 
     const replacesInto = store.replaceRules.filter((rule) => rule.itemIdToReplace === item.id);
     const replacedFrom = store.replaceRules.filter((rule) => rule.replacementItem === item.id);
@@ -241,6 +263,16 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                 >
                                     <EditIcon fontSize="small" />
                                 </IconButton>
+                                {upgradeTierItems.length > 0 && (
+                                    <IconButton
+                                        size="small"
+                                        aria-label="Скопировать описание в прокачку (+/++)"
+                                        title="Скопировать описание в прокачку (+/++)"
+                                        onClick={() => setConfirmingCopyToUpgrades(true)}
+                                    >
+                                        <ContentCopyIcon fontSize="small" />
+                                    </IconButton>
+                                )}
                             </Stack>
                         )}
 
@@ -433,6 +465,32 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                     </Stack>
                 )}
             </Paper>
+
+            <Dialog open={confirmingCopyToUpgrades} onClose={() => setConfirmingCopyToUpgrades(false)}>
+                <DialogTitle>Скопировать описание в прокачку?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Текущее описание заменит собой описания следующих предметов:{" "}
+                        {upgradeTierItems
+                            .map((tierItem) => (typeof tierItem === "string" ? tierItem : store.itemName(tierItem)))
+                            .join(", ")}
+                        . Их текущие описания будут потеряны.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingCopyToUpgrades(false)}>Отмена</Button>
+                    <Button
+                        color="primary"
+                        variant="contained"
+                        onClick={() => {
+                            store.copyDescriptionToUpgrades(item.id);
+                            setConfirmingCopyToUpgrades(false);
+                        }}
+                    >
+                        Скопировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Stack>
     );
 }

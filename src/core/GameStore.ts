@@ -332,6 +332,27 @@ export class GameStore {
         return this.getTranslation(item.descKey) ?? "";
     }
 
+    /** Tier chains almost always share the exact same description template across + and ++ (only the underlying
+     *  values differ, resolved per-item via {ValueOrRange}-style tokens) — this pushes the given item's current
+     *  description text onto every later tier in its upgrade chain, so an edit doesn't have to be retyped by hand
+     *  into each one. Only propagates forward (base → + → ++), matching what the chain's own order implies. */
+    copyDescriptionToUpgrades(itemId: string): void {
+        const chain = this.chainForItem(itemId);
+        if (!chain) return;
+        const index = chain.itemIds.indexOf(itemId);
+        if (index === -1) return;
+
+        const sourceItem = this.getItem(itemId);
+        if (!sourceItem) return;
+        const text = this.itemDescription(sourceItem);
+
+        for (const tierId of chain.itemIds.slice(index + 1)) {
+            const tierItem = this.getItem(tierId);
+            if (!tierItem) continue;
+            this.setTranslationOverride(tierItem.descKey ?? `${tierItem.id}_desc`, text);
+        }
+    }
+
     /**
      * `scope` matters only for a non-merge (full replace) apply: "config" replaces every config-derived field
      * (items/mechanics/upgradeChains/replaceRules/enumValues) but leaves `translations` untouched, "translations"
