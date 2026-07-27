@@ -515,14 +515,20 @@ export default function BuildTree({ build }: Props) {
                             const opacity = isHighlighted ? 0.9 : 0.15;
                             return (
                                 <g key={key}>
-                                    {/* Drawn from child to parent (reversed from x1/y1->x2/y2) so the marker-end
-                                        arrowhead lands on the parent — the item this connection explains — with
-                                        the tip pointing at exactly who it came from. */}
+                                    {/* Every other reason is drawn child->parent so the arrowhead lands on the
+                                        parent — the item this connection explains, with the tip pointing at
+                                        exactly who it came from (e.g. "spawner" points at what it spawns). A
+                                        "related" edge reads the other way round: the anchor (parent) is the real
+                                        item already in the graph, and the child is the *other*, merely context
+                                        item it's related to — the anchor is what does the influencing (e.g.
+                                        Маньяк killing), and the child is what's affected (Медсестра reacting to
+                                        it), so the arrow points parent->child instead, same as every solid edge
+                                        reads "arrow points at what's influenced". */}
                                     <line
-                                        x1={edge.x2}
-                                        y1={edge.y2}
-                                        x2={edge.x1}
-                                        y2={edge.y1}
+                                        x1={edge.reason === "related" ? edge.x1 : edge.x2}
+                                        y1={edge.reason === "related" ? edge.y1 : edge.y2}
+                                        x2={edge.reason === "related" ? edge.x2 : edge.x1}
+                                        y2={edge.reason === "related" ? edge.y2 : edge.y1}
                                         stroke={edgeColor(edge.reason)}
                                         strokeWidth={isHighlighted ? 2.5 : 1.5}
                                         strokeDasharray={edge.reason === "related" ? "5 4" : undefined}
