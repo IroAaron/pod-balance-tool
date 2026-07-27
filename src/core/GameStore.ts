@@ -353,6 +353,26 @@ export class GameStore {
         }
     }
 
+    /** Same idea as copyDescriptionToUpgrades, but for the item's name — each tier forward gets one more trailing
+     *  "+" than the last (matching the game's own "Вор" / "Вор+" / "Вор++" naming convention), rather than the
+     *  exact same text repeated verbatim. */
+    copyNameToUpgrades(itemId: string): void {
+        const chain = this.chainForItem(itemId);
+        if (!chain) return;
+        const index = chain.itemIds.indexOf(itemId);
+        if (index === -1) return;
+
+        const sourceItem = this.getItem(itemId);
+        if (!sourceItem) return;
+        const baseName = this.itemName(sourceItem);
+
+        chain.itemIds.slice(index + 1).forEach((tierId, offset) => {
+            const tierItem = this.getItem(tierId);
+            if (!tierItem) return;
+            this.setTranslationOverride(tierItem.nameKey ?? tierItem.id, baseName + "+".repeat(offset + 1));
+        });
+    }
+
     /**
      * `scope` matters only for a non-merge (full replace) apply: "config" replaces every config-derived field
      * (items/mechanics/upgradeChains/replaceRules/enumValues) but leaves `translations` untouched, "translations"

@@ -42,7 +42,8 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
     const [editingDescription, setEditingDescription] = useState(false);
     const [descriptionDraft, setDescriptionDraft] = useState("");
     const descriptionFieldRef = useRef<HTMLTextAreaElement | null>(null);
-    const [confirmingCopyToUpgrades, setConfirmingCopyToUpgrades] = useState(false);
+    const [confirmingCopyDescToUpgrades, setConfirmingCopyDescToUpgrades] = useState(false);
+    const [confirmingCopyNameToUpgrades, setConfirmingCopyNameToUpgrades] = useState(false);
 
     // Splices at the current cursor position (falling back to the end if the field never had focus) rather than
     // always appending, so inserting a second token in the middle of already-typed text lands where expected.
@@ -189,6 +190,16 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                 >
                                     <EditIcon fontSize="small" />
                                 </IconButton>
+                                {upgradeTierItems.length > 0 && (
+                                    <IconButton
+                                        size="small"
+                                        aria-label="Скопировать название в прокачку (+/++)"
+                                        title="Скопировать название в прокачку (+/++)"
+                                        onClick={() => setConfirmingCopyNameToUpgrades(true)}
+                                    >
+                                        <ContentCopyIcon fontSize="small" />
+                                    </IconButton>
+                                )}
                             </Stack>
                         )}
 
@@ -268,7 +279,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                         size="small"
                                         aria-label="Скопировать описание в прокачку (+/++)"
                                         title="Скопировать описание в прокачку (+/++)"
-                                        onClick={() => setConfirmingCopyToUpgrades(true)}
+                                        onClick={() => setConfirmingCopyDescToUpgrades(true)}
                                     >
                                         <ContentCopyIcon fontSize="small" />
                                     </IconButton>
@@ -466,7 +477,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                 )}
             </Paper>
 
-            <Dialog open={confirmingCopyToUpgrades} onClose={() => setConfirmingCopyToUpgrades(false)}>
+            <Dialog open={confirmingCopyDescToUpgrades} onClose={() => setConfirmingCopyDescToUpgrades(false)}>
                 <DialogTitle>Скопировать описание в прокачку?</DialogTitle>
                 <DialogContent>
                     <DialogContentText>
@@ -478,13 +489,44 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setConfirmingCopyToUpgrades(false)}>Отмена</Button>
+                    <Button onClick={() => setConfirmingCopyDescToUpgrades(false)}>Отмена</Button>
                     <Button
                         color="primary"
                         variant="contained"
                         onClick={() => {
                             store.copyDescriptionToUpgrades(item.id);
-                            setConfirmingCopyToUpgrades(false);
+                            setConfirmingCopyDescToUpgrades(false);
+                        }}
+                    >
+                        Скопировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={confirmingCopyNameToUpgrades} onClose={() => setConfirmingCopyNameToUpgrades(false)}>
+                <DialogTitle>Скопировать название в прокачку?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Названия следующих предметов будут заменены на «{store.itemName(item)}» с добавлением +/++
+                        по уровню:{" "}
+                        {upgradeTierItems
+                            .map((tierItem, offset) =>
+                                typeof tierItem === "string"
+                                    ? tierItem
+                                    : `${store.itemName(item)}${"+".repeat(offset + 1)}`
+                            )
+                            .join(", ")}
+                        . Их текущие названия будут потеряны.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingCopyNameToUpgrades(false)}>Отмена</Button>
+                    <Button
+                        color="primary"
+                        variant="contained"
+                        onClick={() => {
+                            store.copyNameToUpgrades(item.id);
+                            setConfirmingCopyNameToUpgrades(false);
                         }}
                     >
                         Скопировать
