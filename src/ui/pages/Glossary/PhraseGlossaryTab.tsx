@@ -154,6 +154,10 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
     const store = useStore();
     const [entries, setEntries] = useState<GlossaryEntry[]>(initialEntries);
     const [query, setQuery] = useState("");
+    // Bumped on every bulk enable/disable so GlossaryRow (keyed below on `${entry.id}:${bulkVersion}`) remounts —
+    // its `enabled` checkbox is local state seeded once from props and never re-synced, so without a fresh key a
+    // bulk change here would update Firestore/entries but leave every checkbox showing its old value.
+    const [bulkVersion, setBulkVersion] = useState(0);
 
     // All 4 callbacks below are useCallback'd with no dependency on `entries` (functional setState instead) so
     // their identity is stable across renders — required for GlossaryRow's `memo` to actually skip re-rendering
@@ -173,6 +177,22 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
     );
 
     const handleAdd = () => setEntries((prev) => [...prev, makeEmptyEntry()]);
+
+    // Bulk-toggles every entry currently visible (respects the search filter, like the rest of this page's
+    // actions implicitly do) rather than the full unfiltered list — flips `enabled` only, so phrases/icon/emoji/
+    // note are left untouched. GlossaryRow seeds its own `enabled` state once from props and never re-syncs, so
+    // remounting via `key` is required for the checkbox to actually reflect the bulk change instead of going
+    // stale (same tradeoff as handleInsertAfter's fresh rows never appearing until their own re-render).
+    const setEnabledForVisible = (enabled: boolean) => {
+        if (filtered.length === 0) return;
+        const visibleIds = new Set(filtered.map((entry) => entry.id));
+        setEntries((prev) => {
+            const next = prev.map((entry) => (visibleIds.has(entry.id) ? { ...entry, enabled } : entry));
+            store.setGlossary(next);
+            return next;
+        });
+        setBulkVersion((version) => version + 1);
+    };
 
     // Looks the id up in the real (unfiltered) list — the boundary a user hovers in a filtered/searched view
     // still needs to insert into that entry's actual neighboring position, not wherever it happens to sit
@@ -229,6 +249,12 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
                 <Button variant="contained" onClick={handleAdd}>
                     + Добавить запись
                 </Button>
+                <Button onClick={() => setEnabledForVisible(true)} disabled={filtered.length === 0}>
+                    Выбрать все
+                </Button>
+                <Button onClick={() => setEnabledForVisible(false)} disabled={filtered.length === 0}>
+                    Отключить все
+                </Button>
             </Stack>
 
             {filtered.length === 0 && (
@@ -242,7 +268,7 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
             <Stack>
                 {filtered.map((entry) => (
                     <GlossaryRow
-                        key={entry.id}
+                        key={`${entry.id}:${bulkVersion}`}
                         entry={entry}
                         onCommit={handleRowCommit}
                         onDelete={handleDelete}
