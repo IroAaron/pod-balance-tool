@@ -950,7 +950,7 @@ export interface ScalingNode {
     parents: { itemId: string; reason: ScalingEdgeReason }[];
 }
 
-const DEFAULT_MAX_SCALING_DEPTH = 6;
+export const DEFAULT_MAX_SCALING_DEPTH = 6;
 
 /**
  * The actual BFS, factored out so computeCascadeBuilds (many roots, one shared index) and computeCascadeLevels

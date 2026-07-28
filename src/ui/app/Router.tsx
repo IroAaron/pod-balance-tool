@@ -9,6 +9,7 @@ import BuildDetailPage from "../pages/Builds/BuildDetailPage";
 import GlossaryPage from "../pages/Glossary/GlossaryPage";
 import GraphPage from "../pages/Graph/GraphPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
+import BalancePage from "../pages/Balance/BalancePage";
 import SettingsPage from "../pages/Settings/SettingsPage";
 
 // Keyed by :id so navigating between two detail pages of the same route
@@ -46,6 +47,7 @@ export default function AppRouter() {
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
             <Route path="/glossary" element={<GlossaryPage />} />
             <Route path="/graph" element={<GraphPage />} />
+            <Route path="/balance" element={<BalancePage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFoundPage />} />
