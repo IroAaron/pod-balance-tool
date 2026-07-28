@@ -6,6 +6,7 @@ import type { UpgradeChain } from "./models/UpgradeChain";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
+import type { BalanceSaveMeta, BalanceSavePayload } from "./models/BalanceSave";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
@@ -25,6 +26,8 @@ import {
     markMigratedToFirestore,
     exportSnapshot as writeSnapshotFile,
     parseSnapshotFile,
+    getLastSavedBalanceSnapshot,
+    saveLastSavedBalanceSnapshot,
     type SourceUrls,
 } from "./persistence/localStore";
 
@@ -53,7 +56,30 @@ import {
     replaceAllBuilds,
     replaceSharedState,
     migrateIfEmpty,
+    subscribeBalanceSaves,
+    createBalanceSaveRemote,
+    fetchBalanceSavePayloadRemote,
+    deleteBalanceSaveRemote,
 } from "./persistence/firestoreStore";
+
+/** Deterministic stringify (object keys sorted recursively, array order preserved) — used to compare a
+ *  BalanceSavePayload against the current live state regardless of Firestore's map-field key ordering, which
+ *  isn't guaranteed to round-trip identically to however the object was originally constructed locally. */
+function canonicalStringify(value: unknown): string {
+    return JSON.stringify(sortKeysDeep(value));
+}
+
+function sortKeysDeep(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(sortKeysDeep);
+    if (value && typeof value === "object") {
+        return Object.fromEntries(
+            Object.keys(value as Record<string, unknown>)
+                .sort()
+                .map((key) => [key, sortKeysDeep((value as Record<string, unknown>)[key])])
+        );
+    }
+    return value;
+}
 
 function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
     const map = new Map(existing.map((entry) => [entry.id, entry]));
@@ -108,6 +134,9 @@ export class GameStore {
      *  see GlossaryPage's "Иконки тегов" tab and descriptionTemplate.ts. Synced independently, like glossary. */
     tagIcons: TagIcon[] = [];
 
+    /** Named point-in-time balance saves — metadata only (see SavesPage). Payload fetched on demand when restoring. */
+    balanceSaves: BalanceSaveMeta[] = [];
+
     /** False until the first Firestore `builds` snapshot arrives — distinguishes "still loading" from "no builds yet". */
     buildsReady = false;
 
@@ -119,6 +148,9 @@ export class GameStore {
 
     /** False until the first Firestore `shared/tagIcons` snapshot arrives. */
     tagIconsReady = false;
+
+    /** False until the first Firestore `balanceSaves` snapshot arrives. */
+    balanceSavesReady = false;
 
     importReport: ImportReport | null = null;
 
@@ -203,6 +235,12 @@ export class GameStore {
         subscribeTagIcons((entries) => {
             this.tagIcons = entries;
             this.tagIconsReady = true;
+            this.notify();
+        });
+
+        subscribeBalanceSaves((saves) => {
+            this.balanceSaves = saves;
+            this.balanceSavesReady = true;
             this.notify();
         });
     }
@@ -670,6 +708,90 @@ export class GameStore {
         this.tagIcons = entries;
         this.notify();
         void replaceTagIconsRemote(entries).catch((error) => console.error("setTagIcons → Firestore", error));
+    }
+
+    /** Everything a BalanceSave captures, read straight from live state — see BalanceSavePayload for why `sources`
+     *  is deliberately excluded. */
+    currentBalancePayload(): BalanceSavePayload {
+        return {
+            items: this.allItems,
+            translations: this.translations,
+            mechanics: this.mechanics,
+            upgradeChains: this.upgradeChains,
+            replaceRules: this.replaceRules,
+            enumValues: this.enumValues,
+            builds: this.builds,
+            itemIcons: this.itemIcons,
+            customParamValues: this.customParamValues,
+            descriptionSettings: this.descriptionSettings,
+            translationOverrides: this.translationOverrides,
+            exportedOverrides: this.exportedOverrides,
+            glossary: this.glossary,
+            tagIcons: this.tagIcons,
+        };
+    }
+
+    /** False whenever the live balance differs from whichever BalanceSave was last created or restored in this
+     *  browser — SavesPage uses this to decide whether restoring a *different* save needs the "are you sure, your
+     *  current changes aren't saved" warning. Not a true "does this match *any* save" check (that would need
+     *  fetching every save's full payload) — see localStore.ts's getLastSavedBalanceSnapshot doc comment. */
+    isCurrentBalanceSaved(): boolean {
+        return canonicalStringify(this.currentBalancePayload()) === getLastSavedBalanceSnapshot();
+    }
+
+    async createBalanceSave(name: string, description: string): Promise<BalanceSaveMeta> {
+        const payload = this.currentBalancePayload();
+        const meta = await createBalanceSaveRemote(name, description, payload);
+        saveLastSavedBalanceSnapshot(canonicalStringify(payload));
+        return meta;
+    }
+
+    deleteBalanceSave(id: string): void {
+        void deleteBalanceSaveRemote(id).catch((error) => console.error("deleteBalanceSave → Firestore", error));
+    }
+
+    /**
+     * Full replace with a previously-saved balance — mirrors importSnapshot's shape exactly (config/translations
+     * go to this browser's local importCache only, same as a fresh Google Sheets download would; everything else
+     * is shared Firestore state and gets pushed for every collaborator to see). `sources` is read back from the
+     * *current* live value rather than touched at all, since BalanceSavePayload never captured it.
+     */
+    async restoreBalanceSave(id: string): Promise<void> {
+        const payload = await fetchBalanceSavePayloadRemote(id);
+
+        this.allItems = payload.items;
+        this.translations = payload.translations;
+        this.mechanics = payload.mechanics;
+        this.upgradeChains = payload.upgradeChains;
+        this.replaceRules = payload.replaceRules;
+        this.enumValues = payload.enumValues;
+        this.rebuildDerivedCaches();
+        this.importedAt = new Date().toISOString();
+        saveImportCache({
+            items: payload.items,
+            translations: payload.translations,
+            mechanics: payload.mechanics,
+            upgradeChains: payload.upgradeChains,
+            replaceRules: payload.replaceRules,
+            enumValues: payload.enumValues,
+        });
+
+        saveLastSavedBalanceSnapshot(canonicalStringify(payload));
+        this.notify();
+
+        await Promise.all([
+            replaceAllBuilds(payload.builds),
+            replaceSharedState({
+                itemIcons: payload.itemIcons,
+                customParamValues: payload.customParamValues,
+                sources: this.sources,
+                descriptionSettings: payload.descriptionSettings,
+                translationOverrides: payload.translationOverrides,
+                exportedOverrides: payload.exportedOverrides,
+            }),
+            replaceGlossaryRemote(payload.glossary),
+            replaceTagIconsRemote(payload.tagIcons),
+        ]);
     }
 
     exportSnapshot(): void {

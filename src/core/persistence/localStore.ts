@@ -108,6 +108,21 @@ export function exportSnapshot(state: PersistedState): void {
     URL.revokeObjectURL(url);
 }
 
+/**
+ * Tracks the canonical JSON (see GameStore's canonicalStringify) of whichever BalanceSavePayload was most
+ * recently created or restored in this browser — compared against the current live state to decide whether
+ * restoring a different save needs the "current balance isn't saved" warning (see GameStore.isCurrentBalanceSaved).
+ * Deliberately local/per-browser, not Firestore — this is bookkeeping about *this browser's* editing session, not
+ * shared team data.
+ */
+export function getLastSavedBalanceSnapshot(): string | null {
+    return localStorage.getItem(storageKey("lastSavedBalanceSnapshot"));
+}
+
+export function saveLastSavedBalanceSnapshot(canonicalJson: string): void {
+    localStorage.setItem(storageKey("lastSavedBalanceSnapshot"), canonicalJson);
+}
+
 /** Pure parse, no side effects — the caller decides where the parsed state gets written (Firestore, now). */
 export async function parseSnapshotFile(file: File): Promise<PersistedState> {
     const text = await file.text();
