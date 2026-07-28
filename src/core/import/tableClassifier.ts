@@ -10,7 +10,9 @@ export type TableType =
     | "UpgradeChains"
     | "Enums"
     | "ReplaceItem"
-    | "ReplaceOnTrigger";
+    | "ReplaceOnTrigger"
+    | "Packs"
+    | "DecksShop";
 
 export interface ClassifiedTable {
     type: TableType;
@@ -67,6 +69,16 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
             return { type: "ReplaceOnTrigger", table };
         }
         return { type: "ReplaceItem", table };
+    }
+
+    // Shop packs (draws N items from a named deck) and the decks themselves — real column names, checked before
+    // the generic Id-column fallback since neither PackId nor DeckId matches findIdColumn's exact id/itemid check.
+    if (hasAllColumns(headers, ["PackId", "SourceDeckId", "ItemNumber"])) {
+        return { type: "Packs", table };
+    }
+
+    if (hasAllColumns(headers, ["DeckId", "Item"])) {
+        return { type: "DecksShop", table };
     }
 
     const idColumn = findIdColumn(headers);

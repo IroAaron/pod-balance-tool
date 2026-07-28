@@ -30,12 +30,15 @@ function ConstantsForm() {
         <Stack spacing={3} sx={{ maxWidth: 640 }}>
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>
-                    <Typography variant="h6">Вероятность появления скейл-челов</Typography>
+                    <Typography variant="h6">Вероятность появления в магазине (P)</Typography>
                     <Typography variant="body2" color="text.secondary">
-                        P в формуле силы предмета — используется одинаково для всех предметов.
+                        Теперь P считается автоматически по-предметно из таблиц «Магазин → Паки/Колоды» (шанс
+                        попасться хотя бы раз за визит в магазин). Значение ниже — запасное, используется только
+                        для предметов, для которых авто-расчёт недоступен (нет в магазинных колодах, или Packs/
+                        DecksShop ещё не загружены).
                     </Typography>
                     <TextField
-                        label="P"
+                        label="P (запасное значение)"
                         type="number"
                         value={draft.scaleChelAppearanceProbability}
                         onChange={(event) => {

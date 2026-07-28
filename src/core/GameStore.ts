@@ -4,6 +4,8 @@ import type { Translation } from "./models/Translation";
 import type { MechanicRow } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
 import type { ReplaceRule } from "./models/ReplaceRule";
+import type { Pack } from "./models/Pack";
+import type { ShopDeckEntry } from "./models/ShopDeck";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
 import { DEFAULT_BALANCE_CONFIG, type BalanceConfig } from "./models/BalanceConfig";
@@ -83,6 +85,11 @@ export class GameStore {
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
+
+    /** Shop packs + their source decks (Packs/DecksShop sheets) — see domain/shopProbability.ts. */
+    packs: Pack[] = [];
+
+    shopDecks: ShopDeckEntry[] = [];
 
     /** Synced live from Firestore's `builds` collection — see initRemoteSync(). */
     builds: Build[] = [];
@@ -168,6 +175,8 @@ export class GameStore {
             this.upgradeChains = cache.importCache.upgradeChains ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
+            this.packs = cache.importCache.packs ?? [];
+            this.shopDecks = cache.importCache.shopDecks ?? [];
         }
 
         this.rebuildDerivedCaches();
@@ -420,6 +429,8 @@ export class GameStore {
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
+            this.packs = mergeById(this.packs, result.data.packs);
+            this.shopDecks = mergeById(this.shopDecks, result.data.shopDecks);
         } else {
             if (options?.scope !== "translations") {
                 this.allItems = result.data.items;
@@ -427,6 +438,8 @@ export class GameStore {
                 this.upgradeChains = result.data.upgradeChains;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
+                this.packs = result.data.packs;
+                this.shopDecks = result.data.shopDecks;
             }
             if (options?.scope !== "config") {
                 this.translations = result.data.translations;
@@ -443,6 +456,8 @@ export class GameStore {
             upgradeChains: this.upgradeChains,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
+            packs: this.packs,
+            shopDecks: this.shopDecks,
         });
     }
 
@@ -505,6 +520,8 @@ export class GameStore {
         this.upgradeChains = [];
         this.replaceRules = [];
         this.enumValues = {};
+        this.packs = [];
+        this.shopDecks = [];
         this.rebuildDerivedCaches();
         this.importReport = null;
         this.importedAt = null;
@@ -701,6 +718,8 @@ export class GameStore {
                 upgradeChains: this.upgradeChains,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
+                packs: this.packs,
+                shopDecks: this.shopDecks,
             },
             importCacheTimestamp: this.importedAt,
         });
@@ -731,6 +750,8 @@ export class GameStore {
             this.upgradeChains = state.importCache.upgradeChains ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
+            this.packs = state.importCache.packs ?? [];
+            this.shopDecks = state.importCache.shopDecks ?? [];
             saveImportCache(state.importCache);
             this.rebuildDerivedCaches();
         }

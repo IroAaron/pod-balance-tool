@@ -113,4 +113,42 @@ describe("computeItemPowers", () => {
         expect(sharedPower.buildPresence).toHaveLength(2);
         expect(sharedPower.buildCoefficientSum).toBe(6); // depth 1 in both builds: 3 + 3
     });
+
+    it("uses an auto-computed shop-appearance probability when present, falling back to the manual constant otherwise", () => {
+        const withShopData = makeItem("with-shop-data", { valueMin: 4, valueMax: 4 });
+        const withoutShopData = makeItem("without-shop-data", { valueMin: 4, valueMax: 4 });
+        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0 }, scaleChelAppearanceProbability: 0.1 };
+
+        const shopAppearances = new Map([
+            [
+                "with-shop-data",
+                {
+                    itemId: "with-shop-data",
+                    packs: [{ packId: "shop_card_x", deckId: "deck_x", withinPackProbability: 0.5 }],
+                    perSlotProbability: 0.5,
+                    perVisitProbability: 0.4,
+                },
+            ],
+        ]);
+
+        const powers = computeItemPowers(
+            [withShopData, withoutShopData],
+            [],
+            [],
+            [],
+            [],
+            balanceConfig,
+            shopAppearances
+        );
+
+        const withData = powers.get("with-shop-data")!;
+        expect(withData.probabilityIsAuto).toBe(true);
+        expect(withData.probability).toBeCloseTo(0.4);
+        expect(withData.probabilitySources).toEqual([{ packId: "shop_card_x", deckId: "deck_x", withinPackProbability: 0.5 }]);
+
+        const withoutData = powers.get("without-shop-data")!;
+        expect(withoutData.probabilityIsAuto).toBe(false);
+        expect(withoutData.probability).toBeCloseTo(0.1); // falls back to balanceConfig's manual constant
+        expect(withoutData.probabilitySources).toEqual([]);
+    });
 });

@@ -5,6 +5,7 @@ import type { ReplaceRule } from "../models/ReplaceRule";
 import type { UpgradeChain } from "../models/UpgradeChain";
 import type { BalanceConfig } from "../models/BalanceConfig";
 import { computeCascadeLevels } from "./relations";
+import type { ItemShopAppearance } from "./shopProbability";
 
 /** Same comma-decimal-tolerant number parsing normalize.ts's parseOptionalNumber uses, but defaulting to 0 (not
  *  undefined) — every term of the power formula treats a missing value as "contributes nothing", not "unknown". */
@@ -44,9 +45,17 @@ export interface ItemPower {
 
     averageValue: number;
 
-    /** balanceConfig.scaleChelAppearanceProbability (P), copied here so a hover tooltip can show it next to the
-     *  rest of the breakdown without re-reading the store. */
+    /** P — either auto-computed per item from real shop pack/deck data (see domain/shopProbability.ts), or
+     *  balanceConfig.scaleChelAppearanceProbability as a fallback when there's no computed value for this item
+     *  (not present in any shop deck, or Packs/DecksShop not imported yet). See probabilityIsAuto. */
     probability: number;
+
+    /** True when `probability` came from computeShopAppearanceProbabilities, false when it fell back to the
+     *  manual balanceConfig constant. */
+    probabilityIsAuto: boolean;
+
+    /** Populated only when probabilityIsAuto — every shop pack that contributed to this item's probability. */
+    probabilitySources: { packId: string; deckId: string; withinPackProbability: number }[];
 
     /** averageValue × (1 + P). */
     probabilityTerm: number;
@@ -73,10 +82,11 @@ export interface ItemPower {
  *
  *   (MoneyValue + avg) + avg × (1 + P) + avg × Σ(coefficient at this item's depth, once per build it's in)
  *
- * where avg = (ValueMin + ValueMax) / 2, P = balanceConfig.scaleChelAppearanceProbability, and the per-build
- * coefficient sum comes from classifying the item into each build it belongs to via computeCascadeLevels (the
- * same depth/"ступень" concept already used for the "Дерево связей" build-detail view) and looking up
- * balanceConfig.depthCoefficients[depth] for each one.
+ * where avg = (ValueMin + ValueMax) / 2, P is per-item — auto-computed from real shop data when `shopAppearances`
+ * has an entry for this item (see domain/shopProbability.ts), otherwise balanceConfig.scaleChelAppearanceProbability
+ * as a manual fallback — and the per-build coefficient sum comes from classifying the item into each build it
+ * belongs to via computeCascadeLevels (the same depth/"ступень" concept already used for the "Дерево связей"
+ * build-detail view) and looking up balanceConfig.depthCoefficients[depth] for each one.
  *
  * computeCascadeLevels is run once per build (not once per item×build) — for typical dataset sizes (hundreds of
  * items, dozens of builds) this is cheap enough for a page-level useMemo; callers should still memoize on their
@@ -89,6 +99,7 @@ export function computeItemPowers(
     replaceRules: ReplaceRule[],
     upgradeChains: UpgradeChain[],
     balanceConfig: BalanceConfig,
+    shopAppearances?: Map<string, ItemShopAppearance>,
     includeMoneyValueRoots = false
 ): Map<string, ItemPower> {
     const knownIds = new Set(items.map((item) => item.id));
@@ -113,11 +124,12 @@ export function computeItemPowers(
     }
 
     const powers = new Map<string, ItemPower>();
-    const probability = balanceConfig.scaleChelAppearanceProbability;
 
     for (const item of items) {
         const moneyValue = moneyValueOf(item);
         const averageValue = averageValueOf(item);
+        const autoAppearance = shopAppearances?.get(item.id);
+        const probability = autoAppearance?.perVisitProbability ?? balanceConfig.scaleChelAppearanceProbability;
         const probabilityTerm = averageValue * (1 + probability);
         const buildPresence = presenceByItem.get(item.id) ?? [];
         const buildCoefficientSum = buildPresence.reduce((sum, entry) => sum + entry.coefficient, 0);
@@ -127,6 +139,8 @@ export function computeItemPowers(
             moneyValue,
             averageValue,
             probability,
+            probabilityIsAuto: autoAppearance !== undefined,
+            probabilitySources: autoAppearance?.packs ?? [],
             probabilityTerm,
             buildPresence,
             buildCoefficientSum,

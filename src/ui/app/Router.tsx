@@ -10,6 +10,7 @@ import GlossaryPage from "../pages/Glossary/GlossaryPage";
 import GraphPage from "../pages/Graph/GraphPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
 import BalancePage from "../pages/Balance/BalancePage";
+import ShopPage from "../pages/Shop/ShopPage";
 import SettingsPage from "../pages/Settings/SettingsPage";
 
 // Keyed by :id so navigating between two detail pages of the same route
@@ -48,6 +49,7 @@ export default function AppRouter() {
             <Route path="/glossary" element={<GlossaryPage />} />
             <Route path="/graph" element={<GraphPage />} />
             <Route path="/balance" element={<BalancePage />} />
+            <Route path="/shop" element={<ShopPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<NotFoundPage />} />

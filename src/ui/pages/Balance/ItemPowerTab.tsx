@@ -23,6 +23,7 @@ import DetailModal from "../../components/DetailModal";
 import ItemDetailPage from "../Items/ItemDetailPage";
 import { computeUpgradeTierIds } from "../../../core/domain/relations";
 import { computeItemPowers, type ItemPower } from "../../../core/domain/balance";
+import { computeShopAppearanceProbabilities } from "../../../core/domain/shopProbability";
 import type { Item } from "../../../core/models/Item";
 
 type SortKey = "power" | "name";
@@ -42,8 +43,18 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
             <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
             <Typography variant="caption">avg = (Min+Max)/2: {fmt(power.averageValue)}</Typography>
             <Typography variant="caption">
-                P: {fmt(power.probability)} → avg×(1+P) = {fmt(power.probabilityTerm)}
+                P: {fmt(power.probability)} ({power.probabilityIsAuto ? "авто, по магазинным пакам" : "константа из «Констант»"})
+                → avg×(1+P) = {fmt(power.probabilityTerm)}
             </Typography>
+            {power.probabilitySources.length > 0 && (
+                <Stack sx={{ mt: 0.5 }}>
+                    {power.probabilitySources.map((source, index) => (
+                        <Typography key={`${source.packId}-${index}`} variant="caption">
+                            • пак «{source.packId}» (колода {source.deckId}) — {fmt(source.withinPackProbability)}
+                        </Typography>
+                    ))}
+                </Stack>
+            )}
             <Typography variant="caption">
                 Σ коэф. по билдам: {fmt(power.buildCoefficientSum)} → avg×Σ = {fmt(power.buildTerm)}
             </Typography>
@@ -83,6 +94,11 @@ export default function ItemPowerTab() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.items, store.translations, store.upgradeChains]);
 
+    const shopAppearances = useMemo(
+        () => computeShopAppearanceProbabilities(store.packs, store.shopDecks),
+        [store.packs, store.shopDecks]
+    );
+
     const powers = useMemo(
         () =>
             computeItemPowers(
@@ -91,9 +107,10 @@ export default function ItemPowerTab() {
                 store.mechanics,
                 store.replaceRules,
                 store.upgradeChains,
-                store.balanceConfig
+                store.balanceConfig,
+                shopAppearances
             ),
-        [baseItems, store.builds, store.mechanics, store.replaceRules, store.upgradeChains, store.balanceConfig]
+        [baseItems, store.builds, store.mechanics, store.replaceRules, store.upgradeChains, store.balanceConfig, shopAppearances]
     );
 
     const filtered = useMemo(() => {

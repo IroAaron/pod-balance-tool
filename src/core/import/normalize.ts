@@ -5,6 +5,8 @@ import type { Translation } from "../models/Translation";
 import type { MechanicRow, MechanicTableName } from "../models/Mechanic";
 import type { UpgradeChain } from "../models/UpgradeChain";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
+import type { Pack } from "../models/Pack";
+import type { ShopDeckEntry } from "../models/ShopDeck";
 import { tableNameOf } from "./tableNames";
 
 export interface NormalizedData {
@@ -20,6 +22,12 @@ export interface NormalizedData {
 
     /** Valid values per parameter dimension, as curated in the Enums sheet. */
     enumValues: Record<string, string[]>;
+
+    /** Shop packs — see domain/shopProbability.ts. */
+    packs: Pack[];
+
+    /** Shop pack "decks" (item pools) — see domain/shopProbability.ts. */
+    shopDecks: ShopDeckEntry[];
 }
 
 export interface ImportWarning {
@@ -184,6 +192,56 @@ function normalizeReplaceRuleTable(table: ParsedTable, source: ReplaceRuleSource
         });
 }
 
+function normalizePacksTable(table: ParsedTable): Pack[] {
+    const packIdColumn = findColumn(table.headers, ["PackId"]);
+    const sourceDeckColumn = findColumn(table.headers, ["SourceDeckId"]);
+    if (!packIdColumn || !sourceDeckColumn) return [];
+
+    const costColumn = findColumn(table.headers, ["Cost"]);
+    const itemsToTakeColumn = findColumn(table.headers, ["ItemsToTake"]);
+    const useWeightsColumn = findColumn(table.headers, ["UseWeights"]);
+    const allowDuplicatesColumn = findColumn(table.headers, ["AllowDuplicates"]);
+    const itemNumberColumn = findColumn(table.headers, ["ItemNumber"]);
+    const itemCountColumn = findColumn(table.headers, ["ItemCount"]);
+    const itemWeightColumn = findColumn(table.headers, ["ItemWeight"]);
+    const itemCostColumn = findColumn(table.headers, ["ItemCost"]);
+
+    return table.rows
+        .filter((row) => (row[packIdColumn] ?? "").trim() !== "" && (row[sourceDeckColumn] ?? "").trim() !== "")
+        .map((row, index): Pack => ({
+            id: `Packs:${row[packIdColumn].trim()}:${index}`,
+            packId: row[packIdColumn].trim(),
+            sourceDeckId: row[sourceDeckColumn].trim(),
+            cost: costColumn ? parseOptionalNumber(row[costColumn]) : undefined,
+            itemsToTake: itemsToTakeColumn ? parseOptionalNumber(row[itemsToTakeColumn]) : undefined,
+            useWeights: useWeightsColumn ? Boolean((row[useWeightsColumn] ?? "").trim()) : undefined,
+            allowDuplicates: allowDuplicatesColumn ? Boolean((row[allowDuplicatesColumn] ?? "").trim()) : undefined,
+            itemNumber: itemNumberColumn ? parseOptionalNumber(row[itemNumberColumn]) : undefined,
+            itemCount: itemCountColumn ? parseOptionalNumber(row[itemCountColumn]) : undefined,
+            itemWeight: itemWeightColumn ? parseOptionalNumber(row[itemWeightColumn]) : undefined,
+            itemCost: itemCostColumn ? parseOptionalNumber(row[itemCostColumn]) : undefined,
+        }));
+}
+
+function normalizeDecksShopTable(table: ParsedTable): ShopDeckEntry[] {
+    const deckIdColumn = findColumn(table.headers, ["DeckId"]);
+    const itemColumn = findColumn(table.headers, ["Item"]);
+    if (!deckIdColumn || !itemColumn) return [];
+
+    const weightColumn = findColumn(table.headers, ["Weight"]);
+    const costColumn = findColumn(table.headers, ["Cost"]);
+
+    return table.rows
+        .filter((row) => (row[deckIdColumn] ?? "").trim() !== "" && (row[itemColumn] ?? "").trim() !== "")
+        .map((row, index): ShopDeckEntry => ({
+            id: `DecksShop:${row[deckIdColumn].trim()}:${index}`,
+            deckId: row[deckIdColumn].trim(),
+            itemId: row[itemColumn].trim(),
+            weight: weightColumn ? parseOptionalNumber(row[weightColumn]) : undefined,
+            cost: costColumn ? parseOptionalNumber(row[costColumn]) : undefined,
+        }));
+}
+
 /**
  * The Enums sheet lists valid values per parameter dimension as independent,
  * ragged columns (one column per dimension, N unrelated values stacked down
@@ -226,6 +284,8 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const upgradeChains: UpgradeChain[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
+    const packs: Pack[] = [];
+    const shopDecks: ShopDeckEntry[] = [];
     const warnings: ImportWarning[] = [];
 
     for (const { type, table } of classified) {
@@ -265,6 +325,24 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             replaceRules.push(...normalized);
+        } else if (type === "Packs") {
+            const normalized = normalizePacksTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдены колонки PackId/SourceDeckId — таблица паков пропущена",
+                });
+            }
+            packs.push(...normalized);
+        } else if (type === "DecksShop") {
+            const normalized = normalizeDecksShopTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдены колонки DeckId/Item — таблица колод магазина пропущена",
+                });
+            }
+            shopDecks.push(...normalized);
         } else if (type === "Enums") {
             mergeEnumValues(enumValues, normalizeEnumsTable(table));
         } else if (type === "Unknown") {
@@ -299,7 +377,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     }
 
     return {
-        data: { items: dedupedItems, translations, mechanics, upgradeChains, replaceRules, enumValues },
+        data: { items: dedupedItems, translations, mechanics, upgradeChains, replaceRules, enumValues, packs, shopDecks },
         warnings,
     };
 }
