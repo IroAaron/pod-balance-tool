@@ -18,6 +18,7 @@ export default function EnumField({ field, value, onChange }: Props) {
     const store = useStore();
     const slotProps = tooltipFontSizeSlotProps(store.descriptionSettings.tooltipFontSizePx);
     const [listOpen, setListOpen] = useState(false);
+    const [controlHovered, setControlHovered] = useState(false);
 
     if (!dimension) {
         return <TextField size="small" label={field} value={value} onChange={(e) => onChange(e.target.value)} />;
@@ -50,7 +51,15 @@ export default function EnumField({ field, value, onChange }: Props) {
     if (!dimensionHint) return control;
 
     return (
-        <Tooltip title={dimensionHint} placement="top" arrow slotProps={slotProps} disableHoverListener={listOpen}>
+        <Tooltip
+            title={dimensionHint}
+            placement="top"
+            arrow
+            slotProps={slotProps}
+            open={controlHovered && !listOpen}
+            onOpen={() => setControlHovered(true)}
+            onClose={() => setControlHovered(false)}
+        >
             <Box>{control}</Box>
         </Tooltip>
     );

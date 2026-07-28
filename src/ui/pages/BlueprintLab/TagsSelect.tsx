@@ -16,6 +16,7 @@ export default function TagsSelect({ value, onChange }: Props) {
     const store = useStore();
     const slotProps = tooltipFontSizeSlotProps(store.descriptionSettings.tooltipFontSizePx);
     const [listOpen, setListOpen] = useState(false);
+    const [controlHovered, setControlHovered] = useState(false);
 
     const handleChange = (e: SelectChangeEvent<string[]>) => {
         const next = e.target.value;
@@ -60,7 +61,15 @@ export default function TagsSelect({ value, onChange }: Props) {
     if (!dimensionHint) return select;
 
     return (
-        <Tooltip title={dimensionHint} placement="top" arrow slotProps={slotProps} disableHoverListener={listOpen}>
+        <Tooltip
+            title={dimensionHint}
+            placement="top"
+            arrow
+            slotProps={slotProps}
+            open={controlHovered && !listOpen}
+            onOpen={() => setControlHovered(true)}
+            onClose={() => setControlHovered(false)}
+        >
             <Box>{select}</Box>
         </Tooltip>
     );
