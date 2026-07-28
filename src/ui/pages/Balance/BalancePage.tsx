@@ -48,6 +48,27 @@ function BalanceHelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
                         вероятности суммируются в P. Если предмет ни разу не является корнем билда (например, он
                         только скейлер, а не билд сам по себе), используется запасное значение P из «Констант».
                     </Typography>
+                    <Typography variant="body2">
+                        <b>«Сила (мех.)»</b> — второй, независимый расчёт: у предмета может вообще не быть
+                        MinValue/MaxValue (тогда обычная «Сила» читается как ~0), но при этом он активирует/красит/
+                        спавнит/тегает много всего — это не делает его бесполезным. Формула:
+                    </Typography>
+                    <Typography
+                        variant="body2"
+                        sx={{ fontFamily: "monospace", bgcolor: "action.hover", p: 1.5, borderRadius: 1 }}
+                    >
+                        Сила (мех.) = MoneyValue + avg × Σ(TargetCount по MechAddValue) × Влияние(MechAddValue)
+                        <br />
+                        + Σ(TargetCount по T) × Влияние(T), для каждой другой таблицы механик T
+                        <br />
+                        + avg × Σ(коэф. ступени в каждом билде)
+                    </Typography>
+                    <Typography variant="body2">
+                        avg умножает только слагаемое MechAddValue (единственная таблица механик, которая реально
+                        про значения) — остальные таблицы (MechActivate/MechChangeColor/MechAddItem/MechAddTag)
+                        дают вклад напрямую, даже когда avg = 0. Влияние(T) — вес каждой таблицы, задаётся в
+                        «Константах».
+                    </Typography>
                 </Stack>
             </DialogContent>
         </Dialog>

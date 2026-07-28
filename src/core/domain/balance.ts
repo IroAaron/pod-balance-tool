@@ -5,6 +5,7 @@ import type { ReplaceRule } from "../models/ReplaceRule";
 import type { UpgradeChain } from "../models/UpgradeChain";
 import type { BalanceConfig } from "../models/BalanceConfig";
 import { computeCascadeLevels } from "./relations";
+import { KNOWN_MECHANIC_TABLES } from "./mechanicTables";
 import type { ItemShopAppearance } from "./shopProbability";
 
 /** Same comma-decimal-tolerant number parsing normalize.ts's parseOptionalNumber uses, but defaulting to 0 (not
@@ -80,6 +81,32 @@ export interface ItemPower {
 
     /** (MoneyValue + averageValue) + probabilityTerm + buildTerm. */
     power: number;
+
+    /** Per-mechanic-table breakdown of the "mechanic power" formula (see mechanicPower) — one entry per table
+     *  this item has at least one row of with a real (non-zero) TargetCount, skipped otherwise (same "only real
+     *  contributions" convention as buildPresence/probabilitySources). */
+    mechanicTerms: MechanicInfluenceEntry[];
+
+    /** A second, independent power estimate — see computeItemPowers' doc for the full formula. Meant to surface
+     *  items that score 0 (or near it) on `power` because they have no MoneyValue/ValueMin/ValueMax at all, but
+     *  are still clearly useful because they activate/color/spawn/tag a lot of other things. */
+    mechanicPower: number;
+}
+
+export interface MechanicInfluenceEntry {
+    /** MechanicTableName, e.g. "MechAddValue"/"MechActivate"/... — kept as `string` (not the exact union) so this
+     *  module doesn't need to import models/Mechanic.ts just for the type. */
+    table: string;
+
+    /** Sum of TargetCount across every row this item has in this mechanic table. */
+    targetCountSum: number;
+
+    /** balanceConfig.mechanicInfluence[table] at the time this was computed. */
+    influence: number;
+
+    /** targetCountSum × influence — scaled by averageValue as well, but only for the MechAddValue table (the one
+     *  mechanic table that's actually about *values*, see computeItemPowers' doc). */
+    term: number;
 }
 
 /**
@@ -100,6 +127,20 @@ export interface ItemPower {
  * computeCascadeLevels is run once per build (not once per item×build) — for typical dataset sizes (hundreds of
  * items, dozens of builds) this is cheap enough for a page-level useMemo; callers should still memoize on their
  * own inputs since this recomputes the whole graph for every build on every call.
+ *
+ * Also computes a second, independent estimate (`mechanicPower`/`mechanicTerms` on ItemPower) — added per the
+ * user's own real-world example: an item can have no MoneyValue/ValueMin/ValueMax configured at all (so `power`
+ * above reads as ~0, looking "useless") while still mattering a lot because it activates/recolors/spawns/tags
+ * many other things. Its formula:
+ *
+ *   MoneyValue + avg × Σ(TargetCount over this item's MechAddValue rows) × Влияние(MechAddValue)
+ *              + Σ(TargetCount over this item's rows of table T) × Влияние(T), for every other mechanic table T
+ *              + buildTerm (the same avg × Σ(depth coefficient) term `power` already uses)
+ *
+ * avg only multiplies the MechAddValue term (the one mechanic table that's actually about *values*) — every other
+ * table (MechActivate/MechChangeColor/MechAddItem/MechAddTag) contributes `TargetCount × Влияние(T)` directly, so
+ * an item with avg = 0 still scores real mechanicPower from those. Влияние(T) is a per-table constant the user
+ * sets in "Константы" (balanceConfig.mechanicInfluence).
  */
 export function computeItemPowers(
     items: Item[],
@@ -112,6 +153,19 @@ export function computeItemPowers(
     includeMoneyValueRoots = false
 ): Map<string, ItemPower> {
     const knownIds = new Set(items.map((item) => item.id));
+
+    // itemId -> table -> Σ TargetCount, for the mechanicPower formula. Rows with no/zero TargetCount are simply
+    // never added, so a table with nothing real never shows up in an item's map at all.
+    const targetCountByItemAndTable = new Map<string, Map<string, number>>();
+    for (const row of mechanics) {
+        const targetCount = parseNumberOr0(row.fields.TargetCount);
+        if (targetCount === 0) continue;
+
+        const byTable = targetCountByItemAndTable.get(row.itemId) ?? new Map<string, number>();
+        byTable.set(row.table, (byTable.get(row.table) ?? 0) + targetCount);
+        targetCountByItemAndTable.set(row.itemId, byTable);
+    }
+
     const presenceByItem = new Map<string, BuildPresenceEntry[]>();
     // Populated only for items that are the real root (depth 0) of at least one build — distinguishes "root with
     // zero scalers found" (real 0) from "never a root at all" (falls back to the manual constant), see
@@ -163,6 +217,21 @@ export function computeItemPowers(
         const buildCoefficientSum = buildPresence.reduce((sum, entry) => sum + entry.coefficient, 0);
         const buildTerm = averageValue * buildCoefficientSum;
 
+        const targetCountByTable = targetCountByItemAndTable.get(item.id);
+        const mechanicTerms: MechanicInfluenceEntry[] = [];
+        let mechanicTermsSum = 0;
+        for (const table of KNOWN_MECHANIC_TABLES) {
+            const targetCountSum = targetCountByTable?.get(table) ?? 0;
+            if (targetCountSum === 0) continue;
+
+            const influence = balanceConfig.mechanicInfluence[table] ?? 0;
+            const factor = table === "MechAddValue" ? averageValue : 1;
+            const term = factor * targetCountSum * influence;
+            mechanicTerms.push({ table, targetCountSum, influence, term });
+            mechanicTermsSum += term;
+        }
+        const mechanicPower = moneyValue + mechanicTermsSum + buildTerm;
+
         powers.set(item.id, {
             moneyValue,
             averageValue,
@@ -174,6 +243,8 @@ export function computeItemPowers(
             buildCoefficientSum,
             buildTerm,
             power: moneyValue + averageValue + probabilityTerm + buildTerm,
+            mechanicTerms,
+            mechanicPower,
         });
     }
 

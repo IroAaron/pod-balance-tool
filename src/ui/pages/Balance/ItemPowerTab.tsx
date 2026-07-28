@@ -27,7 +27,7 @@ import { computeItemPowers, type ItemPower } from "../../../core/domain/balance"
 import { computeShopAppearanceProbabilities } from "../../../core/domain/shopProbability";
 import type { Item } from "../../../core/models/Item";
 
-type SortKey = "power" | "name";
+type SortKey = "power" | "mechanicPower" | "name";
 
 type SortDirection = "asc" | "desc";
 
@@ -69,6 +69,38 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
                     ))}
                 </Stack>
             )}
+        </Stack>
+    );
+}
+
+function MechanicPowerTooltipContent({ power }: { power: ItemPower }) {
+    return (
+        <Stack spacing={0.5} sx={{ p: 0.5, maxWidth: 320 }}>
+            <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                Сила (мех.) = MoneyValue + avg×Σ(TargetCount MechAddValue)×Влияние + Σ(TargetCount T)×Влияние(T) +
+                avg×Σкоэф.билдов
+            </Typography>
+            <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
+            {power.mechanicTerms.length > 0 ? (
+                <Stack sx={{ mt: 0.5 }}>
+                    {power.mechanicTerms.map((term, index) => (
+                        <Typography key={`${term.table}-${index}`} variant="caption">
+                            • {term.table}: TargetCount {fmt(term.targetCountSum)} × Влияние {fmt(term.influence)} →{" "}
+                            {fmt(term.term)}
+                        </Typography>
+                    ))}
+                </Stack>
+            ) : (
+                <Typography variant="caption" color="text.secondary">
+                    Нет механик с TargetCount &gt; 0
+                </Typography>
+            )}
+            <Typography variant="caption">
+                Σ коэф. по билдам: {fmt(power.buildCoefficientSum)} → avg×Σ = {fmt(power.buildTerm)}
+            </Typography>
+            <Typography variant="caption" sx={{ fontWeight: 600, mt: 0.5 }}>
+                Итого: {fmt(power.mechanicPower)}
+            </Typography>
         </Stack>
     );
 }
@@ -131,8 +163,9 @@ export default function ItemPowerTab() {
         const sign = sortDirection === "desc" ? -1 : 1;
         return [...result].sort((a, b) => {
             if (sortKey === "name") return sign * resolveName(a).localeCompare(resolveName(b));
-            const powerA = powers.get(a.id)?.power ?? 0;
-            const powerB = powers.get(b.id)?.power ?? 0;
+            const key = sortKey === "mechanicPower" ? "mechanicPower" : "power";
+            const powerA = powers.get(a.id)?.[key] ?? 0;
+            const powerB = powers.get(b.id)?.[key] ?? 0;
             return sign * (powerA - powerB || resolveName(a).localeCompare(resolveName(b)));
         });
         // itemService is a stable method on the long-lived store singleton.
@@ -170,6 +203,7 @@ export default function ItemPowerTab() {
                         sx={{ minWidth: 160 }}
                     >
                         <MenuItem value="power">По силе</MenuItem>
+                        <MenuItem value="mechanicPower">По силе (мех.)</MenuItem>
                         <MenuItem value="name">По названию</MenuItem>
                     </TextField>
 
@@ -196,6 +230,7 @@ export default function ItemPowerTab() {
                             <TableCell>Предмет</TableCell>
                             <TableCell>Id</TableCell>
                             <TableCell align="right">Сила</TableCell>
+                            <TableCell align="right">Сила (мех.)</TableCell>
                         </TableRow>
                     </TableHead>
                     <TableBody>
@@ -233,6 +268,24 @@ export default function ItemPowerTab() {
                                                     onClick={(event) => event.stopPropagation()}
                                                 >
                                                     {fmt(power.power)}
+                                                </Box>
+                                            </Tooltip>
+                                        )}
+                                    </TableCell>
+                                    <TableCell align="right">
+                                        {power && (
+                                            <Tooltip title={<MechanicPowerTooltipContent power={power} />} arrow>
+                                                <Box
+                                                    component="span"
+                                                    sx={{
+                                                        fontWeight: 700,
+                                                        cursor: "help",
+                                                        borderBottom: "1px dotted",
+                                                        borderColor: "text.disabled",
+                                                    }}
+                                                    onClick={(event) => event.stopPropagation()}
+                                                >
+                                                    {fmt(power.mechanicPower)}
                                                 </Box>
                                             </Tooltip>
                                         )}

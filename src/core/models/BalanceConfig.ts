@@ -1,4 +1,5 @@
 import { DEFAULT_MAX_SCALING_DEPTH } from "../domain/relations";
+import { KNOWN_MECHANIC_TABLES } from "../domain/mechanicTables";
 
 /**
  * User-entered balance constants — see BalancePage's "Константы" tab. `depthCoefficients` is keyed by the same
@@ -12,6 +13,12 @@ export interface BalanceConfig {
 
     /** P — probability that a "scaling chel" (character) appears, used directly in the item power formula. */
     scaleChelAppearanceProbability: number;
+
+    /** Per-mechanic-table "influence" weight, keyed by MechanicTableName ("MechAddValue", "MechActivate", ...) —
+     *  see domain/balance.ts's computeItemPowers "mechanic power" formula. Lets an item with no MinValue/MaxValue
+     *  at all (so 0 in the original power formula) still register as useful/strong when it activates a lot of
+     *  other things. */
+    mechanicInfluence: Record<string, number>;
 }
 
 export const DEFAULT_BALANCE_CONFIG: BalanceConfig = {
@@ -19,4 +26,5 @@ export const DEFAULT_BALANCE_CONFIG: BalanceConfig = {
         Array.from({ length: DEFAULT_MAX_SCALING_DEPTH + 1 }, (_, depth) => [depth, 0])
     ),
     scaleChelAppearanceProbability: 0,
+    mechanicInfluence: Object.fromEntries(KNOWN_MECHANIC_TABLES.map((table) => [table, 0])),
 };

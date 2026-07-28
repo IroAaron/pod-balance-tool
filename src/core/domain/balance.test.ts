@@ -53,6 +53,7 @@ describe("computeItemPowers", () => {
         const balanceConfig: BalanceConfig = {
             depthCoefficients: { 0: 1, 1: 2 },
             scaleChelAppearanceProbability: 0.5,
+            mechanicInfluence: {},
         };
 
         const powers = computeItemPowers([root, booster, unrelated], [build], [payoff], [], [], balanceConfig);
@@ -101,7 +102,7 @@ describe("computeItemPowers", () => {
 
         const buildA: Build = { id: "build-a", name: "A", items: ["root", "shared"] };
         const buildB: Build = { id: "build-b", name: "B", items: ["rootB", "shared"] };
-        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 3 }, scaleChelAppearanceProbability: 0 };
+        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 3 }, scaleChelAppearanceProbability: 0, mechanicInfluence: {} };
 
         const powers = computeItemPowers(
             [root, rootB, shared],
@@ -129,7 +130,7 @@ describe("computeItemPowers", () => {
             fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
         };
         const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
-        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.1 };
+        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.1, mechanicInfluence: {} };
 
         // scaler's OWN shop probability (root itself has none in this map — the root's own appearance is
         // irrelevant to its P, only its scaler's is).
@@ -164,7 +165,7 @@ describe("computeItemPowers", () => {
             fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
         };
         const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
-        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.9 };
+        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.9, mechanicInfluence: {} };
 
         // No shopAppearances passed at all this time.
         const powers = computeItemPowers([root, scaler], [build], [payoff], [], [], balanceConfig);
@@ -172,5 +173,68 @@ describe("computeItemPowers", () => {
         const rootPower = powers.get("root")!;
         expect(rootPower.probabilityIsAuto).toBe(true);
         expect(rootPower.probability).toBe(0); // real root, just no scaler shop data — not the 0.9 fallback
+    });
+
+    it("mechanicPower lets a valueless item (avg=0) still score real power from its mechanics' TargetCount × Влияние", () => {
+        // No ValueMin/ValueMax/MoneyValue at all — `power` would read as ~0, but this item activates a lot.
+        const activator = makeItem("activator", { valueMin: 0, valueMax: 0, raw: {} });
+
+        const activateRow: MechanicRow = {
+            id: "activator-activate-1",
+            table: "MechActivate",
+            itemId: "activator",
+            fields: { TargetCount: "3" },
+        };
+        // A second row of the same table — sums into the same table's targetCountSum.
+        const activateRow2: MechanicRow = {
+            id: "activator-activate-2",
+            table: "MechActivate",
+            itemId: "activator",
+            fields: { TargetCount: "2" },
+        };
+        const tagRow: MechanicRow = {
+            id: "activator-tag-1",
+            table: "MechAddTag",
+            itemId: "activator",
+            fields: { TargetCount: "1" },
+        };
+
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: {},
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: { MechActivate: 2, MechAddTag: 5, MechAddValue: 100 }, // MechAddValue unused here
+        };
+
+        const powers = computeItemPowers([activator], [], [activateRow, activateRow2, tagRow], [], [], balanceConfig);
+        const power = powers.get("activator")!;
+
+        expect(power.power).toBe(0); // the original formula sees nothing here — avg=0, no build presence, P=0 fallback
+        expect(power.mechanicTerms).toEqual([
+            { table: "MechActivate", targetCountSum: 5, influence: 2, term: 10 }, // (3+2) × 2, no avg factor
+            { table: "MechAddTag", targetCountSum: 1, influence: 5, term: 5 },
+        ]);
+        expect(power.mechanicPower).toBe(15); // MoneyValue(0) + 10 + 5 + buildTerm(0)
+    });
+
+    it("mechanicPower's MechAddValue term is scaled by averageValue, unlike every other mechanic table", () => {
+        const item = makeItem("item", { valueMin: 2, valueMax: 8, raw: {} }); // avg = 5
+
+        const row: MechanicRow = {
+            id: "item-addvalue-1",
+            table: "MechAddValue",
+            itemId: "item",
+            fields: { TargetCount: "4" },
+        };
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: {},
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: { MechAddValue: 3 },
+        };
+
+        const powers = computeItemPowers([item], [], [row], [], [], balanceConfig);
+        const power = powers.get("item")!;
+
+        expect(power.mechanicTerms).toEqual([{ table: "MechAddValue", targetCountSum: 4, influence: 3, term: 60 }]); // 5 × 4 × 3
+        expect(power.mechanicPower).toBe(60);
     });
 });
