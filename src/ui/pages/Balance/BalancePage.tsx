@@ -57,17 +57,20 @@ function BalanceHelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
                         variant="body2"
                         sx={{ fontFamily: "monospace", bgcolor: "action.hover", p: 1.5, borderRadius: 1 }}
                     >
-                        Сила (мех.) = MoneyValue + avg × Σ(TargetCount по MechAddValue) × Влияние(MechAddValue)
+                        Сила (мех.) = [MoneyValue + avg × Σ(TargetCount по MechAddValue) × Влияние(MechAddValue)
                         <br />
                         + Σ(TargetCount по T) × Влияние(T), для каждой другой таблицы механик T
                         <br />
-                        + avg × Σ(коэф. ступени в каждом билде)
+                        + avg × Σ(коэф. ступени в каждом билде)] × P
                     </Typography>
                     <Typography variant="body2">
                         avg умножает только слагаемое MechAddValue (единственная таблица механик, которая реально
                         про значения) — остальные таблицы (MechActivate/MechChangeColor/MechAddItem/MechAddTag)
                         дают вклад напрямую, даже когда avg = 0. Влияние(T) — вес каждой таблицы, задаётся в
-                        «Константах».
+                        «Константах». Вся сумма в скобках домножается на то же самое P, что и в обычной «Силе» —
+                        сумму вероятностей появления скейлеров этого предмета (см. выше): номинальное влияние
+                        механик считается полностью реализованным только если чел, который его создаёт, реально
+                        может выпасть в игре.
                     </Typography>
                 </Stack>
             </DialogContent>

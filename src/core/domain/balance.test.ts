@@ -199,21 +199,25 @@ describe("computeItemPowers", () => {
             fields: { TargetCount: "1" },
         };
 
+        // Neither item is a build root here (no builds passed), so P falls back to this manual constant — set to
+        // 1 so mechanicPower === mechanicPowerBeforeProbability, keeping this test's focus on the term math (the
+        // multiplication itself is covered by its own test below).
         const balanceConfig: BalanceConfig = {
             depthCoefficients: {},
-            scaleChelAppearanceProbability: 0,
+            scaleChelAppearanceProbability: 1,
             mechanicInfluence: { MechActivate: 2, MechAddTag: 5, MechAddValue: 100 }, // MechAddValue unused here
         };
 
         const powers = computeItemPowers([activator], [], [activateRow, activateRow2, tagRow], [], [], balanceConfig);
         const power = powers.get("activator")!;
 
-        expect(power.power).toBe(0); // the original formula sees nothing here — avg=0, no build presence, P=0 fallback
+        expect(power.power).toBe(0); // the original formula sees nothing here — avg=0, no build presence
         expect(power.mechanicTerms).toEqual([
             { table: "MechActivate", targetCountSum: 5, influence: 2, term: 10 }, // (3+2) × 2, no avg factor
             { table: "MechAddTag", targetCountSum: 1, influence: 5, term: 5 },
         ]);
-        expect(power.mechanicPower).toBe(15); // MoneyValue(0) + 10 + 5 + buildTerm(0)
+        expect(power.mechanicPowerBeforeProbability).toBe(15); // MoneyValue(0) + 10 + 5 + buildTerm(0)
+        expect(power.mechanicPower).toBe(15); // × P(1)
     });
 
     it("mechanicPower's MechAddValue term is scaled by averageValue, unlike every other mechanic table", () => {
@@ -227,7 +231,7 @@ describe("computeItemPowers", () => {
         };
         const balanceConfig: BalanceConfig = {
             depthCoefficients: {},
-            scaleChelAppearanceProbability: 0,
+            scaleChelAppearanceProbability: 1, // never a build root here → P falls back to this; see test above
             mechanicInfluence: { MechAddValue: 3 },
         };
 
@@ -236,5 +240,52 @@ describe("computeItemPowers", () => {
 
         expect(power.mechanicTerms).toEqual([{ table: "MechAddValue", targetCountSum: 4, influence: 3, term: 60 }]); // 5 × 4 × 3
         expect(power.mechanicPower).toBe(60);
+    });
+
+    it("mechanicPower is multiplied by the item's own P (same value as `power`'s P) — scalers appearing scales down raw mechanical influence", () => {
+        // Real ValueMin/ValueMax range required for isEligiblePayoffRow to treat "root" as a real build root at
+        // all (see the earlier "excludes MainValue payoffs..." test in relations.test.ts) — chosen at 1/1 (not
+        // 0/0) specifically so root is still recognized as a root, while contributing nothing to
+        // mechanicPowerBeforeProbability (no MechAddValue row here, so avg never enters that formula).
+        const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: {} });
+        const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
+
+        const payoff: MechanicRow = {
+            id: "root-payoff",
+            table: "MechAddValue",
+            itemId: "root",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const activateRow: MechanicRow = {
+            id: "root-activate-1",
+            table: "MechActivate",
+            itemId: "root",
+            fields: { TargetCount: "10" },
+        };
+        const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: {},
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: { MechActivate: 1 },
+        };
+        // scaler's own shop probability — this becomes root's P (0.25), auto-computed since root is a build root.
+        const shopAppearances = new Map([
+            ["scaler", { itemId: "scaler", packs: [], perSlotProbability: 0.25, perVisitProbability: 0.25 }],
+        ]);
+
+        const powers = computeItemPowers(
+            [root, scaler],
+            [build],
+            [payoff, activateRow],
+            [],
+            [],
+            balanceConfig,
+            shopAppearances
+        );
+        const power = powers.get("root")!;
+
+        expect(power.probability).toBeCloseTo(0.25);
+        expect(power.mechanicPowerBeforeProbability).toBe(10); // MoneyValue(0) + TargetCount(10)×Влияние(1)
+        expect(power.mechanicPower).toBeCloseTo(2.5); // 10 × 0.25
     });
 });

@@ -87,9 +87,16 @@ export interface ItemPower {
      *  contributions" convention as buildPresence/probabilitySources). */
     mechanicTerms: MechanicInfluenceEntry[];
 
+    /** MoneyValue + Σ mechanicTerms + buildTerm — the mechanic formula's subtotal *before* being scaled by P (see
+     *  mechanicPower). */
+    mechanicPowerBeforeProbability: number;
+
     /** A second, independent power estimate — see computeItemPowers' doc for the full formula. Meant to surface
      *  items that score 0 (or near it) on `power` because they have no MoneyValue/ValueMin/ValueMax at all, but
-     *  are still clearly useful because they activate/color/spawn/tag a lot of other things. */
+     *  are still clearly useful because they activate/color/spawn/tag a lot of other things. Scaled by the same P
+     *  as `power` (mechanicPowerBeforeProbability × probability) — an item whose scalers are unlikely to actually
+     *  show up in a run has its raw mechanical potential discounted accordingly, same reasoning as `power`'s own
+     *  avg × (1 + P) term. */
     mechanicPower: number;
 }
 
@@ -141,6 +148,12 @@ export interface MechanicInfluenceEntry {
  * table (MechActivate/MechChangeColor/MechAddItem/MechAddTag) contributes `TargetCount × Влияние(T)` directly, so
  * an item with avg = 0 still scores real mechanicPower from those. Влияние(T) is a per-table constant the user
  * sets in "Константы" (balanceConfig.mechanicInfluence).
+ *
+ * The whole subtotal above is then multiplied by the item's own P (the exact same value as `power`'s P — sum of
+ * the shop-appearance probability of this item's scalers, see ItemPower.probability's doc): items connected to
+ * this one by a direct structural edge, cascading down through the scaling graph's tiers. Per the user's own
+ * framing — a mechanic's nominal influence only really counts if the chels that make it happen are actually likely
+ * to show up in a run.
  */
 export function computeItemPowers(
     items: Item[],
@@ -230,7 +243,8 @@ export function computeItemPowers(
             mechanicTerms.push({ table, targetCountSum, influence, term });
             mechanicTermsSum += term;
         }
-        const mechanicPower = moneyValue + mechanicTermsSum + buildTerm;
+        const mechanicPowerBeforeProbability = moneyValue + mechanicTermsSum + buildTerm;
+        const mechanicPower = mechanicPowerBeforeProbability * probability;
 
         powers.set(item.id, {
             moneyValue,
@@ -244,6 +258,7 @@ export function computeItemPowers(
             buildTerm,
             power: moneyValue + averageValue + probabilityTerm + buildTerm,
             mechanicTerms,
+            mechanicPowerBeforeProbability,
             mechanicPower,
         });
     }
