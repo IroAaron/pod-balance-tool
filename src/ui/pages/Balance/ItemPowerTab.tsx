@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import {
+    Autocomplete,
     Box,
     IconButton,
     MenuItem,
@@ -81,6 +82,7 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
 export default function ItemPowerTab() {
     const store = useStore();
     const [query, setQuery] = useState("");
+    const [typeFilter, setTypeFilter] = useState<string[]>([]);
     const [sortKey, setSortKey] = useState<SortKey>("power");
     const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
     const [openItemId, setOpenItemId] = useState<string | null>(null);
@@ -94,6 +96,13 @@ export default function ItemPowerTab() {
         return store.items.filter((item) => !tierIds.has(item.id));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [store.items, store.translations, store.upgradeChains]);
+
+    // Real item types present in the data (not store.paramValues.ItemType, which also aggregates unrelated
+    // mechanic-field values like "PlayerScore" — see BuildsPage's BUILD_TYPE_OPTIONS for the same caveat).
+    const availableTypes = useMemo(
+        () => [...new Set(baseItems.map((item) => item.itemType).filter((type): type is string => Boolean(type)))].sort(),
+        [baseItems]
+    );
 
     const shopAppearances = useMemo(
         () => computeShopAppearanceProbabilities(store.packs, store.shopDecks),
@@ -115,7 +124,10 @@ export default function ItemPowerTab() {
     );
 
     const filtered = useMemo(() => {
-        const result = store.itemService.search(baseItems, query, resolveName);
+        let result = store.itemService.search(baseItems, query, resolveName);
+        if (typeFilter.length > 0) {
+            result = result.filter((item) => item.itemType && typeFilter.includes(item.itemType));
+        }
         const sign = sortDirection === "desc" ? -1 : 1;
         return [...result].sort((a, b) => {
             if (sortKey === "name") return sign * resolveName(a).localeCompare(resolveName(b));
@@ -125,7 +137,7 @@ export default function ItemPowerTab() {
         });
         // itemService is a stable method on the long-lived store singleton.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [baseItems, query, sortKey, sortDirection, powers, resolveName]);
+    }, [baseItems, query, typeFilter, sortKey, sortDirection, powers, resolveName]);
 
     return (
         <Stack spacing={3}>
@@ -136,6 +148,16 @@ export default function ItemPowerTab() {
                     onChange={(event) => setQuery(event.target.value)}
                     size="small"
                     sx={{ minWidth: 220 }}
+                />
+
+                <Autocomplete
+                    multiple
+                    size="small"
+                    options={availableTypes}
+                    value={typeFilter}
+                    onChange={(_event, value) => setTypeFilter(value)}
+                    renderInput={(params) => <TextField {...params} label="Типы" />}
+                    sx={{ minWidth: 240 }}
                 />
 
                 <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
