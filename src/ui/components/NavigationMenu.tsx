@@ -13,5 +13,6 @@ export const menu: NavigationMenuItem[] = [
     { text: "Глоссарий", path: "/glossary", icon: "📖" },
     { text: "Граф", path: "/graph", icon: "🕸" },
     { text: "Аналитика", path: "/analytics", icon: "📊" },
+    { text: "Сохранения", path: "/saves", icon: "💾" },
     { text: "Настройки", path: "/settings", icon: "⚙️" },
 ];
