@@ -87,16 +87,21 @@ export interface ItemPower {
      *  contributions" convention as buildPresence/probabilitySources). */
     mechanicTerms: MechanicInfluenceEntry[];
 
-    /** MoneyValue + Σ mechanicTerms + buildTerm — the mechanic formula's subtotal *before* being scaled by P (see
+    /** Σ mechanicTerms — the raw sum of every table's TargetCount × Влияние term, *before* being boosted by P (see
      *  mechanicPower). */
-    mechanicPowerBeforeProbability: number;
+    mechanicTermsSum: number;
+
+    /** mechanicTermsSum × (1 + P) — see mechanicPower's doc for why (1 + P), not a bare × P. */
+    mechanicTermsWithProbability: number;
 
     /** A second, independent power estimate — see computeItemPowers' doc for the full formula. Meant to surface
      *  items that score 0 (or near it) on `power` because they have no MoneyValue/ValueMin/ValueMax at all, but
-     *  are still clearly useful because they activate/color/spawn/tag a lot of other things. Scaled by the same P
-     *  as `power` (mechanicPowerBeforeProbability × probability) — an item whose scalers are unlikely to actually
-     *  show up in a run has its raw mechanical potential discounted accordingly, same reasoning as `power`'s own
-     *  avg × (1 + P) term. */
+     *  are still clearly useful because they activate/color/spawn/tag a lot of other things. Only the mechanic
+     *  terms are boosted by `(1 + P)` — same shape as `power`'s own avg × (1 + P) term, and for the same reason:
+     *  a bare `× P` would zero out the whole formula whenever an item has no known scalers (P = 0), which is both
+     *  common (most items are never a build root) and wrong — an item's raw mechanical influence is real even
+     *  with no scalers, P should only ever add a *bonus* on top, never erase the baseline. MoneyValue and
+     *  buildTerm are left untouched by P, same as `power`'s own MoneyValue/buildTerm terms. */
     mechanicPower: number;
 }
 
@@ -140,8 +145,9 @@ export interface MechanicInfluenceEntry {
  * above reads as ~0, looking "useless") while still mattering a lot because it activates/recolors/spawns/tags
  * many other things. Its formula:
  *
- *   MoneyValue + avg × Σ(TargetCount over this item's MechAddValue rows) × Влияние(MechAddValue)
- *              + Σ(TargetCount over this item's rows of table T) × Влияние(T), for every other mechanic table T
+ *   MoneyValue + [Σ(TargetCount over this item's MechAddValue rows) × Влияние(MechAddValue) × avg
+ *              +  Σ(TargetCount over this item's rows of table T) × Влияние(T), for every other mechanic table T]
+ *                 × (1 + P)
  *              + buildTerm (the same avg × Σ(depth coefficient) term `power` already uses)
  *
  * avg only multiplies the MechAddValue term (the one mechanic table that's actually about *values*) — every other
@@ -149,11 +155,12 @@ export interface MechanicInfluenceEntry {
  * an item with avg = 0 still scores real mechanicPower from those. Влияние(T) is a per-table constant the user
  * sets in "Константы" (balanceConfig.mechanicInfluence).
  *
- * The whole subtotal above is then multiplied by the item's own P (the exact same value as `power`'s P — sum of
- * the shop-appearance probability of this item's scalers, see ItemPower.probability's doc): items connected to
- * this one by a direct structural edge, cascading down through the scaling graph's tiers. Per the user's own
- * framing — a mechanic's nominal influence only really counts if the chels that make it happen are actually likely
- * to show up in a run.
+ * Only the mechanic-terms sum is boosted by `(1 + P)` — P is the exact same value `power` uses (sum of the
+ * shop-appearance probability of this item's scalers, see ItemPower.probability's doc). `(1 + P)`, not a bare
+ * `× P`: an earlier version multiplied the *whole* subtotal by P, which zeroed mechanicPower out entirely for any
+ * item with no known scalers (P = 0) — common, and wrong, since the point of this formula is precisely to credit
+ * items whose value comes from their own mechanics rather than from being scaled. `(1 + P)` matches `power`'s own
+ * avg × (1 + P) term exactly: P only ever adds a bonus, the baseline mechanic influence always survives.
  */
 export function computeItemPowers(
     items: Item[],
@@ -243,8 +250,8 @@ export function computeItemPowers(
             mechanicTerms.push({ table, targetCountSum, influence, term });
             mechanicTermsSum += term;
         }
-        const mechanicPowerBeforeProbability = moneyValue + mechanicTermsSum + buildTerm;
-        const mechanicPower = mechanicPowerBeforeProbability * probability;
+        const mechanicTermsWithProbability = mechanicTermsSum * (1 + probability);
+        const mechanicPower = moneyValue + mechanicTermsWithProbability + buildTerm;
 
         powers.set(item.id, {
             moneyValue,
@@ -258,7 +265,8 @@ export function computeItemPowers(
             buildTerm,
             power: moneyValue + averageValue + probabilityTerm + buildTerm,
             mechanicTerms,
-            mechanicPowerBeforeProbability,
+            mechanicTermsSum,
+            mechanicTermsWithProbability,
             mechanicPower,
         });
     }

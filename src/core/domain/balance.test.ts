@@ -200,11 +200,13 @@ describe("computeItemPowers", () => {
         };
 
         // Neither item is a build root here (no builds passed), so P falls back to this manual constant — set to
-        // 1 so mechanicPower === mechanicPowerBeforeProbability, keeping this test's focus on the term math (the
-        // multiplication itself is covered by its own test below).
+        // 0 to confirm the exact bug this formula shape fixes: a bare `× P` used to zero mechanicPower out
+        // whenever P was 0, which is both the default and the common case (most items are never a build root).
+        // With `(1 + P)`, P = 0 just means "no bonus", not "erase everything" — see the dedicated test below for
+        // the P > 0 bonus case.
         const balanceConfig: BalanceConfig = {
             depthCoefficients: {},
-            scaleChelAppearanceProbability: 1,
+            scaleChelAppearanceProbability: 0,
             mechanicInfluence: { MechActivate: 2, MechAddTag: 5, MechAddValue: 100 }, // MechAddValue unused here
         };
 
@@ -216,8 +218,8 @@ describe("computeItemPowers", () => {
             { table: "MechActivate", targetCountSum: 5, influence: 2, term: 10 }, // (3+2) × 2, no avg factor
             { table: "MechAddTag", targetCountSum: 1, influence: 5, term: 5 },
         ]);
-        expect(power.mechanicPowerBeforeProbability).toBe(15); // MoneyValue(0) + 10 + 5 + buildTerm(0)
-        expect(power.mechanicPower).toBe(15); // × P(1)
+        expect(power.mechanicTermsSum).toBe(15); // 10 + 5
+        expect(power.mechanicPower).toBe(15); // MoneyValue(0) + 15×(1+0) + buildTerm(0) — NOT zeroed by P=0
     });
 
     it("mechanicPower's MechAddValue term is scaled by averageValue, unlike every other mechanic table", () => {
@@ -231,7 +233,7 @@ describe("computeItemPowers", () => {
         };
         const balanceConfig: BalanceConfig = {
             depthCoefficients: {},
-            scaleChelAppearanceProbability: 1, // never a build root here → P falls back to this; see test above
+            scaleChelAppearanceProbability: 0,
             mechanicInfluence: { MechAddValue: 3 },
         };
 
@@ -239,15 +241,15 @@ describe("computeItemPowers", () => {
         const power = powers.get("item")!;
 
         expect(power.mechanicTerms).toEqual([{ table: "MechAddValue", targetCountSum: 4, influence: 3, term: 60 }]); // 5 × 4 × 3
-        expect(power.mechanicPower).toBe(60);
+        expect(power.mechanicPower).toBe(60); // 60 × (1+0), P=0 doesn't zero it out
     });
 
-    it("mechanicPower is multiplied by the item's own P (same value as `power`'s P) — scalers appearing scales down raw mechanical influence", () => {
+    it("mechanicPower's mechanic-terms sum (only) gets a (1+P) bonus — MoneyValue/buildTerm stay untouched by P", () => {
         // Real ValueMin/ValueMax range required for isEligiblePayoffRow to treat "root" as a real build root at
         // all (see the earlier "excludes MainValue payoffs..." test in relations.test.ts) — chosen at 1/1 (not
-        // 0/0) specifically so root is still recognized as a root, while contributing nothing to
-        // mechanicPowerBeforeProbability (no MechAddValue row here, so avg never enters that formula).
-        const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: {} });
+        // 0/0) specifically so root is still recognized as a root, while contributing 0 to averageValue-driven
+        // terms (no MechAddValue row here, so avg never enters mechanicTermsSum).
+        const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: { MoneyValue: "7" } });
         const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
 
         const payoff: MechanicRow = {
@@ -264,7 +266,7 @@ describe("computeItemPowers", () => {
         };
         const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
         const balanceConfig: BalanceConfig = {
-            depthCoefficients: {},
+            depthCoefficients: { 0: 2 }, // root's own depth-0 coefficient — feeds buildTerm, unrelated to P
             scaleChelAppearanceProbability: 0,
             mechanicInfluence: { MechActivate: 1 },
         };
@@ -285,7 +287,10 @@ describe("computeItemPowers", () => {
         const power = powers.get("root")!;
 
         expect(power.probability).toBeCloseTo(0.25);
-        expect(power.mechanicPowerBeforeProbability).toBe(10); // MoneyValue(0) + TargetCount(10)×Влияние(1)
-        expect(power.mechanicPower).toBeCloseTo(2.5); // 10 × 0.25
+        expect(power.moneyValue).toBe(7);
+        expect(power.buildTerm).toBe(2); // avg(1) × coefficient(2) — untouched by P
+        expect(power.mechanicTermsSum).toBe(10); // TargetCount(10) × Влияние(1)
+        expect(power.mechanicTermsWithProbability).toBeCloseTo(12.5); // 10 × (1 + 0.25)
+        expect(power.mechanicPower).toBeCloseTo(21.5); // MoneyValue(7) + 12.5 + buildTerm(2)
     });
 });

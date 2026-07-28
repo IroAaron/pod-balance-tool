@@ -77,8 +77,8 @@ function MechanicPowerTooltipContent({ power }: { power: ItemPower }) {
     return (
         <Stack spacing={0.5} sx={{ p: 0.5, maxWidth: 320 }}>
             <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                Сила (мех.) = [MoneyValue + avg×Σ(TargetCount MechAddValue)×Влияние + Σ(TargetCount T)×Влияние(T) +
-                avg×Σкоэф.билдов] × P
+                Сила (мех.) = MoneyValue + [avg×Σ(TargetCount MechAddValue)×Влияние + Σ(TargetCount T)×Влияние(T)]
+                ×(1+P) + avg×Σкоэф.билдов
             </Typography>
             <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
             {power.mechanicTerms.length > 0 ? (
@@ -96,11 +96,12 @@ function MechanicPowerTooltipContent({ power }: { power: ItemPower }) {
                 </Typography>
             )}
             <Typography variant="caption">
-                Σ коэф. по билдам: {fmt(power.buildCoefficientSum)} → avg×Σ = {fmt(power.buildTerm)}
+                Σ механик: {fmt(power.mechanicTermsSum)} × (1+P), P {fmt(power.probability)} (
+                {power.probabilityIsAuto ? "авто, Σ по скейлерам" : "константа из «Констант»"}) →{" "}
+                {fmt(power.mechanicTermsWithProbability)}
             </Typography>
             <Typography variant="caption">
-                Подытог: {fmt(power.mechanicPowerBeforeProbability)} × P {fmt(power.probability)} (
-                {power.probabilityIsAuto ? "авто, Σ по скейлерам" : "константа из «Констант»"})
+                Σ коэф. по билдам: {fmt(power.buildCoefficientSum)} → avg×Σ = {fmt(power.buildTerm)}
             </Typography>
             <Typography variant="caption" sx={{ fontWeight: 600, mt: 0.5 }}>
                 Итого: {fmt(power.mechanicPower)}
