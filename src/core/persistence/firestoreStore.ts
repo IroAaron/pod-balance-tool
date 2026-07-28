@@ -20,9 +20,15 @@ import type { TagIcon } from "../models/TagIcon";
 import type { SourceUrls } from "./localStore";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
 import { db } from "./firebaseClient";
+import {
+    BALANCE_SAVE_PAYLOAD_KEYS,
+    type BalanceSaveMeta,
+    type BalanceSavePayload,
+} from "../models/BalanceSave";
 
 const buildsCol = collection(db, "builds");
 const sharedCol = collection(db, "shared");
+const balanceSavesCol = collection(db, "balanceSaves");
 
 export interface SharedState {
     itemIcons: Record<string, string>;
@@ -328,5 +334,80 @@ export async function replaceAllBuilds(builds: Build[]): Promise<void> {
         if (!incomingIds.has(entry.id)) batch.delete(entry.ref);
     });
     builds.forEach((build) => batch.set(doc(buildsCol, build.id), build));
+    await batch.commit();
+}
+
+/**
+ * Named balance saves live under `balanceSaves/{id}` (metadata only: name/description/createdAt) with the actual
+ * captured state split one-key-per-doc into a `parts` subcollection (`balanceSaves/{id}/parts/{key}`) — same
+ * per-field-doc pattern as `shared/*` above, needed here because the full payload (items/mechanics/translations
+ * included) can run well past Firestore's 1 MiB single-document limit if kept as one doc, while any single table
+ * on its own stays comfortably under it.
+ */
+function partsCol(saveId: string) {
+    return collection(db, "balanceSaves", saveId, "parts");
+}
+
+/** Metadata-only list — never touches `parts`, so this stays cheap no matter how large individual saves are. */
+export function subscribeBalanceSaves(onChange: (saves: BalanceSaveMeta[]) => void): () => void {
+    return onSnapshot(
+        balanceSavesCol,
+        (snapshot) =>
+            onChange(
+                snapshot.docs.map((entry) => ({ id: entry.id, ...(entry.data() as Omit<BalanceSaveMeta, "id">) }))
+            ),
+        (error) => console.error("subscribeBalanceSaves", error)
+    );
+}
+
+export async function createBalanceSaveRemote(
+    name: string,
+    description: string,
+    payload: BalanceSavePayload
+): Promise<BalanceSaveMeta> {
+    const id = `save-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const meta: BalanceSaveMeta = { id, name, description, createdAt: new Date().toISOString() };
+
+    const batch = writeBatch(db);
+    batch.set(doc(balanceSavesCol, id), { name, description, createdAt: meta.createdAt });
+    for (const key of BALANCE_SAVE_PAYLOAD_KEYS) {
+        batch.set(doc(partsCol(id), key), { value: stripUndefined(payload[key]) });
+    }
+    await batch.commit();
+
+    return meta;
+}
+
+/** Reconstructs the full payload from its `parts` subcollection — only called on demand (restoring), never subscribed. */
+export async function fetchBalanceSavePayloadRemote(saveId: string): Promise<BalanceSavePayload> {
+    const snapshot = await getDocs(partsCol(saveId));
+    const byKey = new Map(snapshot.docs.map((entry) => [entry.id, entry.data().value]));
+
+    return {
+        items: (byKey.get("items") as BalanceSavePayload["items"]) ?? [],
+        translations: (byKey.get("translations") as BalanceSavePayload["translations"]) ?? [],
+        mechanics: (byKey.get("mechanics") as BalanceSavePayload["mechanics"]) ?? [],
+        upgradeChains: (byKey.get("upgradeChains") as BalanceSavePayload["upgradeChains"]) ?? [],
+        replaceRules: (byKey.get("replaceRules") as BalanceSavePayload["replaceRules"]) ?? [],
+        enumValues: (byKey.get("enumValues") as BalanceSavePayload["enumValues"]) ?? {},
+        builds: (byKey.get("builds") as BalanceSavePayload["builds"]) ?? [],
+        itemIcons: (byKey.get("itemIcons") as BalanceSavePayload["itemIcons"]) ?? {},
+        customParamValues: (byKey.get("customParamValues") as BalanceSavePayload["customParamValues"]) ?? {},
+        descriptionSettings:
+            (byKey.get("descriptionSettings") as BalanceSavePayload["descriptionSettings"]) ??
+            DEFAULT_DESCRIPTION_SETTINGS,
+        translationOverrides: (byKey.get("translationOverrides") as BalanceSavePayload["translationOverrides"]) ?? {},
+        exportedOverrides: (byKey.get("exportedOverrides") as BalanceSavePayload["exportedOverrides"]) ?? {},
+        glossary: (byKey.get("glossary") as BalanceSavePayload["glossary"])?.map(normalizeGlossaryEntry) ?? [],
+        tagIcons: (byKey.get("tagIcons") as BalanceSavePayload["tagIcons"]) ?? [],
+    };
+}
+
+/** Deletes a save's metadata doc and every doc in its `parts` subcollection — Firestore never cascade-deletes subcollections on its own. */
+export async function deleteBalanceSaveRemote(saveId: string): Promise<void> {
+    const parts = await getDocs(partsCol(saveId));
+    const batch = writeBatch(db);
+    parts.docs.forEach((entry) => batch.delete(entry.ref));
+    batch.delete(doc(balanceSavesCol, saveId));
     await batch.commit();
 }
