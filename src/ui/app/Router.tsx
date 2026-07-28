@@ -10,6 +10,7 @@ import GlossaryPage from "../pages/Glossary/GlossaryPage";
 import GraphPage from "../pages/Graph/GraphPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
 import SettingsPage from "../pages/Settings/SettingsPage";
+import BlueprintLabPage from "../pages/BlueprintLab/BlueprintLabPage";
 
 // Keyed by :id so navigating between two detail pages of the same route
 // fully remounts the component instead of leaking stale local edit state.
@@ -48,6 +49,7 @@ export default function AppRouter() {
             <Route path="/graph" element={<GraphPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/blueprint-lab" element={<BlueprintLabPage />} />
             <Route path="*" element={<NotFoundPage />} />
         </Routes>
     );
