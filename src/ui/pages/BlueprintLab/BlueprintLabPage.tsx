@@ -20,11 +20,15 @@ import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 
 import ItemNode from "./ItemNode";
 import MechanicNode from "./MechanicNode";
+import BlockNode from "./BlockNode";
 import ConnectionMenu from "./ConnectionMenu";
-import { MECHANIC_REF_POINTS } from "./mechanicSchema";
-import type { ItemFlowNode, MechanicFlowNode, MechanicKind } from "./types";
+import PrimaryValueMenu from "./PrimaryValueMenu";
+import EnumPanel from "./EnumPanel";
+import { EnumRegistryProvider } from "./EnumRegistryContext";
+import { MECHANIC_BLOCKS, blockLabel } from "./mechanicSchema";
+import type { BlockFlowNode, BlockKind, ItemFlowNode, MechanicFlowNode, MechanicKind } from "./types";
 
-const nodeTypes = { item: ItemNode, mechanic: MechanicNode };
+const nodeTypes = { item: ItemNode, mechanic: MechanicNode, block: BlockNode };
 
 let idCounter = 0;
 function nextId(prefix: string) {
@@ -32,12 +36,10 @@ function nextId(prefix: string) {
     return `${prefix}-${idCounter}`;
 }
 
-function refRoleLabel(kind: MechanicKind, handleId: string): string {
-    if (handleId === "activator") return "Активатор";
-    return MECHANIC_REF_POINTS[kind].find((p) => p.key === handleId)?.label ?? handleId;
-}
+type FlowNode = ItemFlowNode | MechanicFlowNode | BlockFlowNode;
 
-interface PendingConnection {
+interface PendingItemConnection {
+    kind: "item";
     sourceNodeId: string;
     sourceHandleId: string;
     screenX: number;
@@ -47,23 +49,37 @@ interface PendingConnection {
     roleLabel: string;
 }
 
-function makeItemData(overrides?: Partial<{ name: string; itemType: ItemFlowNode["data"]["itemType"]; tags: string }>) {
+interface PendingBlockCreation {
+    kind: "block";
+    mechanicId: string;
+    blockKind: BlockKind;
+    screenX: number;
+    screenY: number;
+    flowX: number;
+    flowY: number;
+    primaryField: string;
+}
+
+function makeItemData(overrides?: Partial<{ name: string; itemType: ItemFlowNode["data"]["itemType"]; tags: string[] }>) {
     return {
         name: overrides?.name ?? "Новый предмет",
         itemType: overrides?.itemType ?? "Card",
-        tags: overrides?.tags ?? "",
+        tags: overrides?.tags ?? [],
     };
 }
 
 function BlueprintLabCanvas() {
-    const [nodes, setNodes, onNodesChange] = useNodesState<ItemFlowNode | MechanicFlowNode>([]);
+    const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-    const [pending, setPending] = useState<PendingConnection | null>(null);
+    const [pendingItem, setPendingItem] = useState<PendingItemConnection | null>(null);
+    const [pendingBlock, setPendingBlock] = useState<PendingBlockCreation | null>(null);
+    const [enumPanelOpen, setEnumPanelOpen] = useState(false);
     const { screenToFlowPosition } = useReactFlow();
-    const connectStartRole = useRef<{ nodeId: string; handleId: string } | null>(null);
+    const connectStart = useRef<{ nodeId: string; handleId: string } | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     const updateItemData = useCallback(
-        (id: string, patch: Partial<{ name: string; itemType: ItemFlowNode["data"]["itemType"]; tags: string }>) => {
+        (id: string, patch: Partial<{ name: string; itemType: ItemFlowNode["data"]["itemType"]; tags: string[] }>) => {
             setNodes((nds) =>
                 nds.map((n) => (n.id === id && n.type === "item" ? { ...n, data: { ...n.data, ...patch } } : n)),
             );
@@ -138,100 +154,177 @@ function BlueprintLabCanvas() {
         [setNodes, updateItemData, addMechanicNode],
     );
 
+    const addBlockNode = useCallback(
+        (mechanicId: string, blockKind: BlockKind, primaryField: string, primaryValue: string, position: { x: number; y: number }) => {
+            const blockId = nextId("block");
+            const mechanicNode = nodes.find((n) => n.id === mechanicId);
+            const mechanicKind = mechanicNode && mechanicNode.type === "mechanic" ? mechanicNode.data.kind : undefined;
+            if (!mechanicKind) return;
+
+            const node: BlockFlowNode = {
+                id: blockId,
+                type: "block",
+                position,
+                data: {
+                    blockKind,
+                    mechanicKind,
+                    fields: { [primaryField]: primaryValue },
+                    onFieldChange: (field, value) =>
+                        setNodes((cur) =>
+                            cur.map((n) =>
+                                n.id === blockId && n.type === "block"
+                                    ? { ...n, data: { ...n.data, fields: { ...n.data.fields, [field]: value } } }
+                                    : n,
+                            ),
+                        ),
+                },
+            };
+            setNodes((nds) => [...nds, node]);
+            setEdges((eds) => [
+                ...eds,
+                {
+                    id: nextId("edge"),
+                    source: mechanicId,
+                    sourceHandle: blockKind,
+                    target: blockId,
+                    targetHandle: "in",
+                    label: blockLabel(blockKind),
+                },
+            ]);
+        },
+        [nodes, setNodes, setEdges],
+    );
+
     const onConnect = useCallback(
         (connection: Connection) => {
-            setEdges((eds) =>
-                addEdge(
-                    {
-                        ...connection,
-                        id: nextId("edge"),
-                        label: connection.sourceHandle ? refRoleLabelFromNode(nodes, connection.source, connection.sourceHandle) : undefined,
-                    },
-                    eds,
-                ),
-            );
+            const sourceNode = nodes.find((n) => n.id === connection.source);
+            let label: string | undefined;
+            if (connection.sourceHandle === "owns") label = "содержит";
+            else if (connection.sourceHandle === "itemRef" && sourceNode?.type === "block") {
+                label = MECHANIC_BLOCKS[sourceNode.data.mechanicKind].find((b) => b.kind === sourceNode.data.blockKind)?.itemRefField;
+            } else if (sourceNode?.type === "mechanic") {
+                label = MECHANIC_BLOCKS[sourceNode.data.kind].find((b) => b.kind === connection.sourceHandle)?.kind;
+                if (label) label = blockLabel(label as BlockKind);
+            }
+            setEdges((eds) => addEdge({ ...connection, id: nextId("edge"), label }, eds));
         },
         [setEdges, nodes],
     );
 
     const onConnectStart: OnConnectStart = useCallback((_event, params) => {
-        connectStartRole.current = params.nodeId && params.handleId ? { nodeId: params.nodeId, handleId: params.handleId } : null;
+        connectStart.current = params.nodeId && params.handleId ? { nodeId: params.nodeId, handleId: params.handleId } : null;
     }, []);
 
     const onConnectEnd = useCallback(
         (event: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
-            const start = connectStartRole.current;
-            connectStartRole.current = null;
+            const start = connectStart.current;
+            connectStart.current = null;
             if (!start || connectionState.isValid) return;
-            // Only mechanic reference points (not the "owns" handle) open the picker.
             if (start.handleId === "owns") return;
 
             const sourceNode = nodes.find((n) => n.id === start.nodeId);
-            if (!sourceNode || sourceNode.type !== "mechanic") return;
+            if (!sourceNode) return;
 
             const point = "changedTouches" in event ? event.changedTouches[0] : event;
             const flowPos = screenToFlowPosition({ x: point.clientX, y: point.clientY });
+            const bounds = containerRef.current?.getBoundingClientRect();
+            const localX = point.clientX - (bounds?.left ?? 0);
+            const localY = point.clientY - (bounds?.top ?? 0);
 
-            setPending({
-                sourceNodeId: start.nodeId,
-                sourceHandleId: start.handleId,
-                screenX: point.clientX,
-                screenY: point.clientY,
-                flowX: flowPos.x,
-                flowY: flowPos.y,
-                roleLabel: refRoleLabel(sourceNode.data.kind, start.handleId),
-            });
+            if (sourceNode.type === "mechanic") {
+                const definition = MECHANIC_BLOCKS[sourceNode.data.kind].find((b) => b.kind === start.handleId);
+                if (!definition) return;
+
+                setPendingBlock({
+                    kind: "block",
+                    mechanicId: sourceNode.id,
+                    blockKind: definition.kind,
+                    screenX: localX,
+                    screenY: localY,
+                    flowX: flowPos.x,
+                    flowY: flowPos.y,
+                    primaryField: definition.primaryField,
+                });
+                return;
+            }
+
+            if (sourceNode.type === "block" && start.handleId === "itemRef") {
+                const definition = MECHANIC_BLOCKS[sourceNode.data.mechanicKind].find((b) => b.kind === sourceNode.data.blockKind);
+                if (!definition?.itemRefField) return;
+
+                setPendingItem({
+                    kind: "item",
+                    sourceNodeId: sourceNode.id,
+                    sourceHandleId: "itemRef",
+                    screenX: localX,
+                    screenY: localY,
+                    flowX: flowPos.x,
+                    flowY: flowPos.y,
+                    roleLabel: definition.itemRefField,
+                });
+            }
         },
         [nodes, screenToFlowPosition],
     );
 
-    const isValidConnection: IsValidConnection = useCallback(
-        (edgeOrConn) => {
-            const sourceHandle = "sourceHandle" in edgeOrConn ? edgeOrConn.sourceHandle : undefined;
-            const targetHandle = "targetHandle" in edgeOrConn ? edgeOrConn.targetHandle : undefined;
-            if (sourceHandle === "owns") return targetHandle === "owns";
-            return targetHandle === "ref";
-        },
-        [],
-    );
+    const isValidConnection: IsValidConnection = useCallback((edgeOrConn) => {
+        const sourceHandle = "sourceHandle" in edgeOrConn ? edgeOrConn.sourceHandle : undefined;
+        const targetHandle = "targetHandle" in edgeOrConn ? edgeOrConn.targetHandle : undefined;
+        if (sourceHandle === "owns") return targetHandle === "owns";
+        if (sourceHandle === "itemRef") return targetHandle === "ref";
+        return targetHandle === "in";
+    }, []);
 
-    const closePending = useCallback(() => setPending(null), []);
+    const closePendingItem = useCallback(() => setPendingItem(null), []);
+    const closePendingBlock = useCallback(() => setPendingBlock(null), []);
 
     const pickExistingItem = useCallback(
         (itemId: string) => {
-            if (!pending) return;
+            if (!pendingItem) return;
             setEdges((eds) => [
                 ...eds,
                 {
                     id: nextId("edge"),
-                    source: pending.sourceNodeId,
-                    sourceHandle: pending.sourceHandleId,
+                    source: pendingItem.sourceNodeId,
+                    sourceHandle: pendingItem.sourceHandleId,
                     target: itemId,
                     targetHandle: "ref",
-                    label: pending.roleLabel,
+                    label: pendingItem.roleLabel,
                 },
             ]);
-            setPending(null);
+            setPendingItem(null);
         },
-        [pending, setEdges],
+        [pendingItem, setEdges],
     );
 
     const createAndConnectItem = useCallback(() => {
-        if (!pending) return;
-        const newId = addItemNode({ x: pending.flowX, y: pending.flowY });
+        if (!pendingItem) return;
+        const newId = addItemNode({ x: pendingItem.flowX, y: pendingItem.flowY });
         setEdges((eds) => [
             ...eds,
             {
                 id: nextId("edge"),
-                source: pending.sourceNodeId,
-                sourceHandle: pending.sourceHandleId,
+                source: pendingItem.sourceNodeId,
+                sourceHandle: pendingItem.sourceHandleId,
                 target: newId,
                 targetHandle: "ref",
-                label: pending.roleLabel,
+                label: pendingItem.roleLabel,
             },
         ]);
-        setPending(null);
-    }, [pending, addItemNode, setEdges]);
+        setPendingItem(null);
+    }, [pendingItem, addItemNode, setEdges]);
+
+    const confirmBlockValue = useCallback(
+        (value: string) => {
+            if (!pendingBlock) return;
+            addBlockNode(pendingBlock.mechanicId, pendingBlock.blockKind, pendingBlock.primaryField, value, {
+                x: pendingBlock.flowX,
+                y: pendingBlock.flowY,
+            });
+            setPendingBlock(null);
+        },
+        [pendingBlock, addBlockNode],
+    );
 
     const itemCandidates = nodes.filter((n): n is ItemFlowNode => n.type === "item");
 
@@ -241,12 +334,20 @@ function BlueprintLabCanvas() {
                 <Button variant="contained" onClick={() => addItemNode({ x: 40, y: 40 + nodes.length * 10 })}>
                     + Добавить предмет
                 </Button>
+                <Button variant="outlined" onClick={() => setEnumPanelOpen(true)}>
+                    Enum-справочник
+                </Button>
                 <Typography variant="body2" color="text.secondary">
                     Экспериментальный раздел — ничего не сохраняется и никуда не экспортируется.
                 </Typography>
             </Stack>
 
-            <Box sx={{ position: "relative", height: "100%", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
+            <EnumPanel open={enumPanelOpen} onClose={() => setEnumPanelOpen(false)} />
+
+            <Box
+                ref={containerRef}
+                sx={{ position: "relative", height: "100%", border: "1px solid", borderColor: "divider", borderRadius: 1 }}
+            >
                 <ReactFlow
                     nodes={nodes}
                     edges={edges}
@@ -264,26 +365,30 @@ function BlueprintLabCanvas() {
                     <MiniMap />
                 </ReactFlow>
 
-                {pending && (
+                {pendingItem && (
                     <ConnectionMenu
-                        x={pending.screenX}
-                        y={pending.screenY}
-                        roleLabel={pending.roleLabel}
+                        x={pendingItem.screenX}
+                        y={pendingItem.screenY}
+                        roleLabel={pendingItem.roleLabel}
                         candidates={itemCandidates}
                         onPick={pickExistingItem}
                         onCreate={createAndConnectItem}
-                        onClose={closePending}
+                        onClose={closePendingItem}
+                    />
+                )}
+
+                {pendingBlock && (
+                    <PrimaryValueMenu
+                        x={pendingBlock.screenX}
+                        y={pendingBlock.screenY}
+                        fieldLabel={pendingBlock.primaryField}
+                        onConfirm={confirmBlockValue}
+                        onClose={closePendingBlock}
                     />
                 )}
             </Box>
         </Box>
     );
-}
-
-function refRoleLabelFromNode(nodes: (ItemFlowNode | MechanicFlowNode)[], sourceId: string, handleId: string) {
-    const source = nodes.find((n) => n.id === sourceId);
-    if (!source || source.type !== "mechanic") return undefined;
-    return refRoleLabel(source.data.kind, handleId);
 }
 
 export default function BlueprintLabPage() {
@@ -294,9 +399,11 @@ export default function BlueprintLabPage() {
                 Пробный раздел на отдельной ветке — тестируем удобство создания контента через ноды. Не связан с
                 остальными вкладками, ничего не сохраняется между перезагрузками.
             </Alert>
-            <ReactFlowProvider>
-                <BlueprintLabCanvas />
-            </ReactFlowProvider>
+            <EnumRegistryProvider>
+                <ReactFlowProvider>
+                    <BlueprintLabCanvas />
+                </ReactFlowProvider>
+            </EnumRegistryProvider>
         </Stack>
     );
 }

@@ -11,39 +11,100 @@ export const MECHANIC_KINDS: MechanicKind[] = [
     "MechAddTag",
 ];
 
-export const MECHANIC_LABELS: Record<MechanicKind, string> = {
-    MechActivate: "Активация",
-    MechAddValue: "Изменение значения",
-    MechChangeColor: "Смена цвета",
-    MechAddItem: "Спавн/замена предмета",
-    MechAddTag: "Выдача тега",
-};
+/** A block groups one mechanic's related columns (e.g. all Activator* fields) behind a single canvas point. */
+export type BlockKind = "activator" | "target" | "bonus" | "newColor" | "newItem" | "newTag";
 
-/** A reference "point" on a mechanic node that can connect out to an Item node. */
-export interface MechanicRefPoint {
-    key: string;
+export interface BlockDefinition {
+    kind: BlockKind;
 
-    label: string;
+    /** Raw column name offered first when the block is created (the point's drag-to-create prompt). */
+    primaryField: string;
 
-    /** Column this reference represents when the mechanic is eventually serialized (informational only in this lab). */
-    field: string;
+    /** Remaining raw column names, edited as plain fields once the block node exists. */
+    otherFields: string[];
+
+    /** Raw column name that is a literal item-id reference, if this block has one — becomes an "attach item" point. */
+    itemRefField?: string;
+
+    /** Which side of the mechanic node the block's point renders on. */
+    side: "left" | "right";
 }
 
-/** Reference points (handles), keyed by mechanic kind — every mechanic also gets an implicit "activator" input point. */
-export const MECHANIC_REF_POINTS: Record<MechanicKind, MechanicRefPoint[]> = {
-    MechActivate: [{ key: "target", label: "Цель", field: "UseTargetIds" }],
-    MechAddValue: [{ key: "target", label: "Цель", field: "UseTargetIds" }],
-    MechChangeColor: [],
-    MechAddItem: [
-        { key: "target", label: "Куда поставить", field: "TargetItemId" },
-        { key: "newItem", label: "Новый предмет", field: "NewItemId" },
-    ],
-    MechAddTag: [{ key: "target", label: "Кому дать тег", field: "TargetItemId" }],
+const ACTIVATOR_BLOCK: BlockDefinition = {
+    kind: "activator",
+    primaryField: "ActivatorType",
+    otherFields: ["UseActivatorIds", "ActivatorTargetType", "ActivatorPlace", "ActivatorColor", "ActivatorTag", "ActivatorValueUsageType"],
+    side: "left",
 };
 
-const ID_REFERENCE_FIELDS = new Set(["UseActivatorIds", "UseTargetIds", "TargetItemId", "NewItemId", "ItemId"]);
+/** Every mechanic table's Target* fields line up the same way except the item-ref column, which varies by table. */
+function targetBlock(otherFields: string[], itemRefField?: string): BlockDefinition {
+    return { kind: "target", primaryField: "TargetType", otherFields, itemRefField, side: "right" };
+}
 
-/** Scalar (non-item-reference) columns shown as plain inputs on the mechanic node body. */
-export const MECHANIC_SCALAR_FIELDS: Record<MechanicKind, string[]> = Object.fromEntries(
-    MECHANIC_KINDS.map((kind) => [kind, MECHANIC_TABLE_COLUMNS[kind].filter((col) => !ID_REFERENCE_FIELDS.has(col))]),
+export const MECHANIC_BLOCKS: Record<MechanicKind, BlockDefinition[]> = {
+    MechActivate: [
+        ACTIVATOR_BLOCK,
+        targetBlock(["TargetPlace", "TargetColor", "TargetTag", "TargetValueUsageType", "TargetCount"], "UseTargetIds"),
+    ],
+    MechAddValue: [
+        ACTIVATOR_BLOCK,
+        targetBlock(
+            ["TargetValueType", "TargetPlace", "TargetColor", "TargetTag", "TargetValueUsageType", "TargetCount", "TargetGetter"],
+            "UseTargetIds",
+        ),
+        {
+            kind: "bonus",
+            primaryField: "BonusCountingType",
+            otherFields: ["BonusUsageType", "BonusValueUsageType", "BonusTargetType", "BonusTargetPlace", "BonusTargetColor", "BonusTargetTag"],
+            side: "right",
+        },
+    ],
+    MechChangeColor: [
+        ACTIVATOR_BLOCK,
+        targetBlock(["TargetPlace", "TargetColor", "TargetTag", "TargetValueUsageType", "TargetCount"]),
+        { kind: "newColor", primaryField: "NewColor", otherFields: [], side: "right" },
+    ],
+    MechAddItem: [
+        ACTIVATOR_BLOCK,
+        targetBlock(["TargetPlace", "TargetColor", "TargetTag", "TargetValueUsageType", "TargetCount"], "TargetItemId"),
+        {
+            kind: "newItem",
+            primaryField: "ItemMech",
+            otherFields: ["CopiedTargetType", "CopiedTargetPlace", "CopiedTargetColor", "CopiedTargetTag", "CopiedTargetValueUsageType"],
+            itemRefField: "NewItemId",
+            side: "right",
+        },
+    ],
+    MechAddTag: [
+        ACTIVATOR_BLOCK,
+        targetBlock(["TargetPlace", "TargetColor", "TargetTag", "TargetValueUsageType", "TargetCount"], "TargetItemId"),
+        { kind: "newTag", primaryField: "TagMech", otherFields: ["NewTags", "TagsCount"], side: "right" },
+    ],
+};
+
+const BLOCK_LABELS: Record<BlockKind, string> = {
+    activator: "Activator",
+    target: "Target",
+    bonus: "Bonus",
+    newColor: "NewColor",
+    newItem: "NewItem",
+    newTag: "NewTag",
+};
+
+export function blockLabel(kind: BlockKind): string {
+    return BLOCK_LABELS[kind];
+}
+
+/** Columns left over once ItemId + every block's own fields are removed — shown as plain fields on the mechanic node itself. */
+export const MECHANIC_MISC_FIELDS: Record<MechanicKind, string[]> = Object.fromEntries(
+    MECHANIC_KINDS.map((kind) => {
+        const claimed = new Set<string>(["ItemId"]);
+        for (const block of MECHANIC_BLOCKS[kind]) {
+            claimed.add(block.primaryField);
+            for (const f of block.otherFields) claimed.add(f);
+            if (block.itemRefField) claimed.add(block.itemRefField);
+        }
+        return [kind, MECHANIC_TABLE_COLUMNS[kind].filter((col) => !claimed.has(col))];
+    }),
 ) as Record<MechanicKind, string[]>;

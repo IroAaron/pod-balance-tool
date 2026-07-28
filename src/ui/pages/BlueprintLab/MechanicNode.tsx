@@ -1,14 +1,18 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Box, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
-import { MECHANIC_KINDS, MECHANIC_LABELS, MECHANIC_REF_POINTS, MECHANIC_SCALAR_FIELDS } from "./mechanicSchema";
+import { Box, MenuItem, Paper, Select, Stack, Typography } from "@mui/material";
+import { MECHANIC_BLOCKS, MECHANIC_KINDS, MECHANIC_MISC_FIELDS, blockLabel } from "./mechanicSchema";
+import { HANDLE_STYLE } from "./handleStyle";
+import EnumField from "./EnumField";
 import type { MechanicFlowNode } from "./types";
 
-const HANDLE_ROW_HEIGHT = 28;
-const HANDLE_TOP_OFFSET = 24;
+const ROW_HEIGHT = 28;
+const TOP_OFFSET = 24;
 
 export default function MechanicNode({ data, selected }: NodeProps<MechanicFlowNode>) {
-    const refPoints = MECHANIC_REF_POINTS[data.kind];
-    const scalarFields = MECHANIC_SCALAR_FIELDS[data.kind];
+    const blocks = MECHANIC_BLOCKS[data.kind];
+    const leftBlocks = blocks.filter((b) => b.side === "left");
+    const rightBlocks = blocks.filter((b) => b.side === "right");
+    const miscFields = MECHANIC_MISC_FIELDS[data.kind];
 
     return (
         <Paper
@@ -20,55 +24,57 @@ export default function MechanicNode({ data, selected }: NodeProps<MechanicFlowN
                 overflow: "visible",
             }}
         >
-            <Handle type="target" id="owns" position={Position.Left} style={{ top: HANDLE_TOP_OFFSET }} />
+            <Handle type="target" id="owns" position={Position.Left} style={{ top: TOP_OFFSET, ...HANDLE_STYLE }} />
 
-            <Box sx={{ position: "relative" }}>
-                <Handle
-                    type="source"
-                    id="activator"
-                    position={Position.Left}
-                    style={{ top: HANDLE_TOP_OFFSET + HANDLE_ROW_HEIGHT }}
-                />
-                <Typography
-                    variant="caption"
-                    sx={{
-                        position: "absolute",
-                        left: 10,
-                        top: HANDLE_TOP_OFFSET + HANDLE_ROW_HEIGHT - 8,
-                        color: "text.secondary",
-                        pointerEvents: "none",
-                    }}
-                >
-                    ← Активатор
-                </Typography>
-            </Box>
-
-            {refPoints.map((point, i) => (
-                <Box key={point.key} sx={{ position: "relative" }}>
+            {leftBlocks.map((block, i) => (
+                <Box key={block.kind} sx={{ position: "relative" }}>
                     <Handle
                         type="source"
-                        id={point.key}
+                        id={block.kind}
+                        position={Position.Left}
+                        style={{ top: TOP_OFFSET + ROW_HEIGHT * (i + 1), ...HANDLE_STYLE }}
+                    />
+                    <Typography
+                        variant="caption"
+                        sx={{
+                            position: "absolute",
+                            left: 10,
+                            top: TOP_OFFSET + ROW_HEIGHT * (i + 1) - 8,
+                            color: "text.secondary",
+                            pointerEvents: "none",
+                        }}
+                    >
+                        ← {blockLabel(block.kind)}
+                    </Typography>
+                </Box>
+            ))}
+
+            {rightBlocks.map((block, i) => (
+                <Box key={block.kind} sx={{ position: "relative" }}>
+                    <Handle
+                        type="source"
+                        id={block.kind}
                         position={Position.Right}
-                        style={{ top: HANDLE_TOP_OFFSET + HANDLE_ROW_HEIGHT * i }}
+                        style={{ top: TOP_OFFSET + ROW_HEIGHT * i, ...HANDLE_STYLE }}
                     />
                     <Typography
                         variant="caption"
                         sx={{
                             position: "absolute",
                             right: 10,
-                            top: HANDLE_TOP_OFFSET + HANDLE_ROW_HEIGHT * i - 8,
+                            top: TOP_OFFSET + ROW_HEIGHT * i - 8,
                             color: "text.secondary",
                             pointerEvents: "none",
                         }}
                     >
-                        {point.label} →
+                        {blockLabel(block.kind)} →
                     </Typography>
                 </Box>
             ))}
 
             <Box sx={{ px: 1.5, py: 1, bgcolor: "action.hover" }}>
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                    ⚙️ Механика
+                    ⚙️ Mechanic
                 </Typography>
             </Box>
 
@@ -77,26 +83,27 @@ export default function MechanicNode({ data, selected }: NodeProps<MechanicFlowN
                 className="nodrag"
                 sx={{
                     p: 1.5,
-                    pt: `${HANDLE_TOP_OFFSET + HANDLE_ROW_HEIGHT * Math.max(1, refPoints.length) + 8}px`,
-                    maxHeight: 320,
-                    overflowY: "auto",
+                    pt: `${TOP_OFFSET + ROW_HEIGHT * (Math.max(leftBlocks.length, rightBlocks.length) + 1) + 8}px`,
                 }}
             >
-                <Select size="small" value={data.kind} onChange={(e) => data.onKindChange(e.target.value as (typeof MECHANIC_KINDS)[number])}>
+                <Select
+                    size="small"
+                    value={data.kind}
+                    onChange={(e) => data.onKindChange(e.target.value as (typeof MECHANIC_KINDS)[number])}
+                >
                     {MECHANIC_KINDS.map((kind) => (
                         <MenuItem key={kind} value={kind}>
-                            {MECHANIC_LABELS[kind]}
+                            {kind}
                         </MenuItem>
                     ))}
                 </Select>
 
-                {scalarFields.map((field) => (
-                    <TextField
+                {miscFields.map((field) => (
+                    <EnumField
                         key={field}
-                        size="small"
-                        label={field}
+                        field={field}
                         value={data.fields[field] ?? ""}
-                        onChange={(e) => data.onFieldChange(field, e.target.value)}
+                        onChange={(value) => data.onFieldChange(field, value)}
                     />
                 ))}
             </Stack>

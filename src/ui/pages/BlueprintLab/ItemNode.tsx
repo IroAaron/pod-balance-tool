@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Box, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
-import { MECHANIC_KINDS, MECHANIC_LABELS } from "./mechanicSchema";
+import { MECHANIC_KINDS } from "./mechanicSchema";
+import { HANDLE_STYLE } from "./handleStyle";
+import TagsSelect from "./TagsSelect";
 import type { ItemFlowNode, ItemKind } from "./types";
 
 const ITEM_KINDS: ItemKind[] = ["Card", "House", "Artefact"];
@@ -19,8 +21,8 @@ export default function ItemNode({ data, selected }: NodeProps<ItemFlowNode>) {
                 overflow: "visible",
             }}
         >
-            <Handle type="target" id="ref" position={Position.Left} style={{ top: 24 }} />
-            <Handle type="source" id="owns" position={Position.Right} style={{ top: 24 }} />
+            <Handle type="target" id="ref" position={Position.Left} style={{ top: 24, ...HANDLE_STYLE }} />
+            <Handle type="source" id="owns" position={Position.Right} style={{ top: 24, ...HANDLE_STYLE }} />
 
             <Box sx={{ px: 1.5, py: 1, bgcolor: "action.hover", borderTopLeftRadius: 4, borderTopRightRadius: 4 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
@@ -48,12 +50,7 @@ export default function ItemNode({ data, selected }: NodeProps<ItemFlowNode>) {
                     ))}
                 </Select>
 
-                <TextField
-                    size="small"
-                    label="Теги (через запятую)"
-                    value={data.tags}
-                    onChange={(e) => data.onChange({ tags: e.target.value })}
-                />
+                <TagsSelect value={data.tags} onChange={(tags) => data.onChange({ tags })} />
 
                 <Select
                     size="small"
@@ -70,7 +67,7 @@ export default function ItemNode({ data, selected }: NodeProps<ItemFlowNode>) {
                 >
                     {MECHANIC_KINDS.map((kind) => (
                         <MenuItem key={kind} value={kind}>
-                            {MECHANIC_LABELS[kind]}
+                            {kind}
                         </MenuItem>
                     ))}
                 </Select>
