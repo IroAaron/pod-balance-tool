@@ -25,6 +25,7 @@ import ConnectionMenu from "./ConnectionMenu";
 import PrimaryValueMenu from "./PrimaryValueMenu";
 import EnumPanel from "./EnumPanel";
 import { EnumRegistryProvider } from "./EnumRegistryContext";
+import { ItemRegistryProvider } from "./ItemRegistryContext";
 import { MECHANIC_BLOCKS, blockLabel } from "./mechanicSchema";
 import type { BlockFlowNode, BlockKind, ItemFlowNode, MechanicFlowNode, MechanicKind } from "./types";
 
@@ -327,67 +328,70 @@ function BlueprintLabCanvas() {
     );
 
     const itemCandidates = nodes.filter((n): n is ItemFlowNode => n.type === "item");
+    const itemOptions = itemCandidates.map((n) => ({ id: n.id, name: n.data.name }));
 
     return (
-        <Box sx={{ position: "relative", height: "calc(100vh - 96px)" }}>
-            <Stack direction="row" spacing={2} sx={{ mb: 1, alignItems: "center" }}>
-                <Button variant="contained" onClick={() => addItemNode({ x: 40, y: 40 + nodes.length * 10 })}>
-                    + Добавить предмет
-                </Button>
-                <Button variant="outlined" onClick={() => setEnumPanelOpen(true)}>
-                    Enum-справочник
-                </Button>
-                <Typography variant="body2" color="text.secondary">
-                    Экспериментальный раздел — ничего не сохраняется и никуда не экспортируется.
-                </Typography>
-            </Stack>
+        <ItemRegistryProvider items={itemOptions}>
+            <Box sx={{ position: "relative", height: "calc(100vh - 96px)" }}>
+                <Stack direction="row" spacing={2} sx={{ mb: 1, alignItems: "center" }}>
+                    <Button variant="contained" onClick={() => addItemNode({ x: 40, y: 40 + nodes.length * 10 })}>
+                        + Добавить предмет
+                    </Button>
+                    <Button variant="outlined" onClick={() => setEnumPanelOpen(true)}>
+                        Enum-справочник
+                    </Button>
+                    <Typography variant="body2" color="text.secondary">
+                        Экспериментальный раздел — ничего не сохраняется и никуда не экспортируется.
+                    </Typography>
+                </Stack>
 
-            <EnumPanel open={enumPanelOpen} onClose={() => setEnumPanelOpen(false)} />
+                <EnumPanel open={enumPanelOpen} onClose={() => setEnumPanelOpen(false)} />
 
-            <Box
-                ref={containerRef}
-                sx={{ position: "relative", height: "100%", border: "1px solid", borderColor: "divider", borderRadius: 1 }}
-            >
-                <ReactFlow
-                    nodes={nodes}
-                    edges={edges}
-                    nodeTypes={nodeTypes}
-                    onNodesChange={onNodesChange}
-                    onEdgesChange={onEdgesChange}
-                    onConnect={onConnect}
-                    onConnectStart={onConnectStart}
-                    onConnectEnd={onConnectEnd}
-                    isValidConnection={isValidConnection}
-                    fitView
+                <Box
+                    ref={containerRef}
+                    sx={{ position: "relative", height: "100%", border: "1px solid", borderColor: "divider", borderRadius: 1 }}
                 >
-                    <Background />
-                    <Controls />
-                    <MiniMap />
-                </ReactFlow>
+                    <ReactFlow
+                        nodes={nodes}
+                        edges={edges}
+                        nodeTypes={nodeTypes}
+                        onNodesChange={onNodesChange}
+                        onEdgesChange={onEdgesChange}
+                        onConnect={onConnect}
+                        onConnectStart={onConnectStart}
+                        onConnectEnd={onConnectEnd}
+                        isValidConnection={isValidConnection}
+                        fitView
+                    >
+                        <Background />
+                        <Controls />
+                        <MiniMap />
+                    </ReactFlow>
 
-                {pendingItem && (
-                    <ConnectionMenu
-                        x={pendingItem.screenX}
-                        y={pendingItem.screenY}
-                        roleLabel={pendingItem.roleLabel}
-                        candidates={itemCandidates}
-                        onPick={pickExistingItem}
-                        onCreate={createAndConnectItem}
-                        onClose={closePendingItem}
-                    />
-                )}
+                    {pendingItem && (
+                        <ConnectionMenu
+                            x={pendingItem.screenX}
+                            y={pendingItem.screenY}
+                            roleLabel={pendingItem.roleLabel}
+                            candidates={itemCandidates}
+                            onPick={pickExistingItem}
+                            onCreate={createAndConnectItem}
+                            onClose={closePendingItem}
+                        />
+                    )}
 
-                {pendingBlock && (
-                    <PrimaryValueMenu
-                        x={pendingBlock.screenX}
-                        y={pendingBlock.screenY}
-                        fieldLabel={pendingBlock.primaryField}
-                        onConfirm={confirmBlockValue}
-                        onClose={closePendingBlock}
-                    />
-                )}
+                    {pendingBlock && (
+                        <PrimaryValueMenu
+                            x={pendingBlock.screenX}
+                            y={pendingBlock.screenY}
+                            fieldLabel={pendingBlock.primaryField}
+                            onConfirm={confirmBlockValue}
+                            onClose={closePendingBlock}
+                        />
+                    )}
+                </Box>
             </Box>
-        </Box>
+        </ItemRegistryProvider>
     );
 }
 

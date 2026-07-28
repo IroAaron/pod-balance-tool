@@ -37,9 +37,18 @@ const ACTIVATOR_BLOCK: BlockDefinition = {
     side: "left",
 };
 
-/** Every mechanic table's Target* fields line up the same way except the item-ref column, which varies by table. */
-function targetBlock(otherFields: string[], itemRefField?: string): BlockDefinition {
-    return { kind: "target", primaryField: "TargetType", otherFields, itemRefField, side: "right" };
+/**
+ * Every mechanic table's Target* fields line up the same way except the item-id column name, which varies by
+ * table (UseTargetIds vs TargetItemId) — rendered as a plain in-node field (see PLAIN_ITEM_REF_FIELDS), not its
+ * own point, same as Activator's UseActivatorIds.
+ */
+function targetBlock(otherFields: string[], itemIdField?: string): BlockDefinition {
+    return {
+        kind: "target",
+        primaryField: "TargetType",
+        otherFields: itemIdField ? [itemIdField, ...otherFields] : otherFields,
+        side: "right",
+    };
 }
 
 export const MECHANIC_BLOCKS: Record<MechanicKind, BlockDefinition[]> = {
@@ -95,6 +104,9 @@ const BLOCK_LABELS: Record<BlockKind, string> = {
 export function blockLabel(kind: BlockKind): string {
     return BLOCK_LABELS[kind];
 }
+
+/** Item-id-reference columns that render as a plain in-node field (searchable by name/id) rather than their own point. */
+export const PLAIN_ITEM_REF_FIELDS = new Set<string>(["UseActivatorIds", "UseTargetIds", "TargetItemId"]);
 
 /** Columns left over once ItemId + every block's own fields are removed — shown as plain fields on the mechanic node itself. */
 export const MECHANIC_MISC_FIELDS: Record<MechanicKind, string[]> = Object.fromEntries(

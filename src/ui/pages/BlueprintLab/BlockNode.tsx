@@ -1,9 +1,17 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Box, Paper, Stack, Typography } from "@mui/material";
-import { MECHANIC_BLOCKS, blockLabel } from "./mechanicSchema";
+import { MECHANIC_BLOCKS, PLAIN_ITEM_REF_FIELDS, blockLabel } from "./mechanicSchema";
 import { HANDLE_STYLE } from "./handleStyle";
 import EnumField from "./EnumField";
+import ItemRefSelect from "./ItemRefSelect";
 import type { BlockFlowNode } from "./types";
+
+function BlockField({ field, value, onChange }: { field: string; value: string; onChange: (value: string) => void }) {
+    if (PLAIN_ITEM_REF_FIELDS.has(field)) {
+        return <ItemRefSelect field={field} value={value} onChange={onChange} />;
+    }
+    return <EnumField field={field} value={value} onChange={onChange} />;
+}
 
 export default function BlockNode({ data, selected }: NodeProps<BlockFlowNode>) {
     const definition = MECHANIC_BLOCKS[data.mechanicKind].find((b) => b.kind === data.blockKind);
@@ -44,14 +52,14 @@ export default function BlockNode({ data, selected }: NodeProps<BlockFlowNode>) 
             </Box>
 
             <Stack spacing={1} className="nodrag" sx={{ p: 1.5, pt: definition.itemRefField ? "32px" : 1.5 }}>
-                <EnumField
+                <BlockField
                     field={definition.primaryField}
                     value={data.fields[definition.primaryField] ?? ""}
                     onChange={(value) => data.onFieldChange(definition.primaryField, value)}
                 />
 
                 {definition.otherFields.map((field) => (
-                    <EnumField
+                    <BlockField
                         key={field}
                         field={field}
                         value={data.fields[field] ?? ""}
