@@ -35,6 +35,9 @@ export interface SharedState {
 
     /** User-edited name/description text, keyed by translation key — see GameStore.getTranslation(). */
     translationOverrides: Record<string, string>;
+
+    /** Snapshot of translationOverrides as of the last successful Sheets export — see GameStore.pendingExportCount. */
+    exportedOverrides: Record<string, string>;
 }
 
 const DEFAULT_SHARED: SharedState = {
@@ -43,6 +46,7 @@ const DEFAULT_SHARED: SharedState = {
     sources: { configUrl: "", translationsUrl: "" },
     descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
     translationOverrides: {},
+    exportedOverrides: {},
 };
 
 export interface LegacyLocalState {
@@ -119,12 +123,22 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         (error) => console.error("subscribeShared:translationOverrides", error)
     );
 
+    const unsubExportedOverrides = onSnapshot(
+        doc(sharedCol, "exportedOverrides"),
+        (snapshot) => {
+            state.exportedOverrides = (snapshot.data() as Record<string, string> | undefined) ?? {};
+            emit();
+        },
+        (error) => console.error("subscribeShared:exportedOverrides", error)
+    );
+
     return () => {
         unsubIcons();
         unsubParamValues();
         unsubSources();
         unsubDescriptionSettings();
         unsubTranslationOverrides();
+        unsubExportedOverrides();
     };
 }
 
@@ -272,6 +286,12 @@ export function updateTranslationOverrideRemote(key: string, value: string): Pro
     return upsertDocField(doc(sharedCol, "translationOverrides"), key, value || deleteField());
 }
 
+/** Full overwrite — written once per successful export with every key/value just sent, not point-updated per
+ *  key, since a single export touches many keys at once anyway (see GameStore.exportEditedTranslations). */
+export function replaceExportedOverridesRemote(overrides: Record<string, string>): Promise<void> {
+    return setDoc(doc(sharedCol, "exportedOverrides"), overrides);
+}
+
 /** Full overwrite of all `shared/*` docs — used by importSnapshot, which is a full-replace operation. */
 export function replaceSharedState(shared: SharedState): Promise<void> {
     const batch = writeBatch(db);
@@ -280,6 +300,7 @@ export function replaceSharedState(shared: SharedState): Promise<void> {
     batch.set(doc(sharedCol, "sources"), shared.sources);
     batch.set(doc(sharedCol, "descriptionSettings"), shared.descriptionSettings);
     batch.set(doc(sharedCol, "translationOverrides"), shared.translationOverrides);
+    batch.set(doc(sharedCol, "exportedOverrides"), shared.exportedOverrides);
     return batch.commit();
 }
 

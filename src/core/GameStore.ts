@@ -45,6 +45,7 @@ import {
     updateSourceTranslationsUrlRemote,
     updateDescriptionSettingsRemote,
     updateTranslationOverrideRemote,
+    replaceExportedOverridesRemote,
     subscribeGlossary,
     replaceGlossaryRemote,
     subscribeTagIcons,
@@ -95,6 +96,9 @@ export class GameStore {
     /** User-edited name/description text, keyed by translation key — wins over the imported translations table
      *  for the same key. See getTranslation()/setTranslationOverride(). */
     translationOverrides: Record<string, string> = {};
+
+    /** Snapshot of translationOverrides as of the last successful Sheets export — see pendingExportCount. */
+    exportedOverrides: Record<string, string> = {};
 
     /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
@@ -185,6 +189,7 @@ export class GameStore {
             this.sources = shared.sources;
             this.descriptionSettings = shared.descriptionSettings;
             this.translationOverrides = shared.translationOverrides;
+            this.exportedOverrides = shared.exportedOverrides;
             this.sharedReady = true;
             this.notify();
         });
@@ -270,9 +275,12 @@ export class GameStore {
         );
     }
 
-    /** How many translation keys have a site-authored override — what exportEditedTranslations() would send. */
+    /** How many overrides differ from what was last successfully exported — a key whose current value matches
+     *  exportedOverrides[key] has already been sent and doesn't count, even though it's still an active override
+     *  (getTranslation() keeps using it — exporting doesn't clear the site's own copy, only marks it as sent). */
     get pendingExportCount(): number {
-        return Object.keys(this.translationOverrides).length;
+        return Object.entries(this.translationOverrides).filter(([key, value]) => this.exportedOverrides[key] !== value)
+            .length;
     }
 
     /**
@@ -300,13 +308,19 @@ export class GameStore {
 
         const names: Record<string, string> = {};
         const descriptions: Record<string, string> = {};
+        // Raw (pre-BBCode-conversion) values, keyed the same as translationOverrides — snapshotted below only
+        // once the send actually succeeds, so pendingExportCount can tell "sent" apart from "still pending".
+        const sentOverrides: Record<string, string> = {};
 
         for (const item of this.allItems) {
             const nameKey = item.nameKey ?? item.id;
             const descKey = item.descKey ?? `${item.id}_desc`;
 
             const nameOverride = this.translationOverrides[nameKey];
-            if (nameOverride) names[nameKey] = nameOverride;
+            if (nameOverride) {
+                names[nameKey] = nameOverride;
+                sentOverrides[nameKey] = nameOverride;
+            }
 
             const descOverride = this.translationOverrides[descKey];
             if (descOverride) {
@@ -318,10 +332,21 @@ export class GameStore {
                     glossaryToApply,
                     spriteWidthPx: this.descriptionSettings.spriteWidthPx,
                 });
+                sentOverrides[descKey] = descOverride;
             }
         }
 
-        return postExportPayload(this.sources.translationsUrl, { token, names, descriptions });
+        const result = await postExportPayload(this.sources.translationsUrl, { token, names, descriptions });
+
+        if (result.ok) {
+            this.exportedOverrides = { ...this.exportedOverrides, ...sentOverrides };
+            this.notify();
+            void replaceExportedOverridesRemote(this.exportedOverrides).catch((error) =>
+                console.error("exportEditedTranslations → Firestore", error)
+            );
+        }
+
+        return result;
     }
 
     itemName(item: Item): string {
@@ -655,6 +680,7 @@ export class GameStore {
             sources: this.sources,
             descriptionSettings: this.descriptionSettings,
             translationOverrides: this.translationOverrides,
+            exportedOverrides: this.exportedOverrides,
             importCache: {
                 items: this.allItems,
                 translations: this.translations,
@@ -679,6 +705,7 @@ export class GameStore {
                 sources: state.sources,
                 descriptionSettings: state.descriptionSettings,
                 translationOverrides: state.translationOverrides,
+                exportedOverrides: state.exportedOverrides,
             }),
         ]);
 

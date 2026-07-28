@@ -25,6 +25,11 @@ export interface PersistedState {
      *  value the same key has in the imported translations table. See GameStore.getTranslation(). */
     translationOverrides: Record<string, string>;
 
+    /** Snapshot of translationOverrides' values as of the last successful Sheets export, keyed the same way —
+     *  see GameStore.pendingExportCount. A key present here with the same value as translationOverrides[key]
+     *  means that edit has already been sent; a differing (or missing) value means it's still pending. */
+    exportedOverrides: Record<string, string>;
+
     importCache: NormalizedData | null;
 
     importCacheTimestamp: string | null;
@@ -37,6 +42,7 @@ const DEFAULT_STATE: PersistedState = {
     sources: { configUrl: "", translationsUrl: "" },
     descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
     translationOverrides: {},
+    exportedOverrides: {},
     importCache: null,
     importCacheTimestamp: null,
 };
@@ -114,6 +120,7 @@ export async function parseSnapshotFile(file: File): Promise<PersistedState> {
         sources: parsed.sources ?? DEFAULT_STATE.sources,
         descriptionSettings: parsed.descriptionSettings ?? DEFAULT_STATE.descriptionSettings,
         translationOverrides: parsed.translationOverrides ?? DEFAULT_STATE.translationOverrides,
+        exportedOverrides: parsed.exportedOverrides ?? DEFAULT_STATE.exportedOverrides,
         importCache: parsed.importCache ?? null,
         importCacheTimestamp: parsed.importCacheTimestamp ?? null,
     };
