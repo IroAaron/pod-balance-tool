@@ -45,17 +45,23 @@ export interface ItemPower {
 
     averageValue: number;
 
-    /** P — either auto-computed per item from real shop pack/deck data (see domain/shopProbability.ts), or
-     *  balanceConfig.scaleChelAppearanceProbability as a fallback when there's no computed value for this item
-     *  (not present in any shop deck, or Packs/DecksShop not imported yet). See probabilityIsAuto. */
+    /** P — sum of the shop-appearance probability (see domain/shopProbability.ts) of every "scaler" of this item:
+     *  the other members of the build where *this item is the root* (depth ≥ 1 in that build's own scaling
+     *  graph — see computeCascadeLevels), i.e. the things that actually scale it. Auto-computed whenever the item
+     *  is a real root of at least one build (see probabilityIsAuto); balanceConfig.scaleChelAppearanceProbability
+     *  is a manual fallback only for items that are never a build root (pure scalers, or items with no generated
+     *  build at all). */
     probability: number;
 
-    /** True when `probability` came from computeShopAppearanceProbabilities, false when it fell back to the
-     *  manual balanceConfig constant. */
+    /** True when this item is the root (depth 0) of at least one build, so `probability` was computed from its
+     *  own scalers' shop data (even if that sum came out to 0 — e.g. real scalers exist but none have shop-deck
+     *  data yet). False only when the item was never a build root — probability then falls back to the manual
+     *  constant. */
     probabilityIsAuto: boolean;
 
-    /** Populated only when probabilityIsAuto — every shop pack that contributed to this item's probability. */
-    probabilitySources: { packId: string; deckId: string; withinPackProbability: number }[];
+    /** Populated only when probabilityIsAuto — every scaler item that contributed to this item's P, and that
+     *  scaler's own shop-appearance probability. */
+    probabilitySources: { itemId: string; buildId: string; buildName: string; probability: number }[];
 
     /** averageValue × (1 + P). */
     probabilityTerm: number;
@@ -82,11 +88,14 @@ export interface ItemPower {
  *
  *   (MoneyValue + avg) + avg × (1 + P) + avg × Σ(coefficient at this item's depth, once per build it's in)
  *
- * where avg = (ValueMin + ValueMax) / 2, P is per-item — auto-computed from real shop data when `shopAppearances`
- * has an entry for this item (see domain/shopProbability.ts), otherwise balanceConfig.scaleChelAppearanceProbability
- * as a manual fallback — and the per-build coefficient sum comes from classifying the item into each build it
- * belongs to via computeCascadeLevels (the same depth/"ступень" concept already used for the "Дерево связей"
- * build-detail view) and looking up balanceConfig.depthCoefficients[depth] for each one.
+ * where avg = (ValueMin + ValueMax) / 2. P and the coefficient sum are two *different* directions through the
+ * same build graphs:
+ *   - P (term 2) is about this item being scaled: the sum of the shop-appearance probability of every item that
+ *     scales *this* item (the other members of the build where this item is the root — see probabilityIsAuto's
+ *     doc on ItemPower). Reflects "how reliably will this item actually get boosted in a real run."
+ *   - the coefficient sum (term 3) is about this item scaling others: every build this item is a *member* of
+ *     (root or not), weighted by balanceConfig.depthCoefficients[depth] for its own depth in each. Reflects "how
+ *     useful is this item as a lever for other builds."
  *
  * computeCascadeLevels is run once per build (not once per item×build) — for typical dataset sizes (hundreds of
  * items, dozens of builds) this is cheap enough for a page-level useMemo; callers should still memoize on their
@@ -104,6 +113,10 @@ export function computeItemPowers(
 ): Map<string, ItemPower> {
     const knownIds = new Set(items.map((item) => item.id));
     const presenceByItem = new Map<string, BuildPresenceEntry[]>();
+    // Populated only for items that are the real root (depth 0) of at least one build — distinguishes "root with
+    // zero scalers found" (real 0) from "never a root at all" (falls back to the manual constant), see
+    // ItemPower.probabilityIsAuto's doc.
+    const scalerSourcesByRoot = new Map<string, { itemId: string; buildId: string; buildName: string; probability: number }[]>();
 
     for (const build of builds) {
         if (build.items.length === 0) continue;
@@ -121,6 +134,18 @@ export function computeItemPowers(
             if (list) list.push(entry);
             else presenceByItem.set(node.itemId, [entry]);
         }
+
+        const rootNode = result.nodes.find((node) => node.depth === 0 && !node.combo);
+        if (!rootNode) continue;
+
+        const sources = scalerSourcesByRoot.get(rootNode.itemId) ?? [];
+        for (const node of result.nodes) {
+            if (node.combo || node.itemId === rootNode.itemId) continue;
+            const scalerProbability = shopAppearances?.get(node.itemId)?.perVisitProbability;
+            if (!scalerProbability) continue;
+            sources.push({ itemId: node.itemId, buildId: build.id, buildName: build.name, probability: scalerProbability });
+        }
+        scalerSourcesByRoot.set(rootNode.itemId, sources);
     }
 
     const powers = new Map<string, ItemPower>();
@@ -128,8 +153,11 @@ export function computeItemPowers(
     for (const item of items) {
         const moneyValue = moneyValueOf(item);
         const averageValue = averageValueOf(item);
-        const autoAppearance = shopAppearances?.get(item.id);
-        const probability = autoAppearance?.perVisitProbability ?? balanceConfig.scaleChelAppearanceProbability;
+        const scalerSources = scalerSourcesByRoot.get(item.id);
+        const probabilityIsAuto = scalerSources !== undefined;
+        const probability = probabilityIsAuto
+            ? scalerSources.reduce((sum, source) => sum + source.probability, 0)
+            : balanceConfig.scaleChelAppearanceProbability;
         const probabilityTerm = averageValue * (1 + probability);
         const buildPresence = presenceByItem.get(item.id) ?? [];
         const buildCoefficientSum = buildPresence.reduce((sum, entry) => sum + entry.coefficient, 0);
@@ -139,8 +167,8 @@ export function computeItemPowers(
             moneyValue,
             averageValue,
             probability,
-            probabilityIsAuto: autoAppearance !== undefined,
-            probabilitySources: autoAppearance?.packs ?? [],
+            probabilityIsAuto,
+            probabilitySources: scalerSources ?? [],
             probabilityTerm,
             buildPresence,
             buildCoefficientSum,

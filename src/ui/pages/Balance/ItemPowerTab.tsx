@@ -43,14 +43,15 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
             <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
             <Typography variant="caption">avg = (Min+Max)/2: {fmt(power.averageValue)}</Typography>
             <Typography variant="caption">
-                P: {fmt(power.probability)} ({power.probabilityIsAuto ? "авто, по магазинным пакам" : "константа из «Констант»"})
-                → avg×(1+P) = {fmt(power.probabilityTerm)}
+                P: {fmt(power.probability)} ({power.probabilityIsAuto ? "авто, Σ по скейлерам" : "константа из «Констант»"}) →
+                avg×(1+P) = {fmt(power.probabilityTerm)}
             </Typography>
             {power.probabilitySources.length > 0 && (
                 <Stack sx={{ mt: 0.5 }}>
                     {power.probabilitySources.map((source, index) => (
-                        <Typography key={`${source.packId}-${index}`} variant="caption">
-                            • пак «{source.packId}» (колода {source.deckId}) — {fmt(source.withinPackProbability)}
+                        <Typography key={`${source.itemId}-${index}`} variant="caption">
+                            • скейлер «{source.itemId}» ({source.buildName || source.buildId}) —{" "}
+                            {fmt(source.probability)}
                         </Typography>
                     ))}
                 </Stack>

@@ -60,10 +60,13 @@ describe("computeItemPowers", () => {
         const rootPower = powers.get("root")!;
         expect(rootPower.moneyValue).toBe(10);
         expect(rootPower.averageValue).toBe(4);
-        expect(rootPower.probabilityTerm).toBeCloseTo(6); // 4 * (1 + 0.5)
+        // root IS a build root, so P auto-computes as the sum of its scalers' shop probability — no
+        // shopAppearances passed here, so that sum is 0 (real root, just no shop data), NOT the 0.5 fallback.
+        expect(rootPower.probabilityIsAuto).toBe(true);
+        expect(rootPower.probabilityTerm).toBeCloseTo(4); // 4 * (1 + 0)
         expect(rootPower.buildPresence).toEqual([{ buildId: "build-1", buildName: "Test Build", depth: 0, coefficient: 1 }]);
         expect(rootPower.buildTerm).toBeCloseTo(4); // 4 * 1
-        expect(rootPower.power).toBeCloseTo(24); // (10 + 4) + 6 + 4
+        expect(rootPower.power).toBeCloseTo(22); // (10 + 4) + 4 + 4
 
         const boosterPower = powers.get("booster")!;
         expect(boosterPower.buildPresence).toEqual([{ buildId: "build-1", buildName: "Test Build", depth: 1, coefficient: 2 }]);
@@ -114,41 +117,60 @@ describe("computeItemPowers", () => {
         expect(sharedPower.buildCoefficientSum).toBe(6); // depth 1 in both builds: 3 + 3
     });
 
-    it("uses an auto-computed shop-appearance probability when present, falling back to the manual constant otherwise", () => {
-        const withShopData = makeItem("with-shop-data", { valueMin: 4, valueMax: 4 });
-        const withoutShopData = makeItem("without-shop-data", { valueMin: 4, valueMax: 4 });
-        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0 }, scaleChelAppearanceProbability: 0.1 };
+    it("P is the sum of a root item's own scalers' shop-appearance probability, not the root's own", () => {
+        const root = makeItem("root", { valueMin: 2, valueMax: 6, raw: { MoneyValue: "0" } });
+        const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
+        const neverRoot = makeItem("never-root", { valueMin: 4, valueMax: 4 }); // not a member of any build
 
+        const payoff: MechanicRow = {
+            id: "root-payoff",
+            table: "MechAddValue",
+            itemId: "root",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
+        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.1 };
+
+        // scaler's OWN shop probability (root itself has none in this map — the root's own appearance is
+        // irrelevant to its P, only its scaler's is).
         const shopAppearances = new Map([
-            [
-                "with-shop-data",
-                {
-                    itemId: "with-shop-data",
-                    packs: [{ packId: "shop_card_x", deckId: "deck_x", withinPackProbability: 0.5 }],
-                    perSlotProbability: 0.5,
-                    perVisitProbability: 0.4,
-                },
-            ],
+            ["scaler", { itemId: "scaler", packs: [], perSlotProbability: 0.2, perVisitProbability: 0.4 }],
         ]);
 
-        const powers = computeItemPowers(
-            [withShopData, withoutShopData],
-            [],
-            [],
-            [],
-            [],
-            balanceConfig,
-            shopAppearances
-        );
+        const powers = computeItemPowers([root, scaler, neverRoot], [build], [payoff], [], [], balanceConfig, shopAppearances);
 
-        const withData = powers.get("with-shop-data")!;
-        expect(withData.probabilityIsAuto).toBe(true);
-        expect(withData.probability).toBeCloseTo(0.4);
-        expect(withData.probabilitySources).toEqual([{ packId: "shop_card_x", deckId: "deck_x", withinPackProbability: 0.5 }]);
+        const rootPower = powers.get("root")!;
+        expect(rootPower.probabilityIsAuto).toBe(true);
+        expect(rootPower.probability).toBeCloseTo(0.4);
+        expect(rootPower.probabilitySources).toEqual([
+            { itemId: "scaler", buildId: "build-1", buildName: "Root Build", probability: 0.4 },
+        ]);
 
-        const withoutData = powers.get("without-shop-data")!;
-        expect(withoutData.probabilityIsAuto).toBe(false);
-        expect(withoutData.probability).toBeCloseTo(0.1); // falls back to balanceConfig's manual constant
-        expect(withoutData.probabilitySources).toEqual([]);
+        // Never the root of any build → falls back to the manual constant, not 0.
+        const neverRootPower = powers.get("never-root")!;
+        expect(neverRootPower.probabilityIsAuto).toBe(false);
+        expect(neverRootPower.probability).toBeCloseTo(0.1);
+        expect(neverRootPower.probabilitySources).toEqual([]);
+    });
+
+    it("a real root with a scaler that has no known shop data still counts as auto (P=0), not the manual fallback", () => {
+        const root = makeItem("root", { valueMin: 2, valueMax: 6, raw: { MoneyValue: "0" } });
+        const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
+
+        const payoff: MechanicRow = {
+            id: "root-payoff",
+            table: "MechAddValue",
+            itemId: "root",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
+        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.9 };
+
+        // No shopAppearances passed at all this time.
+        const powers = computeItemPowers([root, scaler], [build], [payoff], [], [], balanceConfig);
+
+        const rootPower = powers.get("root")!;
+        expect(rootPower.probabilityIsAuto).toBe(true);
+        expect(rootPower.probability).toBe(0); // real root, just no scaler shop data — not the 0.9 fallback
     });
 });
