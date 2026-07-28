@@ -18,6 +18,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { Alert, Box, Button, Stack, Typography } from "@mui/material";
 
+import { useStore } from "../../hooks/useStore";
 import ItemNode from "./ItemNode";
 import MechanicNode from "./MechanicNode";
 import BlockNode from "./BlockNode";
@@ -70,6 +71,7 @@ function makeItemData(overrides?: Partial<{ name: string; itemType: ItemFlowNode
 }
 
 function BlueprintLabCanvas() {
+    const store = useStore();
     const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const [pendingItem, setPendingItem] = useState<PendingItemConnection | null>(null);
@@ -328,7 +330,10 @@ function BlueprintLabCanvas() {
     );
 
     const itemCandidates = nodes.filter((n): n is ItemFlowNode => n.type === "item");
-    const itemOptions = itemCandidates.map((n) => ({ id: n.id, name: n.data.name }));
+    const itemOptions = [
+        ...store.items.map((item) => ({ id: item.id, name: store.itemName(item), source: "real" as const })),
+        ...itemCandidates.map((n) => ({ id: n.id, name: n.data.name, source: "canvas" as const })),
+    ];
 
     return (
         <ItemRegistryProvider items={itemOptions}>
