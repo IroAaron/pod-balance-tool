@@ -387,6 +387,72 @@ export class GameStore {
         return result;
     }
 
+    /**
+     * Sends every item's current name/description — not just ones with a site-authored override. Exists because
+     * glossary phrase matches and {tag:Name}/{item:ID} tokens can newly apply to an item's description (e.g. a
+     * glossary entry just got a new phrase, or a tag just got an icon) without the description text itself ever
+     * being edited on the site — exportEditedTranslations() has no way to notice that, since translationOverrides
+     * never changed. This instead renders each item exactly as the site currently shows it (override if one
+     * exists, else the imported translation) through the same buildExportDescriptionText conversion, so a
+     * glossary/tag-icon change can be pushed to every affected item at once instead of re-editing each one just
+     * to re-trigger an override.
+     */
+    async exportAllTranslations(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.translationsUrl) {
+            throw new Error("Не задан источник переводов на странице «Источники»");
+        }
+
+        const glossaryToApply =
+            this.descriptionSettings.descriptionMode === "icons-emoji"
+                ? this.glossary
+                : this.descriptionSettings.descriptionMode === "text-icons"
+                  ? this.glossary.filter((entry) => entry.enabled !== false)
+                  : [];
+
+        const names: Record<string, string> = {};
+        const descriptions: Record<string, string> = {};
+
+        for (const item of this.allItems) {
+            const nameKey = item.nameKey ?? item.id;
+            const descKey = item.descKey ?? `${item.id}_desc`;
+
+            // Real translated text only — not itemName()/itemDescription()'s own key/id/"" fallback, which would
+            // otherwise overwrite a real Sheet cell with a literal placeholder for an item that never had a
+            // translation loaded at all.
+            const name = this.getTranslation(item.nameKey);
+            if (name) names[nameKey] = name;
+
+            const description = this.getTranslation(item.descKey);
+            if (description) {
+                descriptions[descKey] = buildExportDescriptionText(description, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+            }
+        }
+
+        const result = await postExportPayload(this.sources.translationsUrl, { token, names, descriptions });
+
+        if (result.ok) {
+            // Every current override just went out too (as part of "every item"), so it's no longer pending.
+            this.exportedOverrides = { ...this.exportedOverrides, ...this.translationOverrides };
+            this.notify();
+            void replaceExportedOverridesRemote(this.exportedOverrides).catch((error) =>
+                console.error("exportAllTranslations → Firestore", error)
+            );
+        }
+
+        return result;
+    }
+
     itemName(item: Item): string {
         return this.getTranslation(item.nameKey) ?? item.nameKey ?? item.id;
     }

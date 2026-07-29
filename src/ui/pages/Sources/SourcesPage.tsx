@@ -39,6 +39,7 @@ export default function SourcesPage() {
     const [spriteSyncResult, setSpriteSyncResult] = useState<SpriteSyncResult | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [confirmingExport, setConfirmingExport] = useState(false);
+    const [confirmingExportAll, setConfirmingExportAll] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
     const [confirmingClearImport, setConfirmingClearImport] = useState(false);
@@ -98,6 +99,19 @@ export default function SourcesPage() {
         setExportResult(null);
         try {
             setExportResult(await store.exportEditedTranslations());
+        } catch (error) {
+            setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    const confirmExportAll = async () => {
+        setConfirmingExportAll(false);
+        setExporting(true);
+        setExportResult(null);
+        try {
+            setExportResult(await store.exportAllTranslations());
         } catch (error) {
             setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
         } finally {
@@ -202,7 +216,7 @@ export default function SourcesPage() {
                         <code> VITE_SHEETS_EXPORT_TOKEN</code> в <code>.env.local</code>.
                     </Typography>
 
-                    <Box>
+                    <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
                         <Button
                             variant="contained"
                             onClick={() => setConfirmingExport(true)}
@@ -213,7 +227,24 @@ export default function SourcesPage() {
                                 ? "Отправка..."
                                 : `Экспортировать правки (${store.pendingExportCount})`}
                         </Button>
-                    </Box>
+
+                        <Button
+                            variant="outlined"
+                            onClick={() => setConfirmingExportAll(true)}
+                            disabled={exporting || store.allItems.length === 0}
+                            startIcon={exporting ? <CircularProgress size={16} /> : undefined}
+                        >
+                            Экспортировать все переводы предметов
+                        </Button>
+                    </Stack>
+
+                    <Typography variant="caption" color="text.secondary">
+                        «Все переводы предметов» отправляет название/описание каждого предмета так, как их сейчас
+                        показывает сайт (с учётом значков глоссария/тегов), даже если сам текст ни разу не
+                        редактировался на сайте — например, когда в глоссарий добавили новую фразу или иконку тега
+                        и нужно, чтобы это попало в таблицу сразу для всех подходящих предметов, а не только для
+                        отредактированных.
+                    </Typography>
 
                     {exportResult &&
                         (exportResult.ok ? (
@@ -450,6 +481,24 @@ export default function SourcesPage() {
                     <Button onClick={() => setConfirmingExport(false)}>Отмена</Button>
                     <Button color="error" onClick={() => void confirmExport()}>
                         Экспортировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={confirmingExportAll} onClose={() => setConfirmingExportAll(false)}>
+                <DialogTitle>Экспортировать все переводы предметов?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Запишет название и описание КАЖДОГО из {store.allItems.length} загруженных предметов (как их
+                        сейчас показывает сайт, включая значки глоссария и тегов) обратно в реальные таблицы
+                        item_name/item_desc — не только отредактированные на сайте. Существующие строки
+                        обновятся, новых ключей — добавятся. Действие необратимо и затронет всю таблицу переводов.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingExportAll(false)}>Отмена</Button>
+                    <Button color="error" onClick={() => void confirmExportAll()}>
+                        Экспортировать всё
                     </Button>
                 </DialogActions>
             </Dialog>
