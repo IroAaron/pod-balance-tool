@@ -33,25 +33,13 @@ export default function BlockNode({ data, selected }: NodeProps<BlockFlowNode>) 
         >
             <Handle type="target" id="in" position={inHandlePosition} style={{ top: 24, ...HANDLE_STYLE }} />
 
-            {definition.itemRefField && (
-                <Box sx={{ position: "relative" }}>
-                    <Handle type="source" id="itemRef" position={Position.Right} style={{ top: 24, ...HANDLE_STYLE }} />
-                    <Typography
-                        variant="caption"
-                        sx={{ position: "absolute", right: 10, top: 16, color: "text.secondary", pointerEvents: "none" }}
-                    >
-                        {definition.itemRefField} →
-                    </Typography>
-                </Box>
-            )}
-
             <Box sx={{ px: 1.5, py: 1, bgcolor: "action.hover" }}>
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
                     {blockLabel(data.blockKind)}
                 </Typography>
             </Box>
 
-            <Stack spacing={1} className="nodrag" sx={{ p: 1.5, pt: definition.itemRefField ? "32px" : 1.5 }}>
+            <Stack spacing={1} className="nodrag" sx={{ p: 1.5 }}>
                 <BlockField
                     field={definition.primaryField}
                     value={data.fields[definition.primaryField] ?? ""}

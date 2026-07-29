@@ -109,6 +109,13 @@ export interface ExportPayload {
 
     /** translation key -> new value, written into item_desc's `ru` column. */
     descriptions: Record<string, string>;
+
+    /** Blueprint Lab item edits — table -> ItemId -> full column bag, upserted by ItemId (safe: unique per item). */
+    items?: Record<"Cards" | "Houses" | "Artefacts", Record<string, Record<string, string>>>;
+
+    /** Blueprint Lab brand-new mechanic rows — table -> full rows, always appended, never matched against an
+     *  existing row (MechanicRow.id isn't a real spreadsheet key, see GameStore.exportBlueprintChanges's doc). */
+    newMechanicRows?: Partial<Record<string, Record<string, string>[]>>;
 }
 
 export interface ExportResult {

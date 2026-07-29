@@ -76,6 +76,11 @@ export default function MechanicNode({ data, selected }: NodeProps<MechanicFlowN
                 <Typography variant="caption" sx={{ fontWeight: 600 }}>
                     ⚙️ Mechanic
                 </Typography>
+                {data.existing && (
+                    <Typography variant="caption" color="warning.main" sx={{ display: "block" }}>
+                        существующая строка — правки не экспортируются
+                    </Typography>
+                )}
             </Box>
 
             <Stack

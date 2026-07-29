@@ -20,11 +20,9 @@ export interface BlockDefinition {
     /** Raw column name offered first when the block is created (the point's drag-to-create prompt). */
     primaryField: string;
 
-    /** Remaining raw column names, edited as plain fields once the block node exists. */
+    /** Remaining raw column names, edited as plain fields once the block node exists — includes any item-id
+     *  reference column (see PLAIN_ITEM_REF_FIELDS), which renders as a searchable item picker, not a point. */
     otherFields: string[];
-
-    /** Raw column name that is a literal item-id reference, if this block has one — becomes an "attach item" point. */
-    itemRefField?: string;
 
     /** Which side of the mechanic node the block's point renders on. */
     side: "left" | "right";
@@ -80,8 +78,9 @@ export const MECHANIC_BLOCKS: Record<MechanicKind, BlockDefinition[]> = {
         {
             kind: "newItem",
             primaryField: "ItemMech",
-            otherFields: ["CopiedTargetType", "CopiedTargetPlace", "CopiedTargetColor", "CopiedTargetTag", "CopiedTargetValueUsageType"],
-            itemRefField: "NewItemId",
+            otherFields: [
+                "NewItemId", "CopiedTargetType", "CopiedTargetPlace", "CopiedTargetColor", "CopiedTargetTag", "CopiedTargetValueUsageType",
+            ],
             side: "right",
         },
     ],
@@ -106,7 +105,7 @@ export function blockLabel(kind: BlockKind): string {
 }
 
 /** Item-id-reference columns that render as a plain in-node field (searchable by name/id) rather than their own point. */
-export const PLAIN_ITEM_REF_FIELDS = new Set<string>(["UseActivatorIds", "UseTargetIds", "TargetItemId"]);
+export const PLAIN_ITEM_REF_FIELDS = new Set<string>(["UseActivatorIds", "UseTargetIds", "TargetItemId", "NewItemId"]);
 
 /** Columns left over once ItemId + every block's own fields are removed — shown as plain fields on the mechanic node itself. */
 export const MECHANIC_MISC_FIELDS: Record<MechanicKind, string[]> = Object.fromEntries(
@@ -115,7 +114,6 @@ export const MECHANIC_MISC_FIELDS: Record<MechanicKind, string[]> = Object.fromE
         for (const block of MECHANIC_BLOCKS[kind]) {
             claimed.add(block.primaryField);
             for (const f of block.otherFields) claimed.add(f);
-            if (block.itemRefField) claimed.add(block.itemRefField);
         }
         return [kind, MECHANIC_TABLE_COLUMNS[kind].filter((col) => !claimed.has(col))];
     }),

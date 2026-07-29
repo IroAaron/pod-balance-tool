@@ -5,14 +5,17 @@ import { useEnumRegistry } from "./EnumRegistryContext";
 import { tooltipFontSizeSlotProps } from "./tooltipSlotProps";
 
 interface Props {
+    dimension: string;
+    label: string;
     value: string[];
-    onChange: (tags: string[]) => void;
+    onChange: (values: string[]) => void;
 }
 
-export default function TagsSelect({ value, onChange }: Props) {
+/** Multi-select over an Enum dimension — used for both the item's Tags (ItemTag) and PossibleColors (TargetColor). */
+export default function EnumMultiSelect({ dimension, label, value, onChange }: Props) {
     const { values, descriptions, valueDescriptions } = useEnumRegistry();
-    const options = values.ItemTag ?? [];
-    const dimensionHint = descriptions.ItemTag;
+    const options = values[dimension] ?? [];
+    const dimensionHint = descriptions[dimension];
     const store = useStore();
     const slotProps = tooltipFontSizeSlotProps(store.descriptionSettings.tooltipFontSizePx);
     const [listOpen, setListOpen] = useState(false);
@@ -34,23 +37,23 @@ export default function TagsSelect({ value, onChange }: Props) {
             onClose={() => setListOpen(false)}
             renderValue={(selected) =>
                 selected.length === 0 ? (
-                    "Теги"
+                    label
                 ) : (
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                        {selected.map((tag) => (
-                            <Chip key={tag} label={tag} size="small" />
+                        {selected.map((v) => (
+                            <Chip key={v} label={v} size="small" />
                         ))}
                     </Box>
                 )
             }
         >
-            {options.map((tag) => {
-                const desc = valueDescriptions.ItemTag?.[tag];
+            {options.map((v) => {
+                const desc = valueDescriptions[dimension]?.[v];
                 return (
-                    <Tooltip key={tag} title={desc || ""} placement="right" disableHoverListener={!desc} slotProps={slotProps}>
-                        <MenuItem value={tag}>
-                            <Checkbox size="small" checked={value.includes(tag)} />
-                            <ListItemText primary={tag} />
+                    <Tooltip key={v} title={desc || ""} placement="right" disableHoverListener={!desc} slotProps={slotProps}>
+                        <MenuItem value={v}>
+                            <Checkbox size="small" checked={value.includes(v)} />
+                            <ListItemText primary={v} />
                         </MenuItem>
                     </Tooltip>
                 );

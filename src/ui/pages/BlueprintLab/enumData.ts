@@ -71,6 +71,7 @@ export const FIELD_TO_DIMENSION: Record<string, string> = {
     TagMech: "TagMech",
     NewTags: "ItemTag",
     MyPositionReq: "Place",
+    PossibleColors: "TargetColor",
 };
 
 export const ENUM_DIMENSIONS = Object.keys(DEFAULT_ENUM_VALUES);
