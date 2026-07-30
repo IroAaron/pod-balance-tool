@@ -38,7 +38,7 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
     return (
         <Stack spacing={0.5} sx={{ p: 0.5, maxWidth: 340 }}>
             <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                Сила = (MoneyValue + MainValue) + (|S|×(M+1)/A) × Σ(Q×V)
+                Сила = (MoneyValue + MainValue) + ((M+1)/A) × Σ(Q×V)
             </Typography>
             <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
             <Typography variant="caption">MainValue = (Min+Max)/2: {fmt(power.averageValue)}</Typography>
@@ -47,8 +47,8 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
             </Typography>
             <Typography variant="caption">A (всего предметов): {power.totalItemCount}</Typography>
             <Typography variant="caption">
-                |S| (билдов на ступени ≤ N): {power.qualifyingBuildCount} → множитель |S|×(M+1)/A ={" "}
-                {fmt(power.formulaMultiplier)}
+                Билдов в S (ступень ≤ N, только источник для M и Q×V, не множитель): {power.qualifyingBuildCount} →
+                множитель (M+1)/A = {fmt(power.formulaMultiplier)}
             </Typography>
             {power.qualifyingBuildEntries.length > 0 ? (
                 <Stack sx={{ mt: 0.5 }}>

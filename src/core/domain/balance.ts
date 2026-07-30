@@ -86,7 +86,7 @@ export interface ItemPower {
     /** A — total number of items in the dataset `power` was computed over. */
     totalItemCount: number;
 
-    /** |S| × (M + 1) / A. */
+    /** (M + 1) / A. */
     formulaMultiplier: number;
 
     /** (MoneyValue + MainValue) + formulaMultiplier × sumQV — see computeItemPowers' doc for the full formula. */
@@ -97,13 +97,16 @@ export interface ItemPower {
  * Computes every item's "power" — a single number meant to make relative balance visible at a glance, per the
  * user's own formula:
  *
- *   (MoneyValue + MainValue) + (|S| × (M + 1) / A) × Σ_{b∈S}(Q_b × V_b)
+ *   (MoneyValue + MainValue) + ((M + 1) / A) × Σ_{b∈S}(Q_b × V_b)
  *
  * where, for the item X whose power is being computed:
  *   - MoneyValue/MainValue are X's own values (MainValue = (ValueMin + ValueMax) / 2, same quantity the rest of
  *     this module calls `averageValue`/avg — "MainValue" is the game's own name for it, see TargetValueType).
  *   - S is the subset of builds X is a member of (from `buildPresence`) where X's own depth is ≤
  *     balanceConfig.qualifyingBuildDepthThreshold (N) — "билды, в которых предмет находится не ниже N ступени".
+ *     S itself isn't a factor in the formula — it's the domain M and Σ(Q×V) are both computed over (both read
+ *     "take builds from S, then compute ... from them", not "multiply by |S|"; |S| is exposed separately as
+ *     `qualifyingBuildCount`, purely informational).
  *   - M is the count of unique items X has a *direct* structural connection with — both directions (things X
  *     directly feeds, and things that directly feed X) — found only inside the builds in S itself, not every
  *     build X happens to be a member of. Computed from computeCascadeLevels' `node.parents` (an edge child→parent
@@ -217,8 +220,7 @@ export function computeItemPowers(
         }
         const directConnectionItemIds = [...directConnectionsSet];
         const directConnectionsCount = directConnectionItemIds.length;
-        const formulaMultiplier =
-            totalItemCount > 0 ? ((directConnectionsCount + 1)) / totalItemCount : 0;
+        const formulaMultiplier = totalItemCount > 0 ? (directConnectionsCount + 1) / totalItemCount : 0;
         const power = moneyValue + averageValue + formulaMultiplier * sumQV;
 
         powers.set(item.id, {
