@@ -218,7 +218,7 @@ export function computeItemPowers(
         const directConnectionItemIds = [...directConnectionsSet];
         const directConnectionsCount = directConnectionItemIds.length;
         const formulaMultiplier =
-            totalItemCount > 0 ? (qualifyingBuildCount * (directConnectionsCount + 1)) / totalItemCount : 0;
+            totalItemCount > 0 ? ((directConnectionsCount + 1)) / totalItemCount : 0;
         const power = moneyValue + averageValue + formulaMultiplier * sumQV;
 
         powers.set(item.id, {
