@@ -1330,3 +1330,158 @@ describe("computeCascadeLevels excludes upgrade tiers when options.upgradeChains
         expect(result.nodes.some((n) => n.itemId === stranger.id && n.extra)).toBe(true);
     });
 });
+
+/**
+ * Regression coverage for the 2026-07-28 "type-only activator as context" polish: real motivating example —
+ * Робот/Моряк (`c_chel_activate_near_house_1`/`c_chel_activate_opposite_side_house_1`) directly activate "any
+ * nearby House"/"the opposite House" via MechActivate with no UseTargetIds and no TargetTag at all, so under the
+ * id/tag-only rule they could never appear in *any* build, even though the mechanic effect is completely real.
+ * buildCascadeStyleConnections now connects a House/Artefact-type-only row to every House/Artefact — but that only
+ * ever surfaces through addRelatedContextNodes (orange, extra:true), and only once a same-typed item is already a
+ * real member — never through findFeedersOf/computeCascadeBuilds (real generation stays untouched).
+ */
+describe("computeCascadeLevels type-only activators (House/Artefact) as context nodes only", () => {
+    function robotFixture() {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5, itemType: "Card" });
+        const houseFeeder = makeItem("house_feeder", { itemType: "House", tags: ["Bum"] }); // real depth-1 anchor
+        const robot = makeItem("robot", { itemType: "Card" });
+        const items = [root, houseFeeder, robot];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum" }),
+            {
+                id: "robot-activate-house",
+                table: "MechActivate",
+                itemId: robot.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "House", TargetPlace: "Near", TargetCount: "2" },
+            },
+        ];
+        return { root, houseFeeder, robot, items, mechanics };
+    }
+
+    it("appears as an extra context node once a real House member is already in the graph", () => {
+        const { root, houseFeeder, robot, items, mechanics } = robotFixture();
+        const build = { id: "b", name: "Билд", items: [root.id, houseFeeder.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const robotNode = result.nodes.find((n) => n.itemId === robot.id);
+        expect(robotNode?.extra).toBe(true);
+    });
+
+    it("never appears at all when no House/Artefact member is in the graph", () => {
+        const { root, items, mechanics } = robotFixture();
+        const build = { id: "b2", name: "Билд", items: [root.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        expect(result.nodes.some((n) => n.itemId === "robot")).toBe(false);
+    });
+
+    it("never enters real generation (computeCascadeBuilds), regardless of context", () => {
+        const { root, houseFeeder, items, mechanics } = robotFixture();
+        const drafts = computeCascadeBuilds(items, mechanics, [], [], (item) => item.id);
+        const built = drafts.find((d) => d.items[0] === root.id);
+        expect(built?.items).toContain(houseFeeder.id);
+        expect(built?.items).not.toContain("robot");
+    });
+
+    it("does NOT connect via TargetType=Card (only House/Artefact) — Card is ~most of the catalog", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const cardFeeder = makeItem("card_feeder", { itemType: "Card", tags: ["Bum"] });
+        const genericCardActivator = makeItem("generic_card_activator", { itemType: "Card" });
+        const items = [root, cardFeeder, genericCardActivator];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum" }),
+            {
+                id: "activates-any-card",
+                table: "MechActivate",
+                itemId: genericCardActivator.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetPlace: "Near", TargetCount: "2" },
+            },
+        ];
+        const build = { id: "b3", name: "Билд", items: [root.id, cardFeeder.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        expect(result.nodes.some((n) => n.itemId === genericCardActivator.id)).toBe(false);
+    });
+});
+
+/**
+ * Regression coverage for the 2026-07-28 "indirect depth" fix: real motivating example — Медсестра, in "Билд от
+ * Фотомодели", showed at a *shallower* depth than Фитнес-тренер/a combo, even though her only connection was the
+ * "indirect" fallback (no real parent among this build's own members) while theirs were genuinely real, in-build,
+ * multi-hop connections. Root cause: an indirect node's `depth` came straight from the full, catalog-wide BFS
+ * (computeScalingGraphInternal over every item, not just this build's members), which has no idea the node just
+ * fell back to a placeholder parent — so a small catalog-wide hop count via some non-member item displayed as if
+ * it were a strong, shallow connection.
+ */
+describe("computeCascadeLevels pushes indirect-only members past every genuinely-connected one", () => {
+    it("an indirect member (originally shallower in the full catalog graph) ends up deeper than a real 3-hop in-build chain", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        // Real, genuinely in-build 3-hop chain: root -(tag Bum, activation-subject)-> realShallow(1)
+        // -(activates Bum, "activator")-> realMid(2) -(activates Fast, "activator")-> realDeep(3).
+        const realShallow = makeItem("real_shallow", { tags: ["Bum"] });
+        const realMid = makeItem("real_mid", { tags: ["Fast"] });
+        const realDeep = makeItem("real_deep");
+        // indirectMember's *real* catalog-wide feeder is outsider (tag Rich, found directly off root's own Bonus
+        // filter, depth 1) — a genuinely real edge, just not through a member of *this* build, so within this
+        // build she can only be explained by the "indirect" fallback even though her raw catalog-wide depth (2)
+        // is smaller than the real chain's (3).
+        const indirectMember = makeItem("indirect_member", { tags: ["Loud"] });
+        const outsider = makeItem("outsider", { tags: ["Rich"] }); // real catalog-wide feeder, NOT a build member
+        const items = [root, realShallow, realMid, realDeep, indirectMember, outsider];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum", BonusTargetTag: "Rich", BonusCountingType: "ItemMoneyValue" }),
+            {
+                id: "realMid-activates-Bum",
+                table: "MechActivate",
+                itemId: realMid.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Bum" },
+            },
+            {
+                id: "realDeep-activates-Fast",
+                table: "MechActivate",
+                itemId: realDeep.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Fast" },
+            },
+            {
+                id: "outsider-listens-Loud",
+                table: "MechAddValue",
+                itemId: outsider.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTag: "Loud",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = {
+            id: "b",
+            name: "Билд",
+            items: [root.id, realShallow.id, realMid.id, realDeep.id, indirectMember.id],
+            auto: true,
+        };
+
+        const result = computeCascadeLevels(build, items, mechanics, []);
+
+        const realDeepNode = result.nodes.find((n) => n.itemId === realDeep.id);
+        const indirectNode = result.nodes.find((n) => n.itemId === indirectMember.id);
+        expect(realDeepNode).toMatchObject({ depth: 3, parents: [{ itemId: realMid.id, reason: "activator" }] });
+        expect(indirectNode?.parents).toEqual([{ itemId: root.id, reason: "indirect" }]);
+        // Pushed past the deepest real node (3), not left at her original catalog-wide depth (2) — which used to
+        // display her as shallower than realDeep despite the connection being merely "indirect".
+        expect(indirectNode?.depth).toBe(4);
+    });
+});

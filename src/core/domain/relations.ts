@@ -434,6 +434,14 @@ interface CascadeIndex {
  * ever affects himself, and the old code didn't check Place before indexing him as a generic booster at all — but
  * even after fixing that, Меценат's case is not a bug, just this signal being too weak by design.) See
  * computeScalingGraph's doc for the replacement model: only Id/tag/event/replace-rule signals count as real edges.
+ *
+ * 2026-07-28 update: the signal is back, but *only* inside buildCascadeStyleConnections, *only* for House/Artefact
+ * (never Card — see that function's own comment), and it only ever surfaces as an orange context node (see
+ * addRelatedContextNodes), never a real depth-classified feeder — real example this time: Робот/Моряк directly
+ * activate "any nearby House" with no further filter and could never appear anywhere at all before this, even
+ * though the mechanic effect is completely real. findFeedersOf/computeScalingGraphInternal (real generation,
+ * what this comment is actually about) still never read type-only matches — that half of the original decision
+ * stands.
  */
 
 function buildCascadeIndex(
@@ -1400,6 +1408,21 @@ export function computeCascadeLevels(
         });
     }
 
+    // `depth` above still comes straight from the full, catalog-wide graph — it has no idea a node just fell back
+    // to the "indirect" placeholder (real example: Медсестра in "Билд от Фотомодели" — her shortest real hop count
+    // happens to be small via an item outside this build, so she displayed *shallower* than Фитнес-тренер/a combo,
+    // whose longer chain is entirely real and in-build). An indirect-only node's depth is meaningless as "distance
+    // from root" — it's not the root's real distance to it, just whatever the unrestricted graph happened to find
+    // first — so every one of them is pushed past the deepest genuinely-explained node instead, guaranteeing
+    // "indirect" never outranks a real connection regardless of its original catalog-wide depth. Must run before
+    // placeCombosInGraph/addContext below, since both derive their own depths from a node's depth.
+    const isIndirectOnly = (node: CascadeLevelNode) =>
+        node.itemId !== rootId && node.parents.length === 1 && node.parents[0].reason === "indirect";
+    const maxRealDepth = Math.max(0, ...nodes.filter((node) => !isIndirectOnly(node)).map((node) => node.depth));
+    for (const node of nodes) {
+        if (isIndirectOnly(node)) node.depth = maxRealDepth + 1;
+    }
+
     placeCombosInGraph(nodes, combos);
     addContext(nodes);
 
@@ -1417,8 +1440,10 @@ export function computeCascadeLevels(
  * but computed generically for *any* mechanic row belonging to the item, not just a PlayerScore payoff row. Kept
  * in lockstep on purpose — `relatedItems`/`relatedBuilds`/`computeBuildConnections` (graph) all read this, and a
  * signal that generates a build but isn't visible here reads as a bug (real example that originally motivated
- * this whole function: Фермер/Ферма — see below). Deliberately does NOT include a generic "no tag, no id, just
- * type+position" match — see the module note by CascadeIndex for why that signal was tried and reverted.
+ * this whole function: Фермер/Ферма — see below). Mostly does NOT include a generic "no tag, no id, just
+ * type+position" match — see the module note by CascadeIndex for why that signal was tried and reverted — with
+ * one narrow, deliberate exception (below): House/Artefact-only, never Card, and only because this function's
+ * output is *never* real generation, only relatedItems' context-node pass (see addRelatedContextNodes).
  * Directional per row (owner -> match), callers should check both directions for an unordered "are these
  * connected" question, same as the existing direct-id-ref check does.
  */
@@ -1523,6 +1548,25 @@ function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): 
                 for (const id of splitList(row.fields.TargetItemId ?? "")) if (knownIds.has(id)) connect(itemId, id);
                 for (const tag of splitList(row.fields.TargetTag ?? "")) {
                     for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
+                }
+            }
+
+            // Context-only exception to the "no type+position, no tag, no id" rule above (2026-07-28): a
+            // MechActivate/MechAddValue row with a concrete TargetType (House or Artefact specifically — never
+            // Card, ~67% of the catalog and exactly why that generic signal was rejected in the first place) but
+            // no id/tag to anchor it is still a real mechanic effect, just one too generic to safely explain a
+            // *specific* root — real example: Робот/Моряк (`c_chel_activate_near_house_1`/
+            // `c_chel_activate_opposite_side_house_1`) directly activate "2 nearby House"/"the opposite House"
+            // with no further filter, so they could never appear anywhere before this. Connecting them to every
+            // House/Artefact here only ever surfaces as a context node (see addRelatedContextNodes) once some
+            // House/Artefact is *already* a real member of a build — never a real depth-classified feeder, and
+            // never part of computeCascadeBuilds' own generation (findFeedersOf deliberately does not read this).
+            if (row.table === "MechActivate" || row.table === "MechAddValue") {
+                const targetType = (row.fields.TargetType ?? "").trim();
+                const hasId = splitList(row.fields.UseTargetIds ?? "").length > 0;
+                const hasTag = splitList(row.fields.TargetTag ?? "").length > 0;
+                if ((targetType === "House" || targetType === "Artefact") && !hasId && !hasTag) {
+                    for (const id of index.itemIdsByType.get(targetType) ?? []) connect(itemId, id);
                 }
             }
         }
