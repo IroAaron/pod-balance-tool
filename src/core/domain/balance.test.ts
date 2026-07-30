@@ -311,9 +311,10 @@ describe("computeItemPowers — power (MoneyValue+MainValue) + (|S|×(M+1)/A) ×
         expect(powers.get("indirect")!.qualifyingBuildCount).toBe(0); // depth 2 > N(1) — excluded from S entirely
     });
 
-    it("M (directConnectionsCount) is computed across every build the item is in, independent of S/N", () => {
+    it("M (directConnectionsCount) is found only inside builds that qualify for S, not every build the item is in", () => {
         // Two separate builds, two separate roots, and X is a direct scaler of BOTH — but N=0 excludes X's own
-        // depth-1 presence from S in either build, so S is empty for X while M should still count both roots.
+        // depth-1 presence from S in either build, so S is empty for X, and M (only ever looked up per qualifying
+        // build) must be 0 too — not "2" the way an S-independent M would read.
         const r1 = makeItem("r1", { valueMin: 1, valueMax: 1, raw: {} });
         const r2 = makeItem("r2", { valueMin: 1, valueMax: 1, raw: {} });
         const x = makeItem("x", { tags: ["Boost1", "Boost2"], valueMin: 0, valueMax: 0 });
@@ -344,8 +345,61 @@ describe("computeItemPowers — power (MoneyValue+MainValue) + (|S|×(M+1)/A) ×
         const xPower = powers.get("x")!;
 
         expect(xPower.qualifyingBuildCount).toBe(0); // S is empty — both of x's presences are depth 1 > N(0)
-        expect(xPower.directConnectionsCount).toBe(2); // M still counts r1 AND r2, regardless of S
-        expect(xPower.power).toBeCloseTo(0); // (0 + 0) + multiplier × sumQV(0) — S being empty zeroes the 2nd term
+        expect(xPower.directConnectionsCount).toBe(0); // M is looked up per-build-in-S, so an empty S means M=0 too
+        expect(xPower.power).toBeCloseTo(0); // (0 + 0) + multiplier × sumQV(0)
+    });
+
+    it("M unions neighbors across every qualifying build, but ignores neighbors found only in a non-qualifying one", () => {
+        // root: X's own build (depth 1, qualifies at N=1). R2/y: a second, unrelated build where X sits at depth 2
+        // (feeds y, which feeds R2) — deeper than N, so that build is excluded from S, and y must NOT count
+        // toward X's M even though it's a perfectly real direct neighbor of X within that other build.
+        const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: {} });
+        const x = makeItem("x", { tags: ["Boost", "Fuel2"], valueMin: 0, valueMax: 0 });
+        const r2 = makeItem("r2", { valueMin: 1, valueMax: 1, raw: {} });
+        const y = makeItem("y", { tags: ["Something"], valueMin: 0, valueMax: 0 });
+
+        const payoffRoot: MechanicRow = {
+            id: "root-payoff",
+            table: "MechAddValue",
+            itemId: "root",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const payoffR2: MechanicRow = {
+            id: "r2-payoff",
+            table: "MechAddValue",
+            itemId: "r2",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Something" },
+        };
+        // y's own row makes anything tagged "Fuel2" (x) feed into y specifically, landing x at depth 2 in build B.
+        const yRow: MechanicRow = {
+            id: "y-consumes-fuel2",
+            table: "MechAddValue",
+            itemId: "y",
+            fields: { ActivatorType: "BallPass", ActivatorTag: "Fuel2" },
+        };
+
+        const buildA: Build = { id: "build-a", name: "A", items: ["root", "x"] };
+        const buildB: Build = { id: "build-b", name: "B", items: ["r2", "y", "x"] };
+
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: { 0: 1, 1: 1, 2: 1 },
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: 1, // N=1 — build A (depth 1) qualifies, build B (depth 2) doesn't
+        };
+
+        const powers = computeItemPowers(
+            [root, x, r2, y],
+            [buildA, buildB],
+            [payoffRoot, payoffR2, yRow],
+            [],
+            [],
+            balanceConfig
+        );
+        const xPower = powers.get("x")!;
+
+        expect(xPower.qualifyingBuildCount).toBe(1); // only build A
+        expect(xPower.directConnectionsCount).toBe(1); // just root — y (from the excluded build B) doesn't count
     });
 });
 

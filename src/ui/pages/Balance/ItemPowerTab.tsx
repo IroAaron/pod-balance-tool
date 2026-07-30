@@ -44,7 +44,7 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
             <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
             <Typography variant="caption">MainValue = (Min+Max)/2: {fmt(power.averageValue)}</Typography>
             <Typography variant="caption">
-                M (уник. предметов с прямой связью, по всем билдам): {power.directConnectionsCount}
+                M (уник. предметов с прямой связью, только внутри билдов S): {power.directConnectionsCount}
             </Typography>
             <Typography variant="caption">A (всего предметов): {power.totalItemCount}</Typography>
             <Typography variant="caption">
