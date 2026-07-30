@@ -1,6 +1,7 @@
 import type { Build } from "../models/Build";
 import type { NormalizedData } from "../import/normalize";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
+import { DEFAULT_BALANCE_CONFIG, type BalanceConfig } from "../models/BalanceConfig";
 
 const NAMESPACE = "pod-balance-tool:v1";
 
@@ -30,6 +31,9 @@ export interface PersistedState {
      *  means that edit has already been sent; a differing (or missing) value means it's still pending. */
     exportedOverrides: Record<string, string>;
 
+    /** Depth coefficients + balance constants — see BalancePage's "Константы" tab. */
+    balanceConfig: BalanceConfig;
+
     importCache: NormalizedData | null;
 
     importCacheTimestamp: string | null;
@@ -43,6 +47,7 @@ const DEFAULT_STATE: PersistedState = {
     descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
     translationOverrides: {},
     exportedOverrides: {},
+    balanceConfig: DEFAULT_BALANCE_CONFIG,
     importCache: null,
     importCacheTimestamp: null,
 };
@@ -136,6 +141,7 @@ export async function parseSnapshotFile(file: File): Promise<PersistedState> {
         descriptionSettings: parsed.descriptionSettings ?? DEFAULT_STATE.descriptionSettings,
         translationOverrides: parsed.translationOverrides ?? DEFAULT_STATE.translationOverrides,
         exportedOverrides: parsed.exportedOverrides ?? DEFAULT_STATE.exportedOverrides,
+        balanceConfig: parsed.balanceConfig ?? DEFAULT_STATE.balanceConfig,
         importCache: parsed.importCache ?? null,
         importCacheTimestamp: parsed.importCacheTimestamp ?? null,
     };

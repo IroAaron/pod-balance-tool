@@ -17,6 +17,7 @@ import {
 import type { Build } from "../models/Build";
 import { normalizeGlossaryEntry, type GlossaryEntry } from "../models/GlossaryEntry";
 import type { TagIcon } from "../models/TagIcon";
+import { DEFAULT_BALANCE_CONFIG, type BalanceConfig } from "../models/BalanceConfig";
 import type { SourceUrls } from "./localStore";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
 import { db } from "./firebaseClient";
@@ -44,6 +45,9 @@ export interface SharedState {
 
     /** Snapshot of translationOverrides as of the last successful Sheets export — see GameStore.pendingExportCount. */
     exportedOverrides: Record<string, string>;
+
+    /** Depth coefficients + balance constants — see BalancePage's "Константы" tab and domain/balance.ts. */
+    balanceConfig: BalanceConfig;
 }
 
 const DEFAULT_SHARED: SharedState = {
@@ -53,6 +57,7 @@ const DEFAULT_SHARED: SharedState = {
     descriptionSettings: DEFAULT_DESCRIPTION_SETTINGS,
     translationOverrides: {},
     exportedOverrides: {},
+    balanceConfig: DEFAULT_BALANCE_CONFIG,
 };
 
 export interface LegacyLocalState {
@@ -138,6 +143,25 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         (error) => console.error("subscribeShared:exportedOverrides", error)
     );
 
+    const unsubBalanceConfig = onSnapshot(
+        doc(sharedCol, "balanceConfig"),
+        (snapshot) => {
+            // Merged over the default (not a raw cast), same reasoning as descriptionSettings above — a doc
+            // written before a new depth row existed shouldn't leave that depth's coefficient undefined.
+            const data = snapshot.data() as Partial<BalanceConfig> | undefined;
+            state.balanceConfig = {
+                ...DEFAULT_SHARED.balanceConfig,
+                ...data,
+                depthCoefficients: {
+                    ...DEFAULT_SHARED.balanceConfig.depthCoefficients,
+                    ...data?.depthCoefficients,
+                },
+            };
+            emit();
+        },
+        (error) => console.error("subscribeShared:balanceConfig", error)
+    );
+
     return () => {
         unsubIcons();
         unsubParamValues();
@@ -145,6 +169,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         unsubDescriptionSettings();
         unsubTranslationOverrides();
         unsubExportedOverrides();
+        unsubBalanceConfig();
     };
 }
 
@@ -286,6 +311,10 @@ export function updateDescriptionSettingsRemote(settings: DescriptionSettings): 
     return setDoc(doc(sharedCol, "descriptionSettings"), settings);
 }
 
+export function updateBalanceConfigRemote(config: BalanceConfig): Promise<void> {
+    return setDoc(doc(sharedCol, "balanceConfig"), config);
+}
+
 /** Passing "" deletes the field entirely rather than storing an empty string, so a cleared override doesn't
  *  linger as clutter in the doc — getTranslation() would treat either the same way, but this keeps the data clean. */
 export function updateTranslationOverrideRemote(key: string, value: string): Promise<void> {
@@ -307,6 +336,7 @@ export function replaceSharedState(shared: SharedState): Promise<void> {
     batch.set(doc(sharedCol, "descriptionSettings"), shared.descriptionSettings);
     batch.set(doc(sharedCol, "translationOverrides"), shared.translationOverrides);
     batch.set(doc(sharedCol, "exportedOverrides"), shared.exportedOverrides);
+    batch.set(doc(sharedCol, "balanceConfig"), shared.balanceConfig);
     return batch.commit();
 }
 

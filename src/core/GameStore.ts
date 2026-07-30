@@ -7,6 +7,7 @@ import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
 import type { BalanceSaveMeta, BalanceSavePayload } from "./models/BalanceSave";
+import { DEFAULT_BALANCE_CONFIG, type BalanceConfig } from "./models/BalanceConfig";
 
 import { ItemService } from "./services/ItemService";
 import { BuildService } from "./services/BuildService";
@@ -47,6 +48,7 @@ import {
     updateSourceConfigUrlRemote,
     updateSourceTranslationsUrlRemote,
     updateDescriptionSettingsRemote,
+    updateBalanceConfigRemote,
     updateTranslationOverrideRemote,
     replaceExportedOverridesRemote,
     subscribeGlossary,
@@ -118,6 +120,9 @@ export class GameStore {
     sources: SourceUrls = { configUrl: "", translationsUrl: "" };
 
     descriptionSettings: DescriptionSettings = DEFAULT_DESCRIPTION_SETTINGS;
+
+    /** Depth coefficients + balance constants — see BalancePage's "Константы" tab and domain/balance.ts. */
+    balanceConfig: BalanceConfig = DEFAULT_BALANCE_CONFIG;
 
     /** User-edited name/description text, keyed by translation key — wins over the imported translations table
      *  for the same key. See getTranslation()/setTranslationOverride(). */
@@ -222,6 +227,7 @@ export class GameStore {
             this.descriptionSettings = shared.descriptionSettings;
             this.translationOverrides = shared.translationOverrides;
             this.exportedOverrides = shared.exportedOverrides;
+            this.balanceConfig = shared.balanceConfig;
             this.sharedReady = true;
             this.notify();
         });
@@ -761,6 +767,12 @@ export class GameStore {
         );
     }
 
+    setBalanceConfig(config: BalanceConfig): void {
+        this.balanceConfig = config;
+        this.notify();
+        void updateBalanceConfigRemote(config).catch((error) => console.error("setBalanceConfig → Firestore", error));
+    }
+
     /** Full replace, called after every add/edit/delete on the Glossary page — the whole list is small and
      *  hand-curated, so there's no point-update path like itemIcons has. */
     setGlossary(entries: GlossaryEntry[]): void {
@@ -819,8 +831,9 @@ export class GameStore {
     /**
      * Full replace with a previously-saved balance — mirrors importSnapshot's shape exactly (config/translations
      * go to this browser's local importCache only, same as a fresh Google Sheets download would; everything else
-     * is shared Firestore state and gets pushed for every collaborator to see). `sources` is read back from the
-     * *current* live value rather than touched at all, since BalanceSavePayload never captured it.
+     * is shared Firestore state and gets pushed for every collaborator to see). `sources`/`balanceConfig` are read
+     * back from the *current* live value rather than touched at all, since BalanceSavePayload never captured them
+     * (balanceConfig didn't exist yet when this feature was built).
      */
     async restoreBalanceSave(id: string): Promise<void> {
         const payload = await fetchBalanceSavePayloadRemote(id);
@@ -854,6 +867,7 @@ export class GameStore {
                 descriptionSettings: payload.descriptionSettings,
                 translationOverrides: payload.translationOverrides,
                 exportedOverrides: payload.exportedOverrides,
+                balanceConfig: this.balanceConfig,
             }),
             replaceGlossaryRemote(payload.glossary),
             replaceTagIconsRemote(payload.tagIcons),
@@ -869,6 +883,7 @@ export class GameStore {
             descriptionSettings: this.descriptionSettings,
             translationOverrides: this.translationOverrides,
             exportedOverrides: this.exportedOverrides,
+            balanceConfig: this.balanceConfig,
             importCache: {
                 items: this.allItems,
                 translations: this.translations,
@@ -894,6 +909,7 @@ export class GameStore {
                 descriptionSettings: state.descriptionSettings,
                 translationOverrides: state.translationOverrides,
                 exportedOverrides: state.exportedOverrides,
+                balanceConfig: state.balanceConfig,
             }),
         ]);
 

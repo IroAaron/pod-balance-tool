@@ -12,6 +12,7 @@ export const menu: NavigationMenuItem[] = [
     { text: "Билды", path: "/builds", icon: "🧠" },
     { text: "Глоссарий", path: "/glossary", icon: "📖" },
     { text: "Граф", path: "/graph", icon: "🕸" },
+    { text: "Баланс", path: "/balance", icon: "⚖️" },
     { text: "Аналитика", path: "/analytics", icon: "📊" },
     { text: "Сохранения", path: "/saves", icon: "💾" },
     { text: "Настройки", path: "/settings", icon: "⚙️" },
