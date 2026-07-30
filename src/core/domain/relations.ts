@@ -984,7 +984,16 @@ export interface ScalingNode {
     parents: { itemId: string; reason: ScalingEdgeReason }[];
 }
 
-export const DEFAULT_MAX_SCALING_DEPTH = 6;
+/**
+ * Purely a safety valve against pathological/cyclic data — the BFS below already stops on its own the moment a
+ * round finds nothing new (`discovered.size === 0`), so this only matters for runaway cases. Bumped 6 -> 20
+ * (2026-07-30): a node parked right at the old cap never got its *own* row-loop checked at all (the round that
+ * would expand it never ran), silently hiding whatever it feeds into — real example: Медсестра, pushed to a
+ * genuine depth 6 by the indirect-edge-deferral fix, stopped showing her own real ItemRemoved-producer
+ * connections, which used to be found via her own row when she was still shallow enough to be expanded. 20 is
+ * comfortable headroom over any real chain seen in this game's actual data so far (deepest observed: ~6).
+ */
+export const DEFAULT_MAX_SCALING_DEPTH = 20;
 
 /**
  * The actual BFS, factored out so computeCascadeBuilds (many roots, one shared index) and computeCascadeLevels
