@@ -87,6 +87,29 @@ function ConstantsForm() {
 
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>
+                    <Typography variant="h6">Порог ступени для «Силы» (N)</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        В формуле «Сила» участвуют только те билды предмета, где его собственная ступень не глубже
+                        N (0 — сам предмет корень, 1 — прямая связь, и т.д.). Билды глубже N в эту сумму не входят.
+                    </Typography>
+                    <TextField
+                        label="N"
+                        type="number"
+                        value={draft.qualifyingBuildDepthThreshold}
+                        onChange={(event) => {
+                            const value = parseCoefficient(event.target.value, draft.qualifyingBuildDepthThreshold);
+                            setDraft((prev) => ({ ...prev, qualifyingBuildDepthThreshold: value }));
+                        }}
+                        onBlur={() => commit(draft)}
+                        size="small"
+                        slotProps={{ htmlInput: { step: 1, min: 0 } }}
+                        sx={{ maxWidth: 200 }}
+                    />
+                </Stack>
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Stack spacing={2}>
                     <Typography variant="h6">Влияние механик</Typography>
                     <Typography variant="body2" color="text.secondary">
                         Второй, независимый расчёт силы («Сила (мех.)» на вкладке «Сила предметов») — учитывает

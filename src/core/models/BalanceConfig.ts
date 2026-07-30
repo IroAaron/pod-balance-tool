@@ -19,6 +19,12 @@ export interface BalanceConfig {
      *  at all (so 0 in the original power formula) still register as useful/strong when it activates a lot of
      *  other things. */
     mechanicInfluence: Record<string, number>;
+
+    /** N — depth threshold ("не ниже N ступени") for the main power formula's build set S: only builds where the
+     *  examined item's own depth is ≤ N count. See domain/balance.ts's computeItemPowers doc. Defaults to
+     *  DEFAULT_MAX_SCALING_DEPTH so S starts out as "every build the item is in" (real generation never produces
+     *  a deeper node), narrowed down from there by the user. */
+    qualifyingBuildDepthThreshold: number;
 }
 
 export const DEFAULT_BALANCE_CONFIG: BalanceConfig = {
@@ -27,4 +33,5 @@ export const DEFAULT_BALANCE_CONFIG: BalanceConfig = {
     ),
     scaleChelAppearanceProbability: 0,
     mechanicInfluence: Object.fromEntries(KNOWN_MECHANIC_TABLES.map((table) => [table, 0])),
+    qualifyingBuildDepthThreshold: DEFAULT_MAX_SCALING_DEPTH,
 };

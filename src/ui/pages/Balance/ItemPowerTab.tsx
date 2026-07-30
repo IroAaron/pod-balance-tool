@@ -37,38 +37,40 @@ function fmt(value: number): string {
 
 function PowerTooltipContent({ power }: { power: ItemPower }) {
     return (
-        <Stack spacing={0.5} sx={{ p: 0.5, maxWidth: 320 }}>
+        <Stack spacing={0.5} sx={{ p: 0.5, maxWidth: 340 }}>
             <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                Сила = (MoneyValue + avg) + avg×(1+P) + avg×Σкоэф.билдов
+                Сила = (MoneyValue + MainValue) + (|S|×(M+1)/A) × Σ(Q×V)
             </Typography>
             <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
-            <Typography variant="caption">avg = (Min+Max)/2: {fmt(power.averageValue)}</Typography>
+            <Typography variant="caption">MainValue = (Min+Max)/2: {fmt(power.averageValue)}</Typography>
             <Typography variant="caption">
-                P: {fmt(power.probability)} ({power.probabilityIsAuto ? "авто, Σ по прямым скейлерам" : "константа из «Констант»"}) →
-                avg×(1+P) = {fmt(power.probabilityTerm)}
+                M (уник. предметов с прямой связью, по всем билдам): {power.directConnectionsCount}
             </Typography>
-            {power.probabilitySources.length > 0 && (
-                <Stack sx={{ mt: 0.5 }}>
-                    {power.probabilitySources.map((source, index) => (
-                        <Typography key={`${source.itemId}-${index}`} variant="caption">
-                            • скейлер «{source.itemId}» ({source.buildName || source.buildId}) —{" "}
-                            {fmt(source.probability)}
-                        </Typography>
-                    ))}
-                </Stack>
-            )}
+            <Typography variant="caption">A (всего предметов): {power.totalItemCount}</Typography>
             <Typography variant="caption">
-                Σ коэф. по билдам: {fmt(power.buildCoefficientSum)} → avg×Σ = {fmt(power.buildTerm)}
+                |S| (билдов на ступени ≤ N): {power.qualifyingBuildCount} → множитель |S|×(M+1)/A ={" "}
+                {fmt(power.formulaMultiplier)}
             </Typography>
-            {power.buildPresence.length > 0 && (
+            {power.qualifyingBuildEntries.length > 0 ? (
                 <Stack sx={{ mt: 0.5 }}>
-                    {power.buildPresence.map((entry, index) => (
+                    {power.qualifyingBuildEntries.map((entry, index) => (
                         <Typography key={`${entry.buildId}-${index}`} variant="caption">
-                            • {entry.buildName || entry.buildId} — ступень {entry.depth} (×{fmt(entry.coefficient)})
+                            • {entry.buildName || entry.buildId} — ступень {entry.depth}, Q={fmt(entry.q)} × V=
+                            {fmt(entry.v)} = {fmt(entry.product)}
                         </Typography>
                     ))}
                 </Stack>
+            ) : (
+                <Typography variant="caption" color="text.secondary">
+                    Нет билдов на ступени ≤ N
+                </Typography>
             )}
+            <Typography variant="caption">
+                Σ(Q×V) = {fmt(power.sumQV)} → множитель×Σ(Q×V) = {fmt(power.formulaMultiplier * power.sumQV)}
+            </Typography>
+            <Typography variant="caption" sx={{ fontWeight: 600, mt: 0.5 }}>
+                Итого: {fmt(power.power)}
+            </Typography>
         </Stack>
     );
 }

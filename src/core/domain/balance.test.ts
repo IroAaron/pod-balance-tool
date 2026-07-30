@@ -9,6 +9,9 @@ function makeItem(id: string, overrides: Partial<Item> = {}): Item {
     return { id, tags: [], raw: {}, nameKey: id, ...overrides };
 }
 
+// A generous default so tests not focused on the N threshold itself don't accidentally have builds excluded from S.
+const GENEROUS_THRESHOLD = 6;
+
 describe("moneyValueOf / averageValueOf", () => {
     it("reads MoneyValue from item.raw and defaults missing/blank to 0", () => {
         expect(moneyValueOf(makeItem("a", { raw: { MoneyValue: "12" } }))).toBe(12);
@@ -22,31 +25,17 @@ describe("moneyValueOf / averageValueOf", () => {
     });
 });
 
-describe("computeItemPowers", () => {
-    it("sums the build's own depth coefficient into a member's power, per the documented formula", () => {
-        const root = makeItem("root", {
-            valueMin: 2,
-            valueMax: 6,
-            raw: { MoneyValue: "10" },
-        });
-        const booster = makeItem("booster", {
-            tags: ["Boost"],
-            valueMin: 1,
-            valueMax: 3,
-            raw: { MoneyValue: "5" },
-        });
+describe("computeItemPowers — buildPresence/buildTerm (feeds mechanicPower, not power)", () => {
+    it("sums the build's own depth coefficient into a member's buildTerm", () => {
+        const root = makeItem("root", { valueMin: 2, valueMax: 6, raw: { MoneyValue: "10" } });
+        const booster = makeItem("booster", { tags: ["Boost"], valueMin: 1, valueMax: 3, raw: { MoneyValue: "5" } });
         const unrelated = makeItem("unrelated", { valueMin: 9, valueMax: 9 });
 
         const payoff: MechanicRow = {
             id: "root-payoff",
             table: "MechAddValue",
             itemId: "root",
-            fields: {
-                TargetType: "PlayerScore",
-                TargetValueType: "MainValue",
-                ActivatorType: "BallPass",
-                ActivatorTag: "Boost",
-            },
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
         };
 
         const build: Build = { id: "build-1", name: "Test Build", items: ["root", "booster", "unrelated"] };
@@ -54,6 +43,7 @@ describe("computeItemPowers", () => {
             depthCoefficients: { 0: 1, 1: 2 },
             scaleChelAppearanceProbability: 0.5,
             mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
         };
 
         const powers = computeItemPowers([root, booster, unrelated], [build], [payoff], [], [], balanceConfig);
@@ -61,25 +51,18 @@ describe("computeItemPowers", () => {
         const rootPower = powers.get("root")!;
         expect(rootPower.moneyValue).toBe(10);
         expect(rootPower.averageValue).toBe(4);
-        // root IS a build root, so P auto-computes as the sum of its scalers' shop probability — no
-        // shopAppearances passed here, so that sum is 0 (real root, just no shop data), NOT the 0.5 fallback.
-        expect(rootPower.probabilityIsAuto).toBe(true);
-        expect(rootPower.probabilityTerm).toBeCloseTo(4); // 4 * (1 + 0)
         expect(rootPower.buildPresence).toEqual([{ buildId: "build-1", buildName: "Test Build", depth: 0, coefficient: 1 }]);
-        expect(rootPower.buildTerm).toBeCloseTo(4); // 4 * 1
-        expect(rootPower.power).toBeCloseTo(22); // (10 + 4) + 4 + 4
+        expect(rootPower.buildTerm).toBeCloseTo(4); // avg(4) × coefficient(1)
 
         const boosterPower = powers.get("booster")!;
         expect(boosterPower.buildPresence).toEqual([{ buildId: "build-1", buildName: "Test Build", depth: 1, coefficient: 2 }]);
-        expect(boosterPower.buildTerm).toBeCloseTo(4); // 2 * 2
-        expect(boosterPower.power).toBeCloseTo(14); // (5 + 2) + 3 + 4
+        expect(boosterPower.buildTerm).toBeCloseTo(4); // avg(2) × coefficient(2)
 
         // A build member with no real structural path to the root (computeCascadeLevels' `unclassified`) has no
-        // "ступень" to look up a coefficient for — contributes nothing to the sum, not a fallback depth-0 credit.
+        // "ступень" to look up a coefficient for — contributes nothing, not a fallback depth-0 credit.
         const unrelatedPower = powers.get("unrelated")!;
         expect(unrelatedPower.buildPresence).toEqual([]);
         expect(unrelatedPower.buildCoefficientSum).toBe(0);
-        expect(unrelatedPower.power).toBeCloseTo(22.5); // MoneyValue(0) + avg(9) + avg*(1+0.5)=13.5, no build term
     });
 
     it("sums coefficients across every build an item is classified into", () => {
@@ -102,23 +85,23 @@ describe("computeItemPowers", () => {
 
         const buildA: Build = { id: "build-a", name: "A", items: ["root", "shared"] };
         const buildB: Build = { id: "build-b", name: "B", items: ["rootB", "shared"] };
-        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 3 }, scaleChelAppearanceProbability: 0, mechanicInfluence: {} };
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: { 0: 0, 1: 3 },
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
+        };
 
-        const powers = computeItemPowers(
-            [root, rootB, shared],
-            [buildA, buildB],
-            [payoff, payoffB],
-            [],
-            [],
-            balanceConfig
-        );
+        const powers = computeItemPowers([root, rootB, shared], [buildA, buildB], [payoff, payoffB], [], [], balanceConfig);
 
         const sharedPower = powers.get("shared")!;
         expect(sharedPower.buildPresence).toHaveLength(2);
         expect(sharedPower.buildCoefficientSum).toBe(6); // depth 1 in both builds: 3 + 3
     });
+});
 
-    it("P is the sum of a root item's own scalers' shop-appearance probability, not the root's own", () => {
+describe("computeItemPowers — P (probability, still used by mechanicPower)", () => {
+    it("P is the sum of a root item's own direct scalers' shop-appearance probability, not the root's own", () => {
         const root = makeItem("root", { valueMin: 2, valueMax: 6, raw: { MoneyValue: "0" } });
         const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
         const neverRoot = makeItem("never-root", { valueMin: 4, valueMax: 4 }); // not a member of any build
@@ -130,7 +113,12 @@ describe("computeItemPowers", () => {
             fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
         };
         const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
-        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.1, mechanicInfluence: {} };
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: { 0: 0, 1: 0 },
+            scaleChelAppearanceProbability: 0.1,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
+        };
 
         // scaler's OWN shop probability (root itself has none in this map — the root's own appearance is
         // irrelevant to its P, only its scaler's is).
@@ -154,7 +142,7 @@ describe("computeItemPowers", () => {
         expect(neverRootPower.probabilitySources).toEqual([]);
     });
 
-    it("P only sums DIRECT scalers (depth exactly 1) — a depth-2 (indirect) scaler's shop probability is excluded", () => {
+    it("P only sums DIRECT scalers (depth exactly 1); directConnectionsCount (M) counts both directions", () => {
         const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: {} });
         const directScaler = makeItem("direct-scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
         const indirectScaler = makeItem("indirect-scaler", { tags: ["Fuel"], valueMin: 0, valueMax: 0 });
@@ -175,7 +163,12 @@ describe("computeItemPowers", () => {
         };
 
         const build: Build = { id: "build-1", name: "Root Build", items: ["root", "direct-scaler", "indirect-scaler"] };
-        const balanceConfig: BalanceConfig = { depthCoefficients: {}, scaleChelAppearanceProbability: 0, mechanicInfluence: {} };
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: {},
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
+        };
 
         const shopAppearances = new Map([
             ["direct-scaler", { itemId: "direct-scaler", packs: [], perSlotProbability: 0.3, perVisitProbability: 0.3 }],
@@ -193,17 +186,18 @@ describe("computeItemPowers", () => {
         );
 
         const rootPower = powers.get("root")!;
-        // Confirm the fixture actually placed indirectScaler at depth 2 relative to root — sanity check on the
-        // build-presence data this test's premise depends on.
-        expect(rootPower.buildPresence).toEqual([{ buildId: "build-1", buildName: "Root Build", depth: 0, coefficient: 0 }]);
         const indirectPresence = powers.get("indirect-scaler")!.buildPresence[0];
-        expect(indirectPresence.depth).toBe(2);
+        expect(indirectPresence.depth).toBe(2); // sanity check on the fixture's premise
 
         // Only direct-scaler's 0.3 counts — indirect-scaler's 0.9 is excluded despite being a real (indirect) lever.
         expect(rootPower.probability).toBeCloseTo(0.3);
         expect(rootPower.probabilitySources).toEqual([
             { itemId: "direct-scaler", buildId: "build-1", buildName: "Root Build", probability: 0.3 },
         ]);
+
+        // direct-scaler sits between root and indirect-scaler — its own direct connections are BOTH directions:
+        // root (what direct-scaler itself feeds) AND indirect-scaler (what feeds direct-scaler).
+        expect(powers.get("direct-scaler")!.directConnectionsCount).toBe(2);
     });
 
     it("a real root with a scaler that has no known shop data still counts as auto (P=0), not the manual fallback", () => {
@@ -217,7 +211,12 @@ describe("computeItemPowers", () => {
             fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
         };
         const build: Build = { id: "build-1", name: "Root Build", items: ["root", "scaler"] };
-        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 0, 1: 0 }, scaleChelAppearanceProbability: 0.9, mechanicInfluence: {} };
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: { 0: 0, 1: 0 },
+            scaleChelAppearanceProbability: 0.9,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
+        };
 
         // No shopAppearances passed at all this time.
         const powers = computeItemPowers([root, scaler], [build], [payoff], [], [], balanceConfig);
@@ -226,9 +225,133 @@ describe("computeItemPowers", () => {
         expect(rootPower.probabilityIsAuto).toBe(true);
         expect(rootPower.probability).toBe(0); // real root, just no scaler shop data — not the 0.9 fallback
     });
+});
 
-    it("mechanicPower lets a valueless item (avg=0) still score real power from its mechanics' TargetCount × Влияние", () => {
-        // No ValueMin/ValueMax/MoneyValue at all — `power` would read as ~0, but this item activates a lot.
+describe("computeItemPowers — power (MoneyValue+MainValue) + (|S|×(M+1)/A) × Σ(Q×V)", () => {
+    it("computes the full formula end to end, hand-verified", () => {
+        // root: its own build's root, MoneyValue=5, avg=3 (valueMin=2,valueMax=4).
+        const root = makeItem("root", { valueMin: 2, valueMax: 4, raw: { MoneyValue: "5" } });
+        // scaler: depth-1 direct scaler of root (tags match root's own ActivatorTag), no value of its own.
+        const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0, raw: {} });
+        // other: not connected to anything, has its own value.
+        const other = makeItem("other", { valueMin: 1, valueMax: 1, raw: { MoneyValue: "9" } });
+
+        const payoff: MechanicRow = {
+            id: "root-payoff",
+            table: "MechAddValue",
+            itemId: "root",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const build: Build = { id: "build-1", name: "B1", items: ["root", "scaler"] };
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: { 0: 2, 1: 3 },
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: 1, // N=1 — both depth 0 and depth 1 qualify
+        };
+
+        const powers = computeItemPowers([root, scaler, other], [build], [payoff], [], [], balanceConfig);
+
+        // root: S={build-1} (depth 0 ≤ 1), Q=root's own MoneyValue+avg=5+3=8, V=depthCoefficients[0]=2 → sumQV=16.
+        // M(root) = {scaler} → 1. A=3. multiplier = 1×(1+1)/3 = 2/3. power = (5+3) + (2/3)×16 = 8 + 32/3.
+        const rootPower = powers.get("root")!;
+        expect(rootPower.qualifyingBuildCount).toBe(1);
+        expect(rootPower.sumQV).toBeCloseTo(16);
+        expect(rootPower.directConnectionsCount).toBe(1);
+        expect(rootPower.totalItemCount).toBe(3);
+        expect(rootPower.formulaMultiplier).toBeCloseTo(2 / 3);
+        expect(rootPower.power).toBeCloseTo(8 + (2 / 3) * 16);
+
+        // scaler: S={build-1} (its own depth 1 ≤ 1), Q is still the BUILD's root's value (8, not scaler's own 0),
+        // V=depthCoefficients[1]=3 → sumQV=24. M(scaler)={root} → 1. multiplier = 1×2/3 = 2/3.
+        // power = (0+0) + (2/3)×24 = 16.
+        const scalerPower = powers.get("scaler")!;
+        expect(scalerPower.qualifyingBuildEntries).toEqual([
+            { buildId: "build-1", buildName: "B1", depth: 1, q: 8, v: 3, product: 24 },
+        ]);
+        expect(scalerPower.power).toBeCloseTo(16);
+
+        // other: no builds at all → S=[], sumQV=0 → the whole second term is 0 regardless of M/A.
+        const otherPower = powers.get("other")!;
+        expect(otherPower.qualifyingBuildCount).toBe(0);
+        expect(otherPower.power).toBeCloseTo(10); // MoneyValue(9) + avg(1), nothing else
+    });
+
+    it("N excludes builds where the examined item's own depth is deeper than the threshold", () => {
+        const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: {} });
+        const direct = makeItem("direct", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
+        const indirect = makeItem("indirect", { tags: ["Fuel"], valueMin: 0, valueMax: 0 });
+
+        const payoff: MechanicRow = {
+            id: "root-payoff",
+            table: "MechAddValue",
+            itemId: "root",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const directRow: MechanicRow = {
+            id: "direct-consumes-fuel",
+            table: "MechAddValue",
+            itemId: "direct",
+            fields: { ActivatorType: "BallPass", ActivatorTag: "Fuel" },
+        };
+        const build: Build = { id: "build-1", name: "B1", items: ["root", "direct", "indirect"] };
+
+        // N=1: root (depth 0) and direct (depth 1) qualify; indirect (depth 2) does not.
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: { 0: 1, 1: 1, 2: 1 },
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: 1,
+        };
+
+        const powers = computeItemPowers([root, direct, indirect], [build], [payoff, directRow], [], [], balanceConfig);
+
+        expect(powers.get("root")!.qualifyingBuildCount).toBe(1);
+        expect(powers.get("direct")!.qualifyingBuildCount).toBe(1);
+        expect(powers.get("indirect")!.qualifyingBuildCount).toBe(0); // depth 2 > N(1) — excluded from S entirely
+    });
+
+    it("M (directConnectionsCount) is computed across every build the item is in, independent of S/N", () => {
+        // Two separate builds, two separate roots, and X is a direct scaler of BOTH — but N=0 excludes X's own
+        // depth-1 presence from S in either build, so S is empty for X while M should still count both roots.
+        const r1 = makeItem("r1", { valueMin: 1, valueMax: 1, raw: {} });
+        const r2 = makeItem("r2", { valueMin: 1, valueMax: 1, raw: {} });
+        const x = makeItem("x", { tags: ["Boost1", "Boost2"], valueMin: 0, valueMax: 0 });
+
+        const payoff1: MechanicRow = {
+            id: "r1-payoff",
+            table: "MechAddValue",
+            itemId: "r1",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost1" },
+        };
+        const payoff2: MechanicRow = {
+            id: "r2-payoff",
+            table: "MechAddValue",
+            itemId: "r2",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost2" },
+        };
+        const buildA: Build = { id: "build-a", name: "A", items: ["r1", "x"] };
+        const buildB: Build = { id: "build-b", name: "B", items: ["r2", "x"] };
+
+        const balanceConfig: BalanceConfig = {
+            depthCoefficients: { 0: 1, 1: 1 },
+            scaleChelAppearanceProbability: 0,
+            mechanicInfluence: {},
+            qualifyingBuildDepthThreshold: 0, // N=0 — X's own depth-1 presence never qualifies for S
+        };
+
+        const powers = computeItemPowers([r1, r2, x], [buildA, buildB], [payoff1, payoff2], [], [], balanceConfig);
+        const xPower = powers.get("x")!;
+
+        expect(xPower.qualifyingBuildCount).toBe(0); // S is empty — both of x's presences are depth 1 > N(0)
+        expect(xPower.directConnectionsCount).toBe(2); // M still counts r1 AND r2, regardless of S
+        expect(xPower.power).toBeCloseTo(0); // (0 + 0) + multiplier × sumQV(0) — S being empty zeroes the 2nd term
+    });
+});
+
+describe("computeItemPowers — mechanicPower (independent formula, unaffected by the power rewrite)", () => {
+    it("lets a valueless item (avg=0) still score real power from its mechanics' TargetCount × Влияние", () => {
+        // No ValueMin/ValueMax/MoneyValue at all — `power` reads as 0, but this item activates a lot.
         const activator = makeItem("activator", { valueMin: 0, valueMax: 0, raw: {} });
 
         const activateRow: MechanicRow = {
@@ -254,18 +377,17 @@ describe("computeItemPowers", () => {
         // Neither item is a build root here (no builds passed), so P falls back to this manual constant — set to
         // 0 to confirm the exact bug this formula shape fixes: a bare `× P` used to zero mechanicPower out
         // whenever P was 0, which is both the default and the common case (most items are never a build root).
-        // With `(1 + P)`, P = 0 just means "no bonus", not "erase everything" — see the dedicated test below for
-        // the P > 0 bonus case.
         const balanceConfig: BalanceConfig = {
             depthCoefficients: {},
             scaleChelAppearanceProbability: 0,
             mechanicInfluence: { MechActivate: 2, MechAddTag: 5, MechAddValue: 100 }, // MechAddValue unused here
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
         };
 
         const powers = computeItemPowers([activator], [], [activateRow, activateRow2, tagRow], [], [], balanceConfig);
         const power = powers.get("activator")!;
 
-        expect(power.power).toBe(0); // the original formula sees nothing here — avg=0, no build presence
+        expect(power.power).toBe(0); // no builds, no MoneyValue/avg — the new formula also sees nothing here
         expect(power.mechanicTerms).toEqual([
             { table: "MechActivate", targetCountSum: 5, influence: 2, term: 10 }, // (3+2) × 2, no avg factor
             { table: "MechAddTag", targetCountSum: 1, influence: 5, term: 5 },
@@ -274,7 +396,7 @@ describe("computeItemPowers", () => {
         expect(power.mechanicPower).toBe(15); // MoneyValue(0) + 15×(1+0) + buildTerm(0) — NOT zeroed by P=0
     });
 
-    it("mechanicPower's MechAddValue term is scaled by averageValue, unlike every other mechanic table", () => {
+    it("MechAddValue term is scaled by averageValue, unlike every other mechanic table", () => {
         const item = makeItem("item", { valueMin: 2, valueMax: 8, raw: {} }); // avg = 5
 
         const row: MechanicRow = {
@@ -287,6 +409,7 @@ describe("computeItemPowers", () => {
             depthCoefficients: {},
             scaleChelAppearanceProbability: 0,
             mechanicInfluence: { MechAddValue: 3 },
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
         };
 
         const powers = computeItemPowers([item], [], [row], [], [], balanceConfig);
@@ -296,11 +419,7 @@ describe("computeItemPowers", () => {
         expect(power.mechanicPower).toBe(60); // 60 × (1+0), P=0 doesn't zero it out
     });
 
-    it("mechanicPower's mechanic-terms sum (only) gets a (1+P) bonus — MoneyValue/buildTerm stay untouched by P", () => {
-        // Real ValueMin/ValueMax range required for isEligiblePayoffRow to treat "root" as a real build root at
-        // all (see the earlier "excludes MainValue payoffs..." test in relations.test.ts) — chosen at 1/1 (not
-        // 0/0) specifically so root is still recognized as a root, while contributing 0 to averageValue-driven
-        // terms (no MechAddValue row here, so avg never enters mechanicTermsSum).
+    it("mechanic-terms sum (only) gets a (1+P) bonus — MoneyValue/buildTerm stay untouched by P", () => {
         const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: { MoneyValue: "7" } });
         const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
 
@@ -321,21 +440,14 @@ describe("computeItemPowers", () => {
             depthCoefficients: { 0: 2 }, // root's own depth-0 coefficient — feeds buildTerm, unrelated to P
             scaleChelAppearanceProbability: 0,
             mechanicInfluence: { MechActivate: 1 },
+            qualifyingBuildDepthThreshold: GENEROUS_THRESHOLD,
         };
         // scaler's own shop probability — this becomes root's P (0.25), auto-computed since root is a build root.
         const shopAppearances = new Map([
             ["scaler", { itemId: "scaler", packs: [], perSlotProbability: 0.25, perVisitProbability: 0.25 }],
         ]);
 
-        const powers = computeItemPowers(
-            [root, scaler],
-            [build],
-            [payoff, activateRow],
-            [],
-            [],
-            balanceConfig,
-            shopAppearances
-        );
+        const powers = computeItemPowers([root, scaler], [build], [payoff, activateRow], [], [], balanceConfig, shopAppearances);
         const power = powers.get("root")!;
 
         expect(power.probability).toBeCloseTo(0.25);

@@ -64,22 +64,42 @@ export interface ItemPower {
      *  scaler's own shop-appearance probability. */
     probabilitySources: { itemId: string; buildId: string; buildName: string; probability: number }[];
 
-    /** averageValue × (1 + P). */
-    probabilityTerm: number;
-
     /** Every build this item was classified into (with a real depth — see BuildPresenceEntry), and the
      *  coefficient each one contributed. An item that's a member of a build but wasn't reachable in that build's
      *  own scaling graph (computeCascadeLevels' `unclassified`) contributes nothing — there's no "ступень" for it
-     *  to look up a coefficient for. */
+     *  to look up a coefficient for. Still used by `mechanicPower` (not `power` — see computeItemPowers' doc). */
     buildPresence: BuildPresenceEntry[];
 
     /** Sum of buildPresence[].coefficient. */
     buildCoefficientSum: number;
 
-    /** averageValue × buildCoefficientSum. */
+    /** averageValue × buildCoefficientSum — only feeds `mechanicPower` now, not `power`. */
     buildTerm: number;
 
-    /** (MoneyValue + averageValue) + probabilityTerm + buildTerm. */
+    /** M — count of unique items this item has a *direct* structural connection with (both directions: things
+     *  it directly feeds, and things that directly feed it), across every build it's a member of at all (not
+     *  just the ones in `qualifyingBuildEntries`/S). See computeItemPowers' doc for the full `power` formula. */
+    directConnectionsCount: number;
+
+    /** S — the subset of `buildPresence` where this item's own depth is ≤
+     *  balanceConfig.qualifyingBuildDepthThreshold (N), each paired with that build's own Q (root's MoneyValue +
+     *  MainValue) and V (this item's depth coefficient in that build — same value as the matching
+     *  buildPresence[].coefficient). */
+    qualifyingBuildEntries: { buildId: string; buildName: string; depth: number; q: number; v: number; product: number }[];
+
+    /** qualifyingBuildEntries.length — |S|. */
+    qualifyingBuildCount: number;
+
+    /** Σ(Q × V) over qualifyingBuildEntries. */
+    sumQV: number;
+
+    /** A — total number of items in the dataset `power` was computed over. */
+    totalItemCount: number;
+
+    /** |S| × (M + 1) / A. */
+    formulaMultiplier: number;
+
+    /** (MoneyValue + MainValue) + formulaMultiplier × sumQV — see computeItemPowers' doc for the full formula. */
     power: number;
 
     /** Per-mechanic-table breakdown of the "mechanic power" formula (see mechanicPower) — one entry per table
@@ -94,14 +114,14 @@ export interface ItemPower {
     /** mechanicTermsSum × (1 + P) — see mechanicPower's doc for why (1 + P), not a bare × P. */
     mechanicTermsWithProbability: number;
 
-    /** A second, independent power estimate — see computeItemPowers' doc for the full formula. Meant to surface
-     *  items that score 0 (or near it) on `power` because they have no MoneyValue/ValueMin/ValueMax at all, but
-     *  are still clearly useful because they activate/color/spawn/tag a lot of other things. Only the mechanic
-     *  terms are boosted by `(1 + P)` — same shape as `power`'s own avg × (1 + P) term, and for the same reason:
-     *  a bare `× P` would zero out the whole formula whenever an item has no known scalers (P = 0), which is both
-     *  common (most items are never a build root) and wrong — an item's raw mechanical influence is real even
-     *  with no scalers, P should only ever add a *bonus* on top, never erase the baseline. MoneyValue and
-     *  buildTerm are left untouched by P, same as `power`'s own MoneyValue/buildTerm terms. */
+    /** A second, independent power estimate, unrelated to `power`'s own (S/M/Q/V) formula — see computeItemPowers'
+     *  doc for the full formula. Meant to surface items that score 0 (or near it) on `power` because they have no
+     *  MoneyValue/ValueMin/ValueMax at all, but are still clearly useful because they activate/color/spawn/tag a
+     *  lot of other things. Only the mechanic terms are boosted by `(1 + P)`, never a bare `× P`: a bare `× P`
+     *  would zero out the whole formula whenever an item has no known scalers (P = 0), which is both common (most
+     *  items are never a build root) and wrong — an item's raw mechanical influence is real even with no scalers,
+     *  P should only ever add a *bonus* on top, never erase the baseline. MoneyValue and buildTerm are left
+     *  untouched by P. */
     mechanicPower: number;
 }
 
@@ -125,17 +145,26 @@ export interface MechanicInfluenceEntry {
  * Computes every item's "power" — a single number meant to make relative balance visible at a glance, per the
  * user's own formula:
  *
- *   (MoneyValue + avg) + avg × (1 + P) + avg × Σ(coefficient at this item's depth, once per build it's in)
+ *   (MoneyValue + MainValue) + (|S| × (M + 1) / A) × Σ_{b∈S}(Q_b × V_b)
  *
- * where avg = (ValueMin + ValueMax) / 2. P and the coefficient sum are two *different* directions through the
- * same build graphs:
- *   - P (term 2) is about this item being scaled: the sum of the shop-appearance probability of every item that
- *     scales *this* item **directly** (depth exactly 1 in the build where this item is the root — see
- *     probabilityIsAuto's doc on ItemPower). Reflects "how reliably will this item actually get boosted in a real
- *     run" — deeper, indirect scalers don't count here.
- *   - the coefficient sum (term 3) is about this item scaling others: every build this item is a *member* of
- *     (root or not), weighted by balanceConfig.depthCoefficients[depth] for its own depth in each. Reflects "how
- *     useful is this item as a lever for other builds."
+ * where, for the item X whose power is being computed:
+ *   - MoneyValue/MainValue are X's own values (MainValue = (ValueMin + ValueMax) / 2, same quantity the rest of
+ *     this module calls `averageValue`/avg — "MainValue" is the game's own name for it, see TargetValueType).
+ *   - S is the subset of builds X is a member of (from `buildPresence`) where X's own depth is ≤
+ *     balanceConfig.qualifyingBuildDepthThreshold (N) — "билды, в которых предмет находится не ниже N ступени".
+ *   - M is the count of unique items X has a *direct* structural connection with — both directions (things X
+ *     directly feeds, and things that directly feed X), across *every* build X is a member of at all, not just
+ *     the ones in S. Computed from computeCascadeLevels' `node.parents` (an edge child→parent in the BFS sense is
+ *     a direct connection either way you look at it).
+ *   - Q_b, for a qualifying build b, is that build's own root item's MoneyValue + MainValue (not X's — the
+ *     build's head item, which is X itself only when X happens to be that build's root).
+ *   - V_b is X's own depthCoefficients[depth] in build b — literally the same value as
+ *     buildPresence.find(e => e.buildId === b).coefficient.
+ *   - A is the total number of items `power` was computed over (the full `items` array).
+ *
+ * This fully replaced an earlier formula ((MoneyValue + avg) + avg × (1 + P) + avg × Σ(depth coefficient)) per
+ * explicit request — P (still computed, see ItemPower.probability) and the depth-coefficient sum (buildTerm) are
+ * no longer part of `power` at all, but both still feed `mechanicPower` below.
  *
  * computeCascadeLevels is run once per build (not once per item×build) — for typical dataset sizes (hundreds of
  * items, dozens of builds) this is cheap enough for a page-level useMemo; callers should still memoize on their
@@ -156,12 +185,13 @@ export interface MechanicInfluenceEntry {
  * an item with avg = 0 still scores real mechanicPower from those. Влияние(T) is a per-table constant the user
  * sets in "Константы" (balanceConfig.mechanicInfluence).
  *
- * Only the mechanic-terms sum is boosted by `(1 + P)` — P is the exact same value `power` uses (sum of the
- * shop-appearance probability of this item's scalers, see ItemPower.probability's doc). `(1 + P)`, not a bare
- * `× P`: an earlier version multiplied the *whole* subtotal by P, which zeroed mechanicPower out entirely for any
- * item with no known scalers (P = 0) — common, and wrong, since the point of this formula is precisely to credit
- * items whose value comes from their own mechanics rather than from being scaled. `(1 + P)` matches `power`'s own
- * avg × (1 + P) term exactly: P only ever adds a bonus, the baseline mechanic influence always survives.
+ * Only the mechanic-terms sum is boosted by `(1 + P)` — P is the sum of the shop-appearance probability of this
+ * item's direct scalers, see ItemPower.probability's doc (computed independently of `power`'s own S/M/Q/V formula
+ * above, but still shared between both). `(1 + P)`, not a bare `× P`: an earlier version multiplied the *whole*
+ * subtotal by P, which zeroed mechanicPower out entirely for any item with no known scalers (P = 0) — common, and
+ * wrong, since the point of this formula is precisely to credit items whose value comes from their own mechanics
+ * rather than from being scaled. `(1 + P)` means P only ever adds a bonus, the baseline mechanic influence always
+ * survives.
  */
 export function computeItemPowers(
     items: Item[],
@@ -174,6 +204,7 @@ export function computeItemPowers(
     includeMoneyValueRoots = false
 ): Map<string, ItemPower> {
     const knownIds = new Set(items.map((item) => item.id));
+    const itemsById = new Map(items.map((item) => [item.id, item]));
 
     // itemId -> table -> Σ TargetCount, for the mechanicPower formula. Rows with no/zero TargetCount are simply
     // never added, so a table with nothing real never shows up in an item's map at all.
@@ -193,6 +224,20 @@ export function computeItemPowers(
     // ItemPower.probabilityIsAuto's doc.
     const scalerSourcesByRoot = new Map<string, { itemId: string; buildId: string; buildName: string; probability: number }[]>();
 
+    // buildId -> that build's own root item id — for `power`'s Q_b (the build's root's MoneyValue + MainValue).
+    const rootItemIdByBuild = new Map<string, string>();
+
+    // itemId -> Set of unique items with a direct structural edge to it, either direction — for `power`'s M. A
+    // single undirected adjacency map built once across every build, since M is defined "across every build the
+    // item is in at all", not scoped to S.
+    const directNeighborsByItem = new Map<string, Set<string>>();
+    function addDirectNeighbor(a: string, b: string): void {
+        if (a === b) return;
+        const set = directNeighborsByItem.get(a) ?? new Set<string>();
+        set.add(b);
+        directNeighborsByItem.set(a, set);
+    }
+
     for (const build of builds) {
         if (build.items.length === 0) continue;
 
@@ -208,10 +253,20 @@ export function computeItemPowers(
             const list = presenceByItem.get(node.itemId);
             if (list) list.push(entry);
             else presenceByItem.set(node.itemId, [entry]);
+
+            // Every parent edge is a direct connection, counted both ways (see directNeighborsByItem's doc) —
+            // parents pointing at a combo node or an id outside `items` are simply not real items, skipped.
+            for (const parent of node.parents) {
+                if (!knownIds.has(parent.itemId)) continue;
+                addDirectNeighbor(node.itemId, parent.itemId);
+                addDirectNeighbor(parent.itemId, node.itemId);
+            }
         }
 
         const rootNode = result.nodes.find((node) => node.depth === 0 && !node.combo);
         if (!rootNode) continue;
+
+        rootItemIdByBuild.set(build.id, rootNode.itemId);
 
         // Only depth === 1 — a *direct* structural edge to the root, not a deeper/indirect one (see
         // ItemPower.probability's doc for why this was narrowed from "any depth ≥ 1").
@@ -225,6 +280,8 @@ export function computeItemPowers(
         scalerSourcesByRoot.set(rootNode.itemId, sources);
     }
 
+    const totalItemCount = items.length;
+
     const powers = new Map<string, ItemPower>();
 
     for (const item of items) {
@@ -235,10 +292,25 @@ export function computeItemPowers(
         const probability = probabilityIsAuto
             ? scalerSources.reduce((sum, source) => sum + source.probability, 0)
             : balanceConfig.scaleChelAppearanceProbability;
-        const probabilityTerm = averageValue * (1 + probability);
         const buildPresence = presenceByItem.get(item.id) ?? [];
         const buildCoefficientSum = buildPresence.reduce((sum, entry) => sum + entry.coefficient, 0);
         const buildTerm = averageValue * buildCoefficientSum;
+
+        const directConnectionsCount = directNeighborsByItem.get(item.id)?.size ?? 0;
+
+        const qualifyingBuildEntries = buildPresence
+            .filter((entry) => entry.depth <= balanceConfig.qualifyingBuildDepthThreshold)
+            .map((entry) => {
+                const rootItem = itemsById.get(rootItemIdByBuild.get(entry.buildId) ?? "");
+                const q = rootItem ? moneyValueOf(rootItem) + averageValueOf(rootItem) : 0;
+                const v = entry.coefficient;
+                return { buildId: entry.buildId, buildName: entry.buildName, depth: entry.depth, q, v, product: q * v };
+            });
+        const qualifyingBuildCount = qualifyingBuildEntries.length;
+        const sumQV = qualifyingBuildEntries.reduce((sum, entry) => sum + entry.product, 0);
+        const formulaMultiplier =
+            totalItemCount > 0 ? (qualifyingBuildCount * (directConnectionsCount + 1)) / totalItemCount : 0;
+        const power = moneyValue + averageValue + formulaMultiplier * sumQV;
 
         const targetCountByTable = targetCountByItemAndTable.get(item.id);
         const mechanicTerms: MechanicInfluenceEntry[] = [];
@@ -262,11 +334,16 @@ export function computeItemPowers(
             probability,
             probabilityIsAuto,
             probabilitySources: scalerSources ?? [],
-            probabilityTerm,
             buildPresence,
             buildCoefficientSum,
             buildTerm,
-            power: moneyValue + averageValue + probabilityTerm + buildTerm,
+            directConnectionsCount,
+            qualifyingBuildEntries,
+            qualifyingBuildCount,
+            sumQV,
+            totalItemCount,
+            formulaMultiplier,
+            power,
             mechanicTerms,
             mechanicTermsSum,
             mechanicTermsWithProbability,
