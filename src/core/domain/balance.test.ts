@@ -112,7 +112,8 @@ describe("computeItemPowers — power = (MoneyValue+MainValue) + (|S|×(M+1)/A) 
         const powers = computeItemPowers([root, scaler, other], [build], [payoff], [], [], balanceConfig);
 
         // root: S={build-1} (depth 0 ≤ 1), Q=root's own MoneyValue+avg=5+3=8, V=depthCoefficients[0]=2 → sumQV=16.
-        // M(root) = {scaler} → 1. A=3. multiplier = 1×(1+1)/3 = 2/3. power = (5+3) + (2/3)×16 = 8 + 32/3.
+        // M(root) = {scaler} → 1. A=3. multiplier = (M+1)/A = 2/3 (|S| is NOT a factor — see the dedicated test
+        // below). power = (5+3) + (2/3)×16 = 8 + 32/3.
         const rootPower = powers.get("root")!;
         expect(rootPower.qualifyingBuildCount).toBe(1);
         expect(rootPower.sumQV).toBeCloseTo(16);
@@ -122,7 +123,7 @@ describe("computeItemPowers — power = (MoneyValue+MainValue) + (|S|×(M+1)/A) 
         expect(rootPower.power).toBeCloseTo(8 + (2 / 3) * 16);
 
         // scaler: S={build-1} (its own depth 1 ≤ 1), Q is still the BUILD's root's value (8, not scaler's own 0),
-        // V=depthCoefficients[1]=3 → sumQV=24. M(scaler)={root} → 1. multiplier = 1×2/3 = 2/3.
+        // V=depthCoefficients[1]=3 → sumQV=24. M(scaler)={root} → 1. multiplier = (1+1)/3 = 2/3.
         // power = (0+0) + (2/3)×24 = 16.
         const scalerPower = powers.get("scaler")!;
         expect(scalerPower.qualifyingBuildEntries).toEqual([
@@ -135,6 +136,49 @@ describe("computeItemPowers — power = (MoneyValue+MainValue) + (|S|×(M+1)/A) 
         const otherPower = powers.get("other")!;
         expect(otherPower.qualifyingBuildCount).toBe(0);
         expect(otherPower.power).toBeCloseTo(10); // MoneyValue(9) + avg(1), nothing else
+    });
+
+    it("formulaMultiplier is (M+1)/A — |S| is only where M/Σ(Q×V) are computed FROM, not a separate factor", () => {
+        // shared is a depth-1 direct scaler of TWO separate roots' builds, both within N → |S|=2. If |S| were
+        // still (wrongly) multiplied in, the multiplier/power below would double.
+        const root1 = makeItem("root1", { valueMin: 1, valueMax: 1, raw: {} }); // Q1 = 0 + 1 = 1
+        const root2 = makeItem("root2", { valueMin: 1, valueMax: 1, raw: {} }); // Q2 = 0 + 1 = 1
+        const shared = makeItem("shared", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
+
+        const payoff1: MechanicRow = {
+            id: "root1-payoff",
+            table: "MechAddValue",
+            itemId: "root1",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const payoff2: MechanicRow = {
+            id: "root2-payoff",
+            table: "MechAddValue",
+            itemId: "root2",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        const buildA: Build = { id: "build-a", name: "A", items: ["root1", "shared"] };
+        const buildB: Build = { id: "build-b", name: "B", items: ["root2", "shared"] };
+        const balanceConfig: BalanceConfig = { depthCoefficients: { 0: 1, 1: 5 }, qualifyingBuildDepthThreshold: 6 };
+
+        const powers = computeItemPowers(
+            [root1, root2, shared],
+            [buildA, buildB],
+            [payoff1, payoff2],
+            [],
+            [],
+            balanceConfig
+        );
+        const sharedPower = powers.get("shared")!;
+
+        expect(sharedPower.qualifyingBuildCount).toBe(2); // |S| = 2
+        expect(sharedPower.directConnectionsCount).toBe(2); // M = {root1, root2}
+        expect(sharedPower.sumQV).toBeCloseTo(10); // (1×5) + (1×5)
+        expect(sharedPower.totalItemCount).toBe(3); // A
+
+        // Correct: (M+1)/A = 3/3 = 1. The old (buggy) |S|×(M+1)/A would give 2×3/3 = 2 instead.
+        expect(sharedPower.formulaMultiplier).toBeCloseTo(1);
+        expect(sharedPower.power).toBeCloseTo(10); // (0+0) + 1×10, NOT 20
     });
 
     it("N excludes builds where the examined item's own depth is deeper than the threshold", () => {
