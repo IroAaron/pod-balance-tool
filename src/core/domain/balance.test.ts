@@ -126,8 +126,9 @@ describe("computeItemPowers — power = (MoneyValue+MainValue) + (|S|×(M+1)/A) 
         // power = (0+0) + (2/3)×24 = 16.
         const scalerPower = powers.get("scaler")!;
         expect(scalerPower.qualifyingBuildEntries).toEqual([
-            { buildId: "build-1", buildName: "B1", depth: 1, q: 8, v: 3, product: 24 },
+            { buildId: "build-1", buildName: "B1", depth: 1, q: 8, v: 3, product: 24, scalerItemIds: ["root"] },
         ]);
+        expect(scalerPower.directConnectionItemIds).toEqual(["root"]);
         expect(scalerPower.power).toBeCloseTo(16);
 
         // other: no builds at all → S=[], sumQV=0 → the whole second term is 0 regardless of M/A.
@@ -205,7 +206,9 @@ describe("computeItemPowers — power = (MoneyValue+MainValue) + (|S|×(M+1)/A) 
 
         // direct-scaler sits between root and indirect-scaler — its own direct connections are BOTH directions:
         // root (what direct-scaler itself feeds) AND indirect-scaler (what feeds direct-scaler).
-        expect(powers.get("direct-scaler")!.directConnectionsCount).toBe(2);
+        const directScalerPower = powers.get("direct-scaler")!;
+        expect(directScalerPower.directConnectionsCount).toBe(2);
+        expect([...directScalerPower.directConnectionItemIds].sort()).toEqual(["indirect-scaler", "root"]);
     });
 
     it("M is found only inside builds that qualify for S, not every build the item is in", () => {

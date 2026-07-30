@@ -53,14 +53,29 @@ export interface ItemPower {
     /** M — count of unique items this item has a *direct* structural connection with (both directions: things
      *  it directly feeds, and things that directly feed it), found only by looking inside the builds in
      *  `qualifyingBuildEntries`/S (not every build the item happens to be a member of). See computeItemPowers'
-     *  doc for the full `power` formula. */
+     *  doc for the full `power` formula. Same set as `directConnectionItemIds`, just the count. */
     directConnectionsCount: number;
+
+    /** The actual deduplicated item ids behind `directConnectionsCount` — every item found as a direct neighbor
+     *  (either direction) in at least one build from `qualifyingBuildEntries`/S. Exposed (not just the count) for
+     *  the "Баланс → Проверка формулы" tab, which lets the user manually audit exactly what feeds M for a chosen
+     *  item. */
+    directConnectionItemIds: string[];
 
     /** S — the subset of `buildPresence` where this item's own depth is ≤
      *  balanceConfig.qualifyingBuildDepthThreshold (N), each paired with that build's own Q (root's MoneyValue +
-     *  MainValue) and V (this item's depth coefficient in that build — same value as the matching
-     *  buildPresence[].coefficient). */
-    qualifyingBuildEntries: { buildId: string; buildName: string; depth: number; q: number; v: number; product: number }[];
+     *  MainValue), V (this item's depth coefficient in that build — same value as the matching
+     *  buildPresence[].coefficient), and the specific item ids found as this item's direct neighbors *within that
+     *  one build* (a subset of directConnectionItemIds — see its doc). */
+    qualifyingBuildEntries: {
+        buildId: string;
+        buildName: string;
+        depth: number;
+        q: number;
+        v: number;
+        product: number;
+        scalerItemIds: string[];
+    }[];
 
     /** qualifyingBuildEntries.length — |S|. */
     qualifyingBuildCount: number;
@@ -173,25 +188,35 @@ export function computeItemPowers(
         const averageValue = averageValueOf(item);
         const buildPresence = presenceByItem.get(item.id) ?? [];
 
+        const neighborsByBuild = directNeighborsByItemAndBuild.get(item.id);
+
         const qualifyingBuildEntries = buildPresence
             .filter((entry) => entry.depth <= balanceConfig.qualifyingBuildDepthThreshold)
             .map((entry) => {
                 const rootItem = itemsById.get(rootItemIdByBuild.get(entry.buildId) ?? "");
                 const q = rootItem ? moneyValueOf(rootItem) + averageValueOf(rootItem) : 0;
                 const v = entry.coefficient;
-                return { buildId: entry.buildId, buildName: entry.buildName, depth: entry.depth, q, v, product: q * v };
+                const scalerItemIds = [...(neighborsByBuild?.get(entry.buildId) ?? [])];
+                return {
+                    buildId: entry.buildId,
+                    buildName: entry.buildName,
+                    depth: entry.depth,
+                    q,
+                    v,
+                    product: q * v,
+                    scalerItemIds,
+                };
             });
         const qualifyingBuildCount = qualifyingBuildEntries.length;
         const sumQV = qualifyingBuildEntries.reduce((sum, entry) => sum + entry.product, 0);
 
         // M — direct neighbors found only inside the qualifying (S) builds, unioned across them.
-        const neighborsByBuild = directNeighborsByItemAndBuild.get(item.id);
         const directConnectionsSet = new Set<string>();
         for (const entry of qualifyingBuildEntries) {
-            const neighbors = neighborsByBuild?.get(entry.buildId);
-            if (neighbors) for (const neighborId of neighbors) directConnectionsSet.add(neighborId);
+            for (const neighborId of entry.scalerItemIds) directConnectionsSet.add(neighborId);
         }
-        const directConnectionsCount = directConnectionsSet.size;
+        const directConnectionItemIds = [...directConnectionsSet];
+        const directConnectionsCount = directConnectionItemIds.length;
         const formulaMultiplier =
             totalItemCount > 0 ? (qualifyingBuildCount * (directConnectionsCount + 1)) / totalItemCount : 0;
         const power = moneyValue + averageValue + formulaMultiplier * sumQV;
@@ -201,6 +226,7 @@ export function computeItemPowers(
             averageValue,
             buildPresence,
             directConnectionsCount,
+            directConnectionItemIds,
             qualifyingBuildEntries,
             qualifyingBuildCount,
             sumQV,

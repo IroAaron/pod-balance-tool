@@ -3,8 +3,9 @@ import { Dialog, DialogContent, DialogTitle, IconButton, Stack, Tab, Tabs, Toolt
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import ConstantsTab from "./ConstantsTab";
 import ItemPowerTab from "./ItemPowerTab";
+import FormulaCheckTab from "./FormulaCheckTab";
 
-type TabKey = "constants" | "power";
+type TabKey = "constants" | "power" | "check";
 
 function BalanceHelpDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     return (
@@ -43,6 +44,11 @@ function BalanceHelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
                         которой находится исследуемый предмет в этом билде (те же «Коэффициенты по ступеням
                         билда»). Навести курсор на значение силы, чтобы увидеть полную раскладку.
                     </Typography>
+                    <Typography variant="body2">
+                        <b>«Проверка формулы»</b> — выбираешь предмет и видишь ровно те же билды/ступени/скейлеров,
+                        что реально ушли в расчёт S и M выше (не отдельный пересчёт — та же формула), чтобы можно
+                        было вручную сверить результат.
+                    </Typography>
                 </Stack>
             </DialogContent>
         </Dialog>
@@ -67,9 +73,12 @@ export default function BalancePage() {
             <Tabs value={tab} onChange={(_event, next: TabKey) => setTab(next)} sx={{ mb: 3 }}>
                 <Tab value="constants" label="Константы" />
                 <Tab value="power" label="Сила предметов" />
+                <Tab value="check" label="Проверка формулы" />
             </Tabs>
 
-            {tab === "constants" ? <ConstantsTab /> : <ItemPowerTab />}
+            {tab === "constants" && <ConstantsTab />}
+            {tab === "power" && <ItemPowerTab />}
+            {tab === "check" && <FormulaCheckTab />}
 
             <BalanceHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
         </>
