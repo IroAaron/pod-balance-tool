@@ -47,11 +47,11 @@ export interface ItemPower {
     averageValue: number;
 
     /** P — sum of the shop-appearance probability (see domain/shopProbability.ts) of every "scaler" of this item:
-     *  the other members of the build where *this item is the root* (depth ≥ 1 in that build's own scaling
-     *  graph — see computeCascadeLevels), i.e. the things that actually scale it. Auto-computed whenever the item
-     *  is a real root of at least one build (see probabilityIsAuto); balanceConfig.scaleChelAppearanceProbability
-     *  is a manual fallback only for items that are never a build root (pure scalers, or items with no generated
-     *  build at all). */
+     *  members of the build where *this item is the root* that have a **direct** structural edge to it — depth
+     *  exactly 1 in that build's own scaling graph (see computeCascadeLevels), not deeper/indirect ones. Auto-
+     *  computed whenever the item is a real root of at least one build (see probabilityIsAuto);
+     *  balanceConfig.scaleChelAppearanceProbability is a manual fallback only for items that are never a build
+     *  root (pure scalers, or items with no generated build at all). */
     probability: number;
 
     /** True when this item is the root (depth 0) of at least one build, so `probability` was computed from its
@@ -130,8 +130,9 @@ export interface MechanicInfluenceEntry {
  * where avg = (ValueMin + ValueMax) / 2. P and the coefficient sum are two *different* directions through the
  * same build graphs:
  *   - P (term 2) is about this item being scaled: the sum of the shop-appearance probability of every item that
- *     scales *this* item (the other members of the build where this item is the root — see probabilityIsAuto's
- *     doc on ItemPower). Reflects "how reliably will this item actually get boosted in a real run."
+ *     scales *this* item **directly** (depth exactly 1 in the build where this item is the root — see
+ *     probabilityIsAuto's doc on ItemPower). Reflects "how reliably will this item actually get boosted in a real
+ *     run" — deeper, indirect scalers don't count here.
  *   - the coefficient sum (term 3) is about this item scaling others: every build this item is a *member* of
  *     (root or not), weighted by balanceConfig.depthCoefficients[depth] for its own depth in each. Reflects "how
  *     useful is this item as a lever for other builds."
@@ -212,9 +213,11 @@ export function computeItemPowers(
         const rootNode = result.nodes.find((node) => node.depth === 0 && !node.combo);
         if (!rootNode) continue;
 
+        // Only depth === 1 — a *direct* structural edge to the root, not a deeper/indirect one (see
+        // ItemPower.probability's doc for why this was narrowed from "any depth ≥ 1").
         const sources = scalerSourcesByRoot.get(rootNode.itemId) ?? [];
         for (const node of result.nodes) {
-            if (node.combo || node.itemId === rootNode.itemId) continue;
+            if (node.combo || node.depth !== 1) continue;
             const scalerProbability = shopAppearances?.get(node.itemId)?.perVisitProbability;
             if (!scalerProbability) continue;
             sources.push({ itemId: node.itemId, buildId: build.id, buildName: build.name, probability: scalerProbability });

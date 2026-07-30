@@ -44,7 +44,7 @@ function PowerTooltipContent({ power }: { power: ItemPower }) {
             <Typography variant="caption">MoneyValue: {fmt(power.moneyValue)}</Typography>
             <Typography variant="caption">avg = (Min+Max)/2: {fmt(power.averageValue)}</Typography>
             <Typography variant="caption">
-                P: {fmt(power.probability)} ({power.probabilityIsAuto ? "авто, Σ по скейлерам" : "константа из «Констант»"}) →
+                P: {fmt(power.probability)} ({power.probabilityIsAuto ? "авто, Σ по прямым скейлерам" : "константа из «Констант»"}) →
                 avg×(1+P) = {fmt(power.probabilityTerm)}
             </Typography>
             {power.probabilitySources.length > 0 && (
@@ -97,7 +97,7 @@ function MechanicPowerTooltipContent({ power }: { power: ItemPower }) {
             )}
             <Typography variant="caption">
                 Σ механик: {fmt(power.mechanicTermsSum)} × (1+P), P {fmt(power.probability)} (
-                {power.probabilityIsAuto ? "авто, Σ по скейлерам" : "константа из «Констант»"}) →{" "}
+                {power.probabilityIsAuto ? "авто, Σ по прямым скейлерам" : "константа из «Констант»"}) →{" "}
                 {fmt(power.mechanicTermsWithProbability)}
             </Typography>
             <Typography variant="caption">

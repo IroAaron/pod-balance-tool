@@ -154,6 +154,58 @@ describe("computeItemPowers", () => {
         expect(neverRootPower.probabilitySources).toEqual([]);
     });
 
+    it("P only sums DIRECT scalers (depth exactly 1) — a depth-2 (indirect) scaler's shop probability is excluded", () => {
+        const root = makeItem("root", { valueMin: 1, valueMax: 1, raw: {} });
+        const directScaler = makeItem("direct-scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
+        const indirectScaler = makeItem("indirect-scaler", { tags: ["Fuel"], valueMin: 0, valueMax: 0 });
+
+        const payoff: MechanicRow = {
+            id: "root-payoff",
+            table: "MechAddValue",
+            itemId: "root",
+            fields: { TargetType: "PlayerScore", TargetValueType: "MainValue", ActivatorType: "BallPass", ActivatorTag: "Boost" },
+        };
+        // directScaler's own row makes anything tagged "Fuel" feed into IT (not the root) — so indirectScaler
+        // lands at depth 2 (feeds the depth-1 item, not the root directly).
+        const directScalerRow: MechanicRow = {
+            id: "direct-scaler-consumes-fuel",
+            table: "MechAddValue",
+            itemId: "direct-scaler",
+            fields: { ActivatorType: "BallPass", ActivatorTag: "Fuel" },
+        };
+
+        const build: Build = { id: "build-1", name: "Root Build", items: ["root", "direct-scaler", "indirect-scaler"] };
+        const balanceConfig: BalanceConfig = { depthCoefficients: {}, scaleChelAppearanceProbability: 0, mechanicInfluence: {} };
+
+        const shopAppearances = new Map([
+            ["direct-scaler", { itemId: "direct-scaler", packs: [], perSlotProbability: 0.3, perVisitProbability: 0.3 }],
+            ["indirect-scaler", { itemId: "indirect-scaler", packs: [], perSlotProbability: 0.9, perVisitProbability: 0.9 }],
+        ]);
+
+        const powers = computeItemPowers(
+            [root, directScaler, indirectScaler],
+            [build],
+            [payoff, directScalerRow],
+            [],
+            [],
+            balanceConfig,
+            shopAppearances
+        );
+
+        const rootPower = powers.get("root")!;
+        // Confirm the fixture actually placed indirectScaler at depth 2 relative to root — sanity check on the
+        // build-presence data this test's premise depends on.
+        expect(rootPower.buildPresence).toEqual([{ buildId: "build-1", buildName: "Root Build", depth: 0, coefficient: 0 }]);
+        const indirectPresence = powers.get("indirect-scaler")!.buildPresence[0];
+        expect(indirectPresence.depth).toBe(2);
+
+        // Only direct-scaler's 0.3 counts — indirect-scaler's 0.9 is excluded despite being a real (indirect) lever.
+        expect(rootPower.probability).toBeCloseTo(0.3);
+        expect(rootPower.probabilitySources).toEqual([
+            { itemId: "direct-scaler", buildId: "build-1", buildName: "Root Build", probability: 0.3 },
+        ]);
+    });
+
     it("a real root with a scaler that has no known shop data still counts as auto (P=0), not the manual fallback", () => {
         const root = makeItem("root", { valueMin: 2, valueMax: 6, raw: { MoneyValue: "0" } });
         const scaler = makeItem("scaler", { tags: ["Boost"], valueMin: 0, valueMax: 0 });
