@@ -285,6 +285,34 @@ describe("parseItemDescription with a glossary (icons-emoji mode)", () => {
             { kind: "text", value: " соседнюю." },
         ]);
     });
+
+    it("recolors a matched phrase (keeping its original text, not the entry's canonical casing) when only a color is set", () => {
+        const glossary = [{ id: "g1", phrases: ["желтого цвета"], color: "ffff80" }];
+        expect(parseItemDescription(makeItem(), "Активирует ячейку ЖЕЛТОГО ЦВЕТА рядом.", [], glossary)).toEqual([
+            { kind: "text", value: "Активирует ячейку " },
+            { kind: "colored-text", value: "ЖЕЛТОГО ЦВЕТА", colors: ["#ffff80"] },
+            { kind: "text", value: " рядом." },
+        ]);
+    });
+
+    it("prefers icon over color, and emoji over color, when an entry has more than one set", () => {
+        const glossary = [
+            { id: "g1", phrases: ["крутка"], icon: "roulette_interface/icons-tags/spin.svg", color: "ffff80" },
+            { id: "g2", phrases: ["петля"], emoji: "🔁", color: "ff8080" },
+        ];
+        expect(parseItemDescription(makeItem(), "крутка и петля.", [], glossary)).toEqual([
+            {
+                kind: "icon",
+                src: `${import.meta.env.BASE_URL}roulette_interface/icons-tags/spin.svg`,
+                width: 24,
+                alt: "крутка",
+                note: "крутка",
+            },
+            { kind: "text", value: " и " },
+            { kind: "emoji", value: "🔁", note: "петля" },
+            { kind: "text", value: "." },
+        ]);
+    });
 });
 
 describe("parseItemDescription with {item:ID}/{tag:Name} icon tokens", () => {

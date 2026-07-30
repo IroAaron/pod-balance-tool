@@ -237,12 +237,15 @@ type PhraseMatch = { phrase: string; entry: GlossaryEntry };
  * on hover too, not just phrase-substituted occurrences. Matching for the phrase-substitution part is
  * case-insensitive substring, longest phrase first across every phrase of every entry (same principle as
  * TOKEN_RE above), so a more specific phrase wins over a shorter one it happens to contain — including two
- * phrases that belong to the *same* entry. An entry with neither icon nor emoji set is a no-op.
+ * phrases that belong to the *same* entry. An entry with icon/emoji unset but a color set instead keeps the
+ * matched text as-is and wraps it as colored-text (see DescriptionPart) rather than replacing it with a
+ * pictogram — for highlighting a recognized phrase in its own color without hiding the words themselves. An
+ * entry with none of icon/emoji/color set is a no-op.
  */
 function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): DescriptionPart[] {
     const usable: PhraseMatch[] = [];
     for (const entry of glossary) {
-        if (!entry.icon && !entry.emoji) continue;
+        if (!entry.icon && !entry.emoji && !entry.color) continue;
         for (const phrase of entry.phrases) {
             if (phrase.trim()) usable.push({ phrase, entry });
         }
@@ -278,11 +281,15 @@ function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): Des
             // (not the matched text's own casing) when the entry has no note of its own, matching the entry's
             // canonical spelling regardless of how the source text happened to capitalize it.
             const note = entry.note?.trim() || phrase;
-            pieces.push(
-                entry.icon
-                    ? { kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: phrase, note }
-                    : { kind: "emoji", value: entry.emoji!, note }
-            );
+            if (entry.icon) {
+                pieces.push({ kind: "icon", src: glossaryIconSrc(entry.icon), width: DEFAULT_ICON_WIDTH, alt: phrase, note });
+            } else if (entry.emoji) {
+                pieces.push({ kind: "emoji", value: entry.emoji, note });
+            } else {
+                // Color-only entry — keeps the text exactly as written in the description (match[0], not the
+                // entry's own canonical `phrase` casing), just recolored.
+                pieces.push({ kind: "colored-text", value: match[0], colors: [`#${entry.color}`] });
+            }
 
             lastIndex = index + match[0].length;
         }

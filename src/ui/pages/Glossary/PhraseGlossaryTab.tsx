@@ -3,7 +3,7 @@ import { Box, Button, Checkbox, IconButton, Paper, Stack, TextField, Tooltip, Ty
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import type { GlossaryEntry } from "../../../core/models/GlossaryEntry";
-import { IconPathField, InsertDivider, PREVIEW_SLOT_SX } from "./shared";
+import { ColorField, IconPathField, InsertDivider, PREVIEW_SLOT_SX } from "./shared";
 
 function makeEmptyEntry(): GlossaryEntry {
     return { id: `glossary-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, phrases: [] };
@@ -41,32 +41,36 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
     const [phrasesText, setPhrasesText] = useState(entry.phrases.join("\n"));
     const [icon, setIcon] = useState(entry.icon ?? "");
     const [emoji, setEmoji] = useState(entry.emoji ?? "");
+    const [color, setColor] = useState(entry.color ?? "");
     const [note, setNote] = useState(entry.note ?? "");
     const [enabled, setEnabled] = useState(entry.enabled ?? true);
 
-    // Omits (not just falsy-sets) icon/emoji/note when blank — an explicit `undefined` value on a plain object
-    // key is a real, different thing from the key being absent, and Firestore's setDoc rejects the former (see
-    // stripUndefined in firestoreStore.ts, kept as a second line of defense regardless of this one). Takes
-    // explicit overrides since both the enabled checkbox and the icon picker commit immediately on their own
-    // change/select (their handler runs before the corresponding setState's re-render lands), rather than
+    // Omits (not just falsy-sets) icon/emoji/color/note when blank — an explicit `undefined` value on a plain
+    // object key is a real, different thing from the key being absent, and Firestore's setDoc rejects the former
+    // (see stripUndefined in firestoreStore.ts, kept as a second line of defense regardless of this one). Takes
+    // explicit overrides since the enabled checkbox and the icon/color pickers all commit immediately on their
+    // own change/select (their handler runs before the corresponding setState's re-render lands), rather than
     // reading the not-yet-updated state variable.
-    const buildFields = (enabledOverride: boolean, iconOverride: string): Omit<GlossaryEntry, "id"> => ({
+    const buildFields = (enabledOverride: boolean, iconOverride: string, colorOverride: string): Omit<GlossaryEntry, "id"> => ({
         phrases: parsePhrasesText(phrasesText),
         ...(iconOverride ? { icon: iconOverride } : {}),
         ...(emoji ? { emoji } : {}),
+        ...(colorOverride ? { color: colorOverride } : {}),
         ...(note ? { note } : {}),
         enabled: enabledOverride,
     });
 
-    const commit = () => onCommit(entry.id, buildFields(enabled, icon));
+    const commit = () => onCommit(entry.id, buildFields(enabled, icon, color));
 
     const handleEnabledChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const next = event.target.checked;
         setEnabled(next);
-        onCommit(entry.id, buildFields(next, icon));
+        onCommit(entry.id, buildFields(next, icon, color));
     };
 
-    const handleIconCommit = (nextIcon: string) => onCommit(entry.id, buildFields(enabled, nextIcon));
+    const handleIconCommit = (nextIcon: string) => onCommit(entry.id, buildFields(enabled, nextIcon, color));
+
+    const handleColorCommit = (nextColor: string) => onCommit(entry.id, buildFields(enabled, icon, nextColor));
 
     return (
         <Fragment>
@@ -74,7 +78,7 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
                 <Box
                     sx={{
                         display: "grid",
-                        gridTemplateColumns: "40px 220px 230px 150px 1fr 40px",
+                        gridTemplateColumns: "40px 200px 200px 110px 140px 1fr 40px",
                         gap: 2,
                         // "start" (not "center") since the phrases field can grow to several lines while the
                         // rest of the row's fields stay single-line — top-aligning avoids everything else
@@ -117,6 +121,8 @@ const GlossaryRow = memo(function GlossaryRow({ entry, onCommit, onDelete, onIns
                         />
                         <Box sx={PREVIEW_SLOT_SX}>{emoji && <Typography sx={{ fontSize: 24 }}>{emoji}</Typography>}</Box>
                     </Stack>
+
+                    <ColorField value={color} onChange={setColor} onCommit={handleColorCommit} />
 
                     <TextField
                         label="Заметка"
@@ -230,12 +236,14 @@ function GlossaryEditor({ initialEntries }: EditorProps) {
         <Stack spacing={3}>
             <Typography variant="body2" color="text.secondary">
                 Фразы из описаний предметов, которые режимы «Текст + Включенные записи» и «Все записи» (Настройки →
-                Описания предметов) заменяют на иконку или эмодзи — совпадение ищется по подстроке, без учёта
-                регистра. Галочка слева включает/выключает запись для режима «Текст + Включенные записи» — в
-                «Все записи» подключаются все записи независимо от галочки. Одна запись может содержать несколько
-                фраз (по одной на строку) — любая из них ищется в тексте. Картинка — путь относительно public/
-                (напр. «roulette_interface/icons-tags/ui_icon_activation.svg»), берётся из папок, которые
-                синхронизируются с репозиторием игры. Если заданы и картинка, и эмодзи — показывается картинка.
+                Описания предметов) заменяют на иконку, эмодзи или перекрашивают — совпадение ищется по подстроке,
+                без учёта регистра. Галочка слева включает/выключает запись для режима «Текст + Включенные
+                записи» — в «Все записи» подключаются все записи независимо от галочки. Одна запись может содержать
+                несколько фраз (по одной на строку) — любая из них ищется в тексте. Картинка — путь относительно
+                public/ (напр. «roulette_interface/icons-tags/ui_icon_activation.svg»), берётся из папок, которые
+                синхронизируются с репозиторием игры. Если задан цвет (и не заданы картинка/эмодзи) — сама фраза
+                остаётся как есть в тексте, но перекрашивается в этот цвет, в описании и при экспорте в Sheets
+                ([color=#...]...[/color]). Приоритет при нескольких заданных полях: картинка → эмодзи → цвет.
             </Typography>
 
             <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexWrap: "wrap" }}>

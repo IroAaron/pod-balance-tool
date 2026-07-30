@@ -119,7 +119,7 @@ type PhraseMatch = { phrase: string; entry: GlossaryEntry };
 function replaceGlossaryPhrases(text: string, glossary: GlossaryEntry[], spriteWidthPx: number): string {
     const usable: PhraseMatch[] = [];
     for (const entry of glossary) {
-        if (!entry.icon && !entry.emoji) continue;
+        if (!entry.icon && !entry.emoji && !entry.color) continue;
         for (const phrase of entry.phrases) {
             if (phrase.trim()) usable.push({ phrase, entry });
         }
@@ -138,7 +138,10 @@ function replaceGlossaryPhrases(text: string, glossary: GlossaryEntry[], spriteW
             const resPath = reconstructResPath(entry.icon);
             return resPath ? imgTag(resPath, spriteWidthPx) : matchedText;
         }
-        return entry.emoji!;
+        if (entry.emoji) return entry.emoji;
+        // Color-only entry — same real BBCode shape the game already understands for a literal [color=#...] tag,
+        // wrapping the matched text as-written rather than replacing it.
+        return `[color=#${entry.color}]${matchedText}[/color]`;
     });
 }
 

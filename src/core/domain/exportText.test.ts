@@ -96,6 +96,13 @@ describe("buildExportDescriptionText", () => {
         expect(buildExportDescriptionText("Активирует.", makeContext({ glossaryToApply: glossary }))).toBe("⚡.");
     });
 
+    it("wraps a glossary-matched phrase in real [color] BBCode, keeping the original text, when the entry has only a color set", () => {
+        const glossary = [{ id: "g1", phrases: ["желтого цвета"], color: "ffff80" }];
+        expect(
+            buildExportDescriptionText("на своей стороне ЖЕЛТОГО ЦВЕТА при активации", makeContext({ glossaryToApply: glossary }))
+        ).toBe("на своей стороне [color=#ffff80]ЖЕЛТОГО ЦВЕТА[/color] при активации");
+    });
+
     it("never lets a glossary phrase match inside a just-resolved icon token's filename", () => {
         // Contrived but real risk case: an item id whose sprite filename contains a substring that would
         // otherwise match a configured glossary phrase — the placeholder-swap must shield it.

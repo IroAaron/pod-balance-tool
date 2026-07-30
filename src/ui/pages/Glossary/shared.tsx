@@ -33,6 +33,46 @@ export function IconPreview({ icon }: { icon: string | undefined }) {
     );
 }
 
+/** Hex color field (no leading "#" stored, see GlossaryEntry.color) — a text input for typing/pasting a value,
+ *  plus a native color-picker swatch that doubles as a live preview. The swatch commits immediately on pick (a
+ *  discrete action, same reasoning as IconPathField's option selection); the text field commits on blur. */
+export function ColorField({
+    value,
+    onChange,
+    onCommit,
+}: {
+    value: string;
+    onChange: (value: string) => void;
+    /** Takes the value being committed explicitly — the swatch's onChange fires before React applies the
+     *  corresponding setState, so reading back off state inside onCommit could commit a stale value. */
+    onCommit: (nextValue: string) => void;
+}) {
+    return (
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <TextField
+                label="Цвет (HEX)"
+                value={value}
+                onChange={(event) => onChange(event.target.value.replace(/^#/, ""))}
+                onBlur={() => onCommit(value)}
+                size="small"
+                placeholder="ffff80"
+                fullWidth
+            />
+            <Box
+                component="input"
+                type="color"
+                value={`#${/^[0-9a-fA-F]{6}$/.test(value) ? value : "000000"}`}
+                onChange={(event) => {
+                    const next = (event.target as HTMLInputElement).value.replace(/^#/, "");
+                    onChange(next);
+                    onCommit(next);
+                }}
+                sx={{ ...PREVIEW_SLOT_SX, border: "none", p: 0, cursor: "pointer", bgcolor: "transparent" }}
+            />
+        </Stack>
+    );
+}
+
 type IconOption = { value: string; label: string; group: string };
 
 // Insert path uses the game's real Godot folder casing (Icons_tags/Icons_tags_fields), not the site's own

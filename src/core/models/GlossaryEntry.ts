@@ -18,6 +18,12 @@ export interface GlossaryEntry {
     /** Free-typed emoji/text, used when icon is unset. */
     emoji?: string;
 
+    /** 6-digit hex color, no leading "#" (e.g. "ffff80") — when set (and icon/emoji are both unset), a matched
+     *  phrase keeps its original text but renders/exports wrapped in `[color=#XXXXXX]...[/color]` instead of
+     *  being replaced by a pictogram. icon/emoji take priority over color if more than one happens to be set,
+     *  same precedence as icon over emoji. */
+    color?: string;
+
     /** Free-form organizational note (e.g. "MechAddItem / удалить") — never used for matching. */
     note?: string;
 
@@ -39,6 +45,7 @@ export function normalizeGlossaryEntry(raw: RawGlossaryEntry): GlossaryEntry {
         phrases,
         icon: raw.icon,
         emoji: raw.emoji,
+        color: raw.color,
         note: raw.note,
         enabled: raw.enabled,
     };
