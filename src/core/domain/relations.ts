@@ -318,12 +318,23 @@ interface CascadeIndex {
      *  "strengthens it" one, and folding both into one bucket made a kill-by-id read the same as a value boost. */
     targetersOf: Map<string, Set<string>>;
 
-    /** targetId -> items that place/replace it onto the board (MechAddItem "поставить", or the itemIdToReplace
-     *  side of a ReplaceItem/ReplaceOnTrigger swap that turns into it). Directional: a replace rule's
-     *  replacementItem is not a "spawner of" its itemIdToReplace — it's what that item becomes, not what
-     *  produces it (see buildReplaceMates in relatedItems for the symmetric version of this same rule, used
-     *  where direction genuinely doesn't matter). */
+    /** targetId -> items that place it onto the board (MechAddItem "поставить"), or that are *needed nearby* for
+     *  a ReplaceItem/ReplaceOnTrigger swap that turns into it (the rule's own NeededItem — see replacedFromOf for
+     *  the itemIdToReplace side of the same rule, deliberately kept separate and weaker). Directional: a replace
+     *  rule's replacementItem is not a "spawner of" its NeededItem in the literal sense either, but NeededItem is
+     *  a genuine, active prerequisite (see buildReplaceMates in relatedItems for the symmetric version of this
+     *  same rule, used where direction genuinely doesn't matter). */
     spawnersOf: Map<string, Set<string>>;
+
+    /** targetId -> the itemIdToReplace side of every ReplaceItem/ReplaceOnTrigger rule that turns into it (2026-
+     *  07-30: split out of spawnersOf on request — real example: Медсестра, `ItemIdToReplace` of a rule whose
+     *  `ReplacementItem` is Фотомодель, showed as a full-strength depth-1 "spawner" of Фотомодель, outranking
+     *  members with a genuinely longer but real chain. itemIdToReplace is "the thing that stops existing", not an
+     *  active ingredient the way NeededItem is (see spawnersOf) — findFeedersOf pushes this with reason
+     *  `"indirect"` specifically so it's still a real, followable edge but always sorts past every other real
+     *  connection (see computeCascadeLevels' indirect-depth pass), the same as a ReplaceOnTrigger's own base tier
+     *  (itemIdToReplace) relative to what it upgrades into. */
+    replacedFromOf: Map<string, Set<string>>;
 
     /** tag -> items *statically* carrying that tag (item.tags only — not mechanic-derived, see itemIdsByGrantedTag for that). */
     itemIdsByTag: Map<string, Set<string>>;
@@ -452,6 +463,7 @@ function buildCascadeIndex(
 ): CascadeIndex {
     const targetersOf = new Map<string, Set<string>>();
     const spawnersOf = new Map<string, Set<string>>();
+    const replacedFromOf = new Map<string, Set<string>>();
     const itemIdsByProducedColor = new Map<string, Set<string>>();
     const allRecolorers = new Set<string>();
     const itemIdsByProducedEvent = new Map<string, Set<string>>();
@@ -581,15 +593,18 @@ function buildCascadeIndex(
     for (const rule of replaceRules) {
         if (!knownIds.has(rule.replacementItem)) continue;
 
+        // itemIdToReplace is "the thing that stops existing" — a real edge (see findFeedersOf, reason
+        // "indirect"), but deliberately not spawnersOf: it's not an active ingredient the way NeededItem is (see
+        // below), it's what the result *used to be*.
         if (knownIds.has(rule.itemIdToReplace)) {
-            addTo(spawnersOf, rule.replacementItem, rule.itemIdToReplace);
+            addTo(replacedFromOf, rule.replacementItem, rule.itemIdToReplace);
         }
 
         // ReplaceItem rules need a NeededItem present nearby too, not just itemIdToReplace on its own — e.g.
         // Бомж only becomes Рок музыкант next to Музыкальный магазин (NeededItem); Бомж by himself never causes
-        // the upgrade, so he isn't the whole story as a "spawner". Both ingredients are real prerequisites.
-        // ReplaceOnTrigger rules have no NeededItem column, so this is a no-op there (fields.NeededItem is
-        // undefined).
+        // the upgrade, so he isn't the whole story as a "spawner". NeededItem is a genuine, active prerequisite,
+        // unlike itemIdToReplace above — kept at full "spawner" strength. ReplaceOnTrigger rules have no
+        // NeededItem column, so this is a no-op there (fields.NeededItem is undefined).
         const neededItem = rule.fields.NeededItem;
         if (neededItem && knownIds.has(neededItem)) {
             addTo(spawnersOf, rule.replacementItem, neededItem);
@@ -599,6 +614,7 @@ function buildCascadeIndex(
     return {
         targetersOf,
         spawnersOf,
+        replacedFromOf,
         itemIdsByTag,
         itemIdsByType,
         itemIdsByProducedColor,
@@ -776,9 +792,18 @@ export type ScalingEdgeReason =
     /** A MechAddTag row directly grants this item a tag (by id or its own TargetTag) — distinct from
      *  "tag-granter", which is "produces a tag consumed by this row's own filter". See retagsOf/retagsTargetsOf. */
     | "retags"
-    /** The item's *real* parent (from computeScalingGraph) isn't itself a member of this particular build — a
-     *  manually-curated build can be a subset of what fresh generation would find — so computeCascadeLevels falls
-     *  back to drawing a line straight to the root instead of leaving the node with nowhere to point. Rare. */
+    /**
+     * Two distinct sources, deliberately given the same weak treatment: (1) the item's *real* parent (from
+     * computeScalingGraph) isn't itself a member of this particular build — a manually-curated build can be a
+     * subset of what fresh generation would find — so computeCascadeLevels falls back to drawing a line straight
+     * to the root instead of leaving the node with nowhere to point; (2) the itemIdToReplace side of a
+     * ReplaceItem/ReplaceOnTrigger rule (see replacedFromOf) — "the thing that stops existing" when it turns into
+     * the rule's replacementItem, real example: Медсестра, ItemIdToReplace of a rule whose ReplacementItem is
+     * Фотомодель, used to show as a full-strength depth-1 "spawner" and outrank members with a genuinely longer
+     * real chain (2026-07-30). Either way, computeCascadeLevels' indirect-depth pass (see isIndirectOnly) pushes
+     * a node whose *only* parent is "indirect" past every genuinely-connected node in the same build, regardless
+     * of which of these two produced it.
+     */
     | "indirect"
     /** Feeds a synthetic ReplaceItem combo node (see ComboInfo) — the ingredient side. */
     | "combo-ingredient"
@@ -802,7 +827,7 @@ export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
     recolors: "напрямую перекрашивает",
     removes: "напрямую убирает",
     retags: "напрямую даёт тег",
-    indirect: "непрямая связь (через предмет вне билда)",
+    indirect: "непрямая связь",
     "combo-ingredient": "ингредиент комбинации",
     "combo-result": "результат комбинации",
     related: "сильно связан по механикам (не входит в билд)",
@@ -917,6 +942,7 @@ function findFeedersOf(
     }
 
     for (const id of index.spawnersOf.get(target.id) ?? []) push(id, "spawner");
+    for (const id of index.replacedFromOf.get(target.id) ?? []) push(id, "indirect");
 
     for (const id of index.activatorsOf.get(target.id) ?? []) push(id, "activator");
     for (const tag of target.tags) {

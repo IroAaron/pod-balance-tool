@@ -1065,12 +1065,19 @@ describe("computeCascadeLevels", () => {
         expect(comboNode?.parents).toEqual([{ itemId: rockMusician.id, reason: "combo-result" }]);
         const streetMusicianNode = result.nodes.find((n) => n.itemId === streetMusician.id);
         const producerNode = result.nodes.find((n) => n.itemId === producer.id);
-        expect(streetMusicianNode?.depth).toBe(1); // kept its own real spawner depth, not moved to the combo's
+        // streetMusician's only real edge is itemIdToReplace ("indirect" — 2026-07-30: no longer a full-strength
+        // "spawner", see replacedFromOf) — pushed past the deepest genuinely-connected node (producer, depth 1,
+        // via NeededItem — still "spawner", unaffected) rather than sharing its depth.
+        expect(streetMusicianNode?.depth).toBe(2);
         expect(streetMusicianNode?.parents).toEqual([
-            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: rockMusician.id, reason: "indirect" },
             { itemId: comboNode!.itemId, reason: "combo-ingredient" },
         ]);
         expect(producerNode?.depth).toBe(1);
+        expect(producerNode?.parents).toEqual([
+            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+        ]);
         expect(result.unclassified).toEqual([]);
     });
 
@@ -1106,12 +1113,59 @@ describe("computeCascadeLevels", () => {
 
         const comboNode = result.nodes.find((n) => n.combo);
         const streetMusicianNode = result.nodes.find((n) => n.itemId === streetMusician.id);
+        // Has a genuinely real edge (money-scaler) *in addition to* the weak itemIdToReplace one ("indirect" —
+        // 2026-07-30, see replacedFromOf) — not indirect-only, so the depth-push pass leaves her depth alone.
         expect(streetMusicianNode?.depth).toBe(1);
         expect(streetMusicianNode?.parents).toEqual([
             { itemId: rockMusician.id, reason: "money-scaler" },
-            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: rockMusician.id, reason: "indirect" },
             { itemId: comboNode!.itemId, reason: "combo-ingredient" },
         ]);
+    });
+
+    it("real Фотомодель shape: Медсестра (ItemIdToReplace) is indirect and deeper than Фитнес-тренер (NeededItem, a real spawner)", () => {
+        // Real data (2026-07-30): a ReplaceItem row has ItemIdToReplace=Медсестра, ReplacementItem=Фотомодель,
+        // NeededItem=Фитнес-тренер. Медсестра "stops existing" when she turns into Фотомодель — she didn't do
+        // anything to earn that spot the way Фитнес-тренер (the active, needed-nearby ingredient) did, so she
+        // should never outrank a genuinely real connection by depth.
+        const photomodel = makeItem("photomodel", { valueMin: 10, valueMax: 10 });
+        const nurse = makeItem("nurse");
+        const fitnessTrainer = makeItem("fitness_trainer");
+        const items = [photomodel, nurse, fitnessTrainer];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(photomodel.id, { ActivatorType: "ItemActivated", ActivatorTag: "Rich" }),
+        ];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "nurse-to-photomodel",
+                source: "ReplaceItem",
+                itemIdToReplace: nurse.id,
+                replacementItem: photomodel.id,
+                fields: { NeededItem: fitnessTrainer.id, NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+        const build = { id: "b", name: "Билд от Фотомодели", items: [photomodel.id, nurse.id, fitnessTrainer.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, replaceRules);
+
+        // nurse + fitnessTrainer is itself a real 2-ingredient combo (both are {itemIdToReplace, NeededItem} of
+        // the same rule and both build members) — both end up with an extra combo-ingredient parent alongside
+        // their own real-vs-indirect edge, same as the rock-musician tests above.
+        const comboNode = result.nodes.find((n) => n.combo);
+        const nurseNode = result.nodes.find((n) => n.itemId === nurse.id);
+        const fitnessNode = result.nodes.find((n) => n.itemId === fitnessTrainer.id);
+        expect(fitnessNode).toMatchObject({
+            depth: 1,
+            parents: [
+                { itemId: photomodel.id, reason: "spawner" },
+                { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+            ],
+        });
+        expect(nurseNode?.parents).toEqual([
+            { itemId: photomodel.id, reason: "indirect" },
+            { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+        ]);
+        expect(nurseNode!.depth).toBeGreaterThan(fitnessNode!.depth);
     });
 });
 
