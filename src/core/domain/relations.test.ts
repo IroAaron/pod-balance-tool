@@ -863,6 +863,63 @@ describe("computeScalingGraph keeps every real edge to an already-placed node, n
         expect(graph.get(root.id)?.parents).toEqual([]);
         expect(graph.get(deeper.id)?.parents).toEqual([{ itemId: root.id, reason: "money-scaler" }]);
     });
+
+    it("a real edge discovered in a later round wins depth over an indirect edge found in round 1 for the same node (2026-07-30)", () => {
+        // X is reachable two ways: directly off root via an "indirect" (itemIdToReplace) edge in round 1, and via
+        // a genuinely real 3-hop chain (root -> realAnchor -> realFeeder -> X) that only gets discovered in round
+        // 3, once realFeeder itself becomes frontier. Naive round-by-round BFS would let the round-1 indirect
+        // edge claim X's depth first; real motivating example: Медсестра (itemIdToReplace into Фотомодель) *also*
+        // turned out to have an independent real edge one hop past another real member, and needed to end up at
+        // that real edge's depth, not stuck at the indirect edge's shallow round-1 depth.
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const realAnchor = makeItem("real_anchor", { tags: ["Bum"] });
+        const realFeeder = makeItem("real_feeder");
+        const x = makeItem("x", { tags: ["Loud"] });
+        const items = [root, realAnchor, realFeeder, x];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum" }),
+            {
+                // realFeeder's own row activates anything tagged Bum — found as realAnchor's child (reason
+                // "activator") when realAnchor itself is expanded, same pattern as the existing realShallow/
+                // realMid fixture above.
+                id: "realFeeder-activates-Bum",
+                table: "MechActivate",
+                itemId: realFeeder.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Bum" },
+            },
+            {
+                id: "realFeeder-listens-Loud",
+                table: "MechAddValue",
+                itemId: realFeeder.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTag: "Loud",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const replaceRules: ReplaceRule[] = [
+            { id: "x-into-root", source: "ReplaceItem", itemIdToReplace: x.id, replacementItem: root.id, fields: {} },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, replaceRules);
+
+        expect(graph.get(realAnchor.id)?.depth).toBe(1);
+        expect(graph.get(realFeeder.id)?.depth).toBe(2);
+        const xNode = graph.get(x.id);
+        // Settled by the real chain (depth 3), not left at the indirect edge's round-1 depth — the indirect edge
+        // still shows up, just as an *additional* parent that doesn't win the depth race.
+        expect(xNode?.depth).toBe(3);
+        expect(xNode?.parents).toEqual(
+            expect.arrayContaining([
+                { itemId: realFeeder.id, reason: "activation-subject" },
+                { itemId: root.id, reason: "indirect" },
+            ])
+        );
+        expect(xNode?.parents.length).toBe(2);
+    });
 });
 
 /**

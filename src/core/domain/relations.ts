@@ -1011,6 +1011,16 @@ function computeScalingGraphInternal(
     if (!root) return nodes;
     nodes.set(rootId, { itemId: rootId, depth: 0, parents: [] });
 
+    // A brand-new node discovered via an "indirect" edge (see replacedFromOf) is deferred rather than committed
+    // immediately — plain round-by-round BFS would otherwise let it "win" a shallow depth just because the weak
+    // edge happened to be found before a real one, real example: Медсестра (ItemIdToReplace into Фотомодель,
+    // "indirect") *also* has an independent real activation-subject edge one hop further out, discovered only in
+    // a later round once its own source becomes frontier — without deferring, she'd be permanently stuck at the
+    // indirect edge's round-1 depth even though a real path exists. Only *new* discoveries are deferred; an
+    // indirect edge into an *already-placed* node can't affect a depth that's already settled, so it's appended
+    // immediately like any other reason (see the `existing` branch below).
+    const deferredIndirectDiscoveries: { from: string; parentId: string }[] = [];
+
     let frontier = [rootId];
     for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
         const discovered = new Map<string, { itemId: string; reason: ScalingEdgeReason }[]>();
@@ -1038,6 +1048,11 @@ function computeScalingGraphInternal(
                     continue;
                 }
 
+                if (edge.reason === "indirect") {
+                    deferredIndirectDiscoveries.push({ from: edge.from, parentId });
+                    continue;
+                }
+
                 if (!discovered.has(edge.from)) discovered.set(edge.from, []);
                 discovered.get(edge.from)!.push({ itemId: parentId, reason: edge.reason });
             }
@@ -1051,6 +1066,27 @@ function computeScalingGraphInternal(
             nextFrontier.push(itemId);
         }
         frontier = nextFrontier;
+    }
+
+    // Now settle every deferred indirect discovery, once the real (non-indirect) graph above is fully known. An
+    // item the real BFS also reached just gains this as one more parent — its depth was already settled by a
+    // real edge, so it's unaffected. One reached *only* via indirect edges gets a single shared tier, one past
+    // the deepest real node anywhere in this graph — never competing with real depths, whichever round they were
+    // each found in.
+    const maxRealDepth = Math.max(0, ...[...nodes.values()].map((node) => node.depth));
+    const newlyIndirect = new Map<string, { itemId: string; reason: ScalingEdgeReason }[]>();
+    for (const { from, parentId } of deferredIndirectDiscoveries) {
+        if (from === rootId) continue;
+        const existing = nodes.get(from);
+        if (existing) {
+            existing.parents = [...existing.parents, { itemId: parentId, reason: "indirect" }];
+            continue;
+        }
+        if (!newlyIndirect.has(from)) newlyIndirect.set(from, []);
+        newlyIndirect.get(from)!.push({ itemId: parentId, reason: "indirect" });
+    }
+    for (const [itemId, parents] of newlyIndirect) {
+        nodes.set(itemId, { itemId, depth: maxRealDepth + 1, parents });
     }
 
     return nodes;
