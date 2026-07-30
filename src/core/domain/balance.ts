@@ -5,8 +5,6 @@ import type { ReplaceRule } from "../models/ReplaceRule";
 import type { UpgradeChain } from "../models/UpgradeChain";
 import type { BalanceConfig } from "../models/BalanceConfig";
 import { computeCascadeLevels } from "./relations";
-import { KNOWN_MECHANIC_TABLES } from "./mechanicTables";
-import type { ItemShopAppearance } from "./shopProbability";
 
 /** Same comma-decimal-tolerant number parsing normalize.ts's parseOptionalNumber uses, but defaulting to 0 (not
  *  undefined) — every term of the power formula treats a missing value as "contributes nothing", not "unknown". */
@@ -46,35 +44,11 @@ export interface ItemPower {
 
     averageValue: number;
 
-    /** P — sum of the shop-appearance probability (see domain/shopProbability.ts) of every "scaler" of this item:
-     *  members of the build where *this item is the root* that have a **direct** structural edge to it — depth
-     *  exactly 1 in that build's own scaling graph (see computeCascadeLevels), not deeper/indirect ones. Auto-
-     *  computed whenever the item is a real root of at least one build (see probabilityIsAuto);
-     *  balanceConfig.scaleChelAppearanceProbability is a manual fallback only for items that are never a build
-     *  root (pure scalers, or items with no generated build at all). */
-    probability: number;
-
-    /** True when this item is the root (depth 0) of at least one build, so `probability` was computed from its
-     *  own scalers' shop data (even if that sum came out to 0 — e.g. real scalers exist but none have shop-deck
-     *  data yet). False only when the item was never a build root — probability then falls back to the manual
-     *  constant. */
-    probabilityIsAuto: boolean;
-
-    /** Populated only when probabilityIsAuto — every scaler item that contributed to this item's P, and that
-     *  scaler's own shop-appearance probability. */
-    probabilitySources: { itemId: string; buildId: string; buildName: string; probability: number }[];
-
-    /** Every build this item was classified into (with a real depth — see BuildPresenceEntry), and the
-     *  coefficient each one contributed. An item that's a member of a build but wasn't reachable in that build's
-     *  own scaling graph (computeCascadeLevels' `unclassified`) contributes nothing — there's no "ступень" for it
-     *  to look up a coefficient for. Still used by `mechanicPower` (not `power` — see computeItemPowers' doc). */
+    /** Every build this item was classified into (with a real depth — see BuildPresenceEntry). An item that's a
+     *  member of a build but wasn't reachable in that build's own scaling graph (computeCascadeLevels'
+     *  `unclassified`) contributes nothing — there's no "ступень" for it to look up a coefficient for. Filtered
+     *  down to `qualifyingBuildEntries`/S for the actual formula. */
     buildPresence: BuildPresenceEntry[];
-
-    /** Sum of buildPresence[].coefficient. */
-    buildCoefficientSum: number;
-
-    /** averageValue × buildCoefficientSum — only feeds `mechanicPower` now, not `power`. */
-    buildTerm: number;
 
     /** M — count of unique items this item has a *direct* structural connection with (both directions: things
      *  it directly feeds, and things that directly feed it), found only by looking inside the builds in
@@ -102,44 +76,6 @@ export interface ItemPower {
 
     /** (MoneyValue + MainValue) + formulaMultiplier × sumQV — see computeItemPowers' doc for the full formula. */
     power: number;
-
-    /** Per-mechanic-table breakdown of the "mechanic power" formula (see mechanicPower) — one entry per table
-     *  this item has at least one row of with a real (non-zero) TargetCount, skipped otherwise (same "only real
-     *  contributions" convention as buildPresence/probabilitySources). */
-    mechanicTerms: MechanicInfluenceEntry[];
-
-    /** Σ mechanicTerms — the raw sum of every table's TargetCount × Влияние term, *before* being boosted by P (see
-     *  mechanicPower). */
-    mechanicTermsSum: number;
-
-    /** mechanicTermsSum × (1 + P) — see mechanicPower's doc for why (1 + P), not a bare × P. */
-    mechanicTermsWithProbability: number;
-
-    /** A second, independent power estimate, unrelated to `power`'s own (S/M/Q/V) formula — see computeItemPowers'
-     *  doc for the full formula. Meant to surface items that score 0 (or near it) on `power` because they have no
-     *  MoneyValue/ValueMin/ValueMax at all, but are still clearly useful because they activate/color/spawn/tag a
-     *  lot of other things. Only the mechanic terms are boosted by `(1 + P)`, never a bare `× P`: a bare `× P`
-     *  would zero out the whole formula whenever an item has no known scalers (P = 0), which is both common (most
-     *  items are never a build root) and wrong — an item's raw mechanical influence is real even with no scalers,
-     *  P should only ever add a *bonus* on top, never erase the baseline. MoneyValue and buildTerm are left
-     *  untouched by P. */
-    mechanicPower: number;
-}
-
-export interface MechanicInfluenceEntry {
-    /** MechanicTableName, e.g. "MechAddValue"/"MechActivate"/... — kept as `string` (not the exact union) so this
-     *  module doesn't need to import models/Mechanic.ts just for the type. */
-    table: string;
-
-    /** Sum of TargetCount across every row this item has in this mechanic table. */
-    targetCountSum: number;
-
-    /** balanceConfig.mechanicInfluence[table] at the time this was computed. */
-    influence: number;
-
-    /** targetCountSum × influence — scaled by averageValue as well, but only for the MechAddValue table (the one
-     *  mechanic table that's actually about *values*, see computeItemPowers' doc). */
-    term: number;
 }
 
 /**
@@ -163,36 +99,9 @@ export interface MechanicInfluenceEntry {
  *     buildPresence.find(e => e.buildId === b).coefficient.
  *   - A is the total number of items `power` was computed over (the full `items` array).
  *
- * This fully replaced an earlier formula ((MoneyValue + avg) + avg × (1 + P) + avg × Σ(depth coefficient)) per
- * explicit request — P (still computed, see ItemPower.probability) and the depth-coefficient sum (buildTerm) are
- * no longer part of `power` at all, but both still feed `mechanicPower` below.
- *
  * computeCascadeLevels is run once per build (not once per item×build) — for typical dataset sizes (hundreds of
  * items, dozens of builds) this is cheap enough for a page-level useMemo; callers should still memoize on their
  * own inputs since this recomputes the whole graph for every build on every call.
- *
- * Also computes a second, independent estimate (`mechanicPower`/`mechanicTerms` on ItemPower) — added per the
- * user's own real-world example: an item can have no MoneyValue/ValueMin/ValueMax configured at all (so `power`
- * above reads as ~0, looking "useless") while still mattering a lot because it activates/recolors/spawns/tags
- * many other things. Its formula:
- *
- *   MoneyValue + [Σ(TargetCount over this item's MechAddValue rows) × Влияние(MechAddValue) × avg
- *              +  Σ(TargetCount over this item's rows of table T) × Влияние(T), for every other mechanic table T]
- *                 × (1 + P)
- *              + buildTerm (the same avg × Σ(depth coefficient) term `power` already uses)
- *
- * avg only multiplies the MechAddValue term (the one mechanic table that's actually about *values*) — every other
- * table (MechActivate/MechChangeColor/MechAddItem/MechAddTag) contributes `TargetCount × Влияние(T)` directly, so
- * an item with avg = 0 still scores real mechanicPower from those. Влияние(T) is a per-table constant the user
- * sets in "Константы" (balanceConfig.mechanicInfluence).
- *
- * Only the mechanic-terms sum is boosted by `(1 + P)` — P is the sum of the shop-appearance probability of this
- * item's direct scalers, see ItemPower.probability's doc (computed independently of `power`'s own S/M/Q/V formula
- * above, but still shared between both). `(1 + P)`, not a bare `× P`: an earlier version multiplied the *whole*
- * subtotal by P, which zeroed mechanicPower out entirely for any item with no known scalers (P = 0) — common, and
- * wrong, since the point of this formula is precisely to credit items whose value comes from their own mechanics
- * rather than from being scaled. `(1 + P)` means P only ever adds a bonus, the baseline mechanic influence always
- * survives.
  */
 export function computeItemPowers(
     items: Item[],
@@ -201,29 +110,12 @@ export function computeItemPowers(
     replaceRules: ReplaceRule[],
     upgradeChains: UpgradeChain[],
     balanceConfig: BalanceConfig,
-    shopAppearances?: Map<string, ItemShopAppearance>,
     includeMoneyValueRoots = false
 ): Map<string, ItemPower> {
     const knownIds = new Set(items.map((item) => item.id));
     const itemsById = new Map(items.map((item) => [item.id, item]));
 
-    // itemId -> table -> Σ TargetCount, for the mechanicPower formula. Rows with no/zero TargetCount are simply
-    // never added, so a table with nothing real never shows up in an item's map at all.
-    const targetCountByItemAndTable = new Map<string, Map<string, number>>();
-    for (const row of mechanics) {
-        const targetCount = parseNumberOr0(row.fields.TargetCount);
-        if (targetCount === 0) continue;
-
-        const byTable = targetCountByItemAndTable.get(row.itemId) ?? new Map<string, number>();
-        byTable.set(row.table, (byTable.get(row.table) ?? 0) + targetCount);
-        targetCountByItemAndTable.set(row.itemId, byTable);
-    }
-
     const presenceByItem = new Map<string, BuildPresenceEntry[]>();
-    // Populated only for items that are the real root (depth 0) of at least one build — distinguishes "root with
-    // zero scalers found" (real 0) from "never a root at all" (falls back to the manual constant), see
-    // ItemPower.probabilityIsAuto's doc.
-    const scalerSourcesByRoot = new Map<string, { itemId: string; buildId: string; buildName: string; probability: number }[]>();
 
     // buildId -> that build's own root item id — for `power`'s Q_b (the build's root's MoneyValue + MainValue).
     const rootItemIdByBuild = new Map<string, string>();
@@ -269,20 +161,7 @@ export function computeItemPowers(
         }
 
         const rootNode = result.nodes.find((node) => node.depth === 0 && !node.combo);
-        if (!rootNode) continue;
-
-        rootItemIdByBuild.set(build.id, rootNode.itemId);
-
-        // Only depth === 1 — a *direct* structural edge to the root, not a deeper/indirect one (see
-        // ItemPower.probability's doc for why this was narrowed from "any depth ≥ 1").
-        const sources = scalerSourcesByRoot.get(rootNode.itemId) ?? [];
-        for (const node of result.nodes) {
-            if (node.combo || node.depth !== 1) continue;
-            const scalerProbability = shopAppearances?.get(node.itemId)?.perVisitProbability;
-            if (!scalerProbability) continue;
-            sources.push({ itemId: node.itemId, buildId: build.id, buildName: build.name, probability: scalerProbability });
-        }
-        scalerSourcesByRoot.set(rootNode.itemId, sources);
+        if (rootNode) rootItemIdByBuild.set(build.id, rootNode.itemId);
     }
 
     const totalItemCount = items.length;
@@ -292,14 +171,7 @@ export function computeItemPowers(
     for (const item of items) {
         const moneyValue = moneyValueOf(item);
         const averageValue = averageValueOf(item);
-        const scalerSources = scalerSourcesByRoot.get(item.id);
-        const probabilityIsAuto = scalerSources !== undefined;
-        const probability = probabilityIsAuto
-            ? scalerSources.reduce((sum, source) => sum + source.probability, 0)
-            : balanceConfig.scaleChelAppearanceProbability;
         const buildPresence = presenceByItem.get(item.id) ?? [];
-        const buildCoefficientSum = buildPresence.reduce((sum, entry) => sum + entry.coefficient, 0);
-        const buildTerm = averageValue * buildCoefficientSum;
 
         const qualifyingBuildEntries = buildPresence
             .filter((entry) => entry.depth <= balanceConfig.qualifyingBuildDepthThreshold)
@@ -324,31 +196,10 @@ export function computeItemPowers(
             totalItemCount > 0 ? (qualifyingBuildCount * (directConnectionsCount + 1)) / totalItemCount : 0;
         const power = moneyValue + averageValue + formulaMultiplier * sumQV;
 
-        const targetCountByTable = targetCountByItemAndTable.get(item.id);
-        const mechanicTerms: MechanicInfluenceEntry[] = [];
-        let mechanicTermsSum = 0;
-        for (const table of KNOWN_MECHANIC_TABLES) {
-            const targetCountSum = targetCountByTable?.get(table) ?? 0;
-            if (targetCountSum === 0) continue;
-
-            const influence = balanceConfig.mechanicInfluence[table] ?? 0;
-            const factor = table === "MechAddValue" ? averageValue : 1;
-            const term = factor * targetCountSum * influence;
-            mechanicTerms.push({ table, targetCountSum, influence, term });
-            mechanicTermsSum += term;
-        }
-        const mechanicTermsWithProbability = mechanicTermsSum * (1 + probability);
-        const mechanicPower = moneyValue + mechanicTermsWithProbability + buildTerm;
-
         powers.set(item.id, {
             moneyValue,
             averageValue,
-            probability,
-            probabilityIsAuto,
-            probabilitySources: scalerSources ?? [],
             buildPresence,
-            buildCoefficientSum,
-            buildTerm,
             directConnectionsCount,
             qualifyingBuildEntries,
             qualifyingBuildCount,
@@ -356,10 +207,6 @@ export function computeItemPowers(
             totalItemCount,
             formulaMultiplier,
             power,
-            mechanicTerms,
-            mechanicTermsSum,
-            mechanicTermsWithProbability,
-            mechanicPower,
         });
     }
 

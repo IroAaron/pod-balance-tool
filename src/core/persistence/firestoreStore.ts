@@ -150,10 +150,6 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
                     ...DEFAULT_SHARED.balanceConfig.depthCoefficients,
                     ...data?.depthCoefficients,
                 },
-                mechanicInfluence: {
-                    ...DEFAULT_SHARED.balanceConfig.mechanicInfluence,
-                    ...data?.mechanicInfluence,
-                },
             };
             emit();
         },

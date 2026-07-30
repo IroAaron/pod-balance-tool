@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Paper, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import type { BalanceConfig } from "../../../core/models/BalanceConfig";
-import { KNOWN_MECHANIC_TABLES } from "../../../core/domain/mechanicTables";
 
 function parseCoefficient(value: string, fallback: number): number {
     if (value.trim() === "") return 0;
@@ -29,31 +28,6 @@ function ConstantsForm() {
 
     return (
         <Stack spacing={3} sx={{ maxWidth: 640 }}>
-            <Paper sx={{ p: 3 }}>
-                <Stack spacing={2}>
-                    <Typography variant="h6">Вероятность появления скейлеров (P)</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                        Для предметов, которые являются корнем билда, P считается автоматически — как сумма
-                        вероятностей появления в магазине их прямых скейлеров (предметов, с которыми есть прямая
-                        связь, ступень ровно 1 в билде; таблицы «Магазин → Паки/Колоды»). Значение ниже — запасное,
-                        используется только для предметов, которые никогда не являются корнем билда.
-                    </Typography>
-                    <TextField
-                        label="P (запасное значение)"
-                        type="number"
-                        value={draft.scaleChelAppearanceProbability}
-                        onChange={(event) => {
-                            const value = parseCoefficient(event.target.value, draft.scaleChelAppearanceProbability);
-                            setDraft((prev) => ({ ...prev, scaleChelAppearanceProbability: value }));
-                        }}
-                        onBlur={() => commit(draft)}
-                        size="small"
-                        slotProps={{ htmlInput: { step: 0.01 } }}
-                        sx={{ maxWidth: 200 }}
-                    />
-                </Stack>
-            </Paper>
-
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>
                     <Typography variant="h6">Коэффициенты по ступеням билда</Typography>
@@ -105,39 +79,6 @@ function ConstantsForm() {
                         slotProps={{ htmlInput: { step: 1, min: 0 } }}
                         sx={{ maxWidth: 200 }}
                     />
-                </Stack>
-            </Paper>
-
-            <Paper sx={{ p: 3 }}>
-                <Stack spacing={2}>
-                    <Typography variant="h6">Влияние механик</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                        Второй, независимый расчёт силы («Сила (мех.)» на вкладке «Сила предметов») — учитывает
-                        предметы без MinValue/MaxValue, но с активациями/эффектами: MoneyValue + avg×Σ(TargetCount
-                        по MechAddValue)×Влияние + Σ(TargetCount по остальным механикам)×Влияние + тот же вклад от
-                        ступеней в билдах. Значение ниже — вес каждой таблицы механик в этой формуле.
-                    </Typography>
-                    <Stack spacing={1.5}>
-                        {KNOWN_MECHANIC_TABLES.map((table) => (
-                            <TextField
-                                key={table}
-                                label={table}
-                                type="number"
-                                value={draft.mechanicInfluence[table] ?? 0}
-                                onChange={(event) => {
-                                    const value = parseCoefficient(event.target.value, draft.mechanicInfluence[table] ?? 0);
-                                    setDraft((prev) => ({
-                                        ...prev,
-                                        mechanicInfluence: { ...prev.mechanicInfluence, [table]: value },
-                                    }));
-                                }}
-                                onBlur={() => commit(draft)}
-                                size="small"
-                                slotProps={{ htmlInput: { step: 0.1 } }}
-                                sx={{ maxWidth: 260 }}
-                            />
-                        ))}
-                    </Stack>
                 </Stack>
             </Paper>
         </Stack>
