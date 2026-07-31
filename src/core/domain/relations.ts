@@ -318,12 +318,23 @@ interface CascadeIndex {
      *  "strengthens it" one, and folding both into one bucket made a kill-by-id read the same as a value boost. */
     targetersOf: Map<string, Set<string>>;
 
-    /** targetId -> items that place/replace it onto the board (MechAddItem "поставить", or the itemIdToReplace
-     *  side of a ReplaceItem/ReplaceOnTrigger swap that turns into it). Directional: a replace rule's
-     *  replacementItem is not a "spawner of" its itemIdToReplace — it's what that item becomes, not what
-     *  produces it (see buildReplaceMates in relatedItems for the symmetric version of this same rule, used
-     *  where direction genuinely doesn't matter). */
+    /** targetId -> items that place it onto the board (MechAddItem "поставить"), or that are *needed nearby* for
+     *  a ReplaceItem/ReplaceOnTrigger swap that turns into it (the rule's own NeededItem — see replacedFromOf for
+     *  the itemIdToReplace side of the same rule, deliberately kept separate and weaker). Directional: a replace
+     *  rule's replacementItem is not a "spawner of" its NeededItem in the literal sense either, but NeededItem is
+     *  a genuine, active prerequisite (see buildReplaceMates in relatedItems for the symmetric version of this
+     *  same rule, used where direction genuinely doesn't matter). */
     spawnersOf: Map<string, Set<string>>;
+
+    /** targetId -> the itemIdToReplace side of every ReplaceItem/ReplaceOnTrigger rule that turns into it (2026-
+     *  07-30: split out of spawnersOf on request — real example: Медсестра, `ItemIdToReplace` of a rule whose
+     *  `ReplacementItem` is Фотомодель, showed as a full-strength depth-1 "spawner" of Фотомодель, outranking
+     *  members with a genuinely longer but real chain. itemIdToReplace is "the thing that stops existing", not an
+     *  active ingredient the way NeededItem is (see spawnersOf) — findFeedersOf pushes this with reason
+     *  `"indirect"` specifically so it's still a real, followable edge but always sorts past every other real
+     *  connection (see computeCascadeLevels' indirect-depth pass), the same as a ReplaceOnTrigger's own base tier
+     *  (itemIdToReplace) relative to what it upgrades into. */
+    replacedFromOf: Map<string, Set<string>>;
 
     /** tag -> items *statically* carrying that tag (item.tags only — not mechanic-derived, see itemIdsByGrantedTag for that). */
     itemIdsByTag: Map<string, Set<string>>;
@@ -434,6 +445,14 @@ interface CascadeIndex {
  * ever affects himself, and the old code didn't check Place before indexing him as a generic booster at all — but
  * even after fixing that, Меценат's case is not a bug, just this signal being too weak by design.) See
  * computeScalingGraph's doc for the replacement model: only Id/tag/event/replace-rule signals count as real edges.
+ *
+ * 2026-07-28 update: the signal is back, but *only* inside buildCascadeStyleConnections, *only* for House/Artefact
+ * (never Card — see that function's own comment), and it only ever surfaces as an orange context node (see
+ * addRelatedContextNodes), never a real depth-classified feeder — real example this time: Робот/Моряк directly
+ * activate "any nearby House" with no further filter and could never appear anywhere at all before this, even
+ * though the mechanic effect is completely real. findFeedersOf/computeScalingGraphInternal (real generation,
+ * what this comment is actually about) still never read type-only matches — that half of the original decision
+ * stands.
  */
 
 function buildCascadeIndex(
@@ -444,6 +463,7 @@ function buildCascadeIndex(
 ): CascadeIndex {
     const targetersOf = new Map<string, Set<string>>();
     const spawnersOf = new Map<string, Set<string>>();
+    const replacedFromOf = new Map<string, Set<string>>();
     const itemIdsByProducedColor = new Map<string, Set<string>>();
     const allRecolorers = new Set<string>();
     const itemIdsByProducedEvent = new Map<string, Set<string>>();
@@ -573,15 +593,18 @@ function buildCascadeIndex(
     for (const rule of replaceRules) {
         if (!knownIds.has(rule.replacementItem)) continue;
 
+        // itemIdToReplace is "the thing that stops existing" — a real edge (see findFeedersOf, reason
+        // "indirect"), but deliberately not spawnersOf: it's not an active ingredient the way NeededItem is (see
+        // below), it's what the result *used to be*.
         if (knownIds.has(rule.itemIdToReplace)) {
-            addTo(spawnersOf, rule.replacementItem, rule.itemIdToReplace);
+            addTo(replacedFromOf, rule.replacementItem, rule.itemIdToReplace);
         }
 
         // ReplaceItem rules need a NeededItem present nearby too, not just itemIdToReplace on its own — e.g.
         // Бомж only becomes Рок музыкант next to Музыкальный магазин (NeededItem); Бомж by himself never causes
-        // the upgrade, so he isn't the whole story as a "spawner". Both ingredients are real prerequisites.
-        // ReplaceOnTrigger rules have no NeededItem column, so this is a no-op there (fields.NeededItem is
-        // undefined).
+        // the upgrade, so he isn't the whole story as a "spawner". NeededItem is a genuine, active prerequisite,
+        // unlike itemIdToReplace above — kept at full "spawner" strength. ReplaceOnTrigger rules have no
+        // NeededItem column, so this is a no-op there (fields.NeededItem is undefined).
         const neededItem = rule.fields.NeededItem;
         if (neededItem && knownIds.has(neededItem)) {
             addTo(spawnersOf, rule.replacementItem, neededItem);
@@ -591,6 +614,7 @@ function buildCascadeIndex(
     return {
         targetersOf,
         spawnersOf,
+        replacedFromOf,
         itemIdsByTag,
         itemIdsByType,
         itemIdsByProducedColor,
@@ -768,9 +792,18 @@ export type ScalingEdgeReason =
     /** A MechAddTag row directly grants this item a tag (by id or its own TargetTag) — distinct from
      *  "tag-granter", which is "produces a tag consumed by this row's own filter". See retagsOf/retagsTargetsOf. */
     | "retags"
-    /** The item's *real* parent (from computeScalingGraph) isn't itself a member of this particular build — a
-     *  manually-curated build can be a subset of what fresh generation would find — so computeCascadeLevels falls
-     *  back to drawing a line straight to the root instead of leaving the node with nowhere to point. Rare. */
+    /**
+     * Two distinct sources, deliberately given the same weak treatment: (1) the item's *real* parent (from
+     * computeScalingGraph) isn't itself a member of this particular build — a manually-curated build can be a
+     * subset of what fresh generation would find — so computeCascadeLevels falls back to drawing a line straight
+     * to the root instead of leaving the node with nowhere to point; (2) the itemIdToReplace side of a
+     * ReplaceItem/ReplaceOnTrigger rule (see replacedFromOf) — "the thing that stops existing" when it turns into
+     * the rule's replacementItem, real example: Медсестра, ItemIdToReplace of a rule whose ReplacementItem is
+     * Фотомодель, used to show as a full-strength depth-1 "spawner" and outrank members with a genuinely longer
+     * real chain (2026-07-30). Either way, computeCascadeLevels' indirect-depth pass (see isIndirectOnly) pushes
+     * a node whose *only* parent is "indirect" past every genuinely-connected node in the same build, regardless
+     * of which of these two produced it.
+     */
     | "indirect"
     /** Feeds a synthetic ReplaceItem combo node (see ComboInfo) — the ingredient side. */
     | "combo-ingredient"
@@ -794,7 +827,7 @@ export const SCALING_EDGE_REASON_LABELS: Record<ScalingEdgeReason, string> = {
     recolors: "напрямую перекрашивает",
     removes: "напрямую убирает",
     retags: "напрямую даёт тег",
-    indirect: "непрямая связь (через предмет вне билда)",
+    indirect: "непрямая связь",
     "combo-ingredient": "ингредиент комбинации",
     "combo-result": "результат комбинации",
     related: "сильно связан по механикам (не входит в билд)",
@@ -909,6 +942,7 @@ function findFeedersOf(
     }
 
     for (const id of index.spawnersOf.get(target.id) ?? []) push(id, "spawner");
+    for (const id of index.replacedFromOf.get(target.id) ?? []) push(id, "indirect");
 
     for (const id of index.activatorsOf.get(target.id) ?? []) push(id, "activator");
     for (const tag of target.tags) {
@@ -950,7 +984,16 @@ export interface ScalingNode {
     parents: { itemId: string; reason: ScalingEdgeReason }[];
 }
 
-export const DEFAULT_MAX_SCALING_DEPTH = 6;
+/**
+ * Purely a safety valve against pathological/cyclic data — the BFS below already stops on its own the moment a
+ * round finds nothing new (`discovered.size === 0`), so this only matters for runaway cases. Bumped 6 -> 20
+ * (2026-07-30): a node parked right at the old cap never got its *own* row-loop checked at all (the round that
+ * would expand it never ran), silently hiding whatever it feeds into — real example: Медсестра, pushed to a
+ * genuine depth 6 by the indirect-edge-deferral fix, stopped showing her own real ItemRemoved-producer
+ * connections, which used to be found via her own row when she was still shallow enough to be expanded. 20 is
+ * comfortable headroom over any real chain seen in this game's actual data so far (deepest observed: ~6).
+ */
+export const DEFAULT_MAX_SCALING_DEPTH = 20;
 
 /**
  * The actual BFS, factored out so computeCascadeBuilds (many roots, one shared index) and computeCascadeLevels
@@ -976,6 +1019,16 @@ function computeScalingGraphInternal(
     const root = itemsById.get(rootId);
     if (!root) return nodes;
     nodes.set(rootId, { itemId: rootId, depth: 0, parents: [] });
+
+    // A brand-new node discovered via an "indirect" edge (see replacedFromOf) is deferred rather than committed
+    // immediately — plain round-by-round BFS would otherwise let it "win" a shallow depth just because the weak
+    // edge happened to be found before a real one, real example: Медсестра (ItemIdToReplace into Фотомодель,
+    // "indirect") *also* has an independent real activation-subject edge one hop further out, discovered only in
+    // a later round once its own source becomes frontier — without deferring, she'd be permanently stuck at the
+    // indirect edge's round-1 depth even though a real path exists. Only *new* discoveries are deferred; an
+    // indirect edge into an *already-placed* node can't affect a depth that's already settled, so it's appended
+    // immediately like any other reason (see the `existing` branch below).
+    const deferredIndirectDiscoveries: { from: string; parentId: string }[] = [];
 
     let frontier = [rootId];
     for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
@@ -1004,6 +1057,11 @@ function computeScalingGraphInternal(
                     continue;
                 }
 
+                if (edge.reason === "indirect") {
+                    deferredIndirectDiscoveries.push({ from: edge.from, parentId });
+                    continue;
+                }
+
                 if (!discovered.has(edge.from)) discovered.set(edge.from, []);
                 discovered.get(edge.from)!.push({ itemId: parentId, reason: edge.reason });
             }
@@ -1017,6 +1075,27 @@ function computeScalingGraphInternal(
             nextFrontier.push(itemId);
         }
         frontier = nextFrontier;
+    }
+
+    // Now settle every deferred indirect discovery, once the real (non-indirect) graph above is fully known. An
+    // item the real BFS also reached just gains this as one more parent — its depth was already settled by a
+    // real edge, so it's unaffected. One reached *only* via indirect edges gets a single shared tier, one past
+    // the deepest real node anywhere in this graph — never competing with real depths, whichever round they were
+    // each found in.
+    const maxRealDepth = Math.max(0, ...[...nodes.values()].map((node) => node.depth));
+    const newlyIndirect = new Map<string, { itemId: string; reason: ScalingEdgeReason }[]>();
+    for (const { from, parentId } of deferredIndirectDiscoveries) {
+        if (from === rootId) continue;
+        const existing = nodes.get(from);
+        if (existing) {
+            existing.parents = [...existing.parents, { itemId: parentId, reason: "indirect" }];
+            continue;
+        }
+        if (!newlyIndirect.has(from)) newlyIndirect.set(from, []);
+        newlyIndirect.get(from)!.push({ itemId: parentId, reason: "indirect" });
+    }
+    for (const [itemId, parents] of newlyIndirect) {
+        nodes.set(itemId, { itemId, depth: maxRealDepth + 1, parents });
     }
 
     return nodes;
@@ -1400,6 +1479,21 @@ export function computeCascadeLevels(
         });
     }
 
+    // `depth` above still comes straight from the full, catalog-wide graph — it has no idea a node just fell back
+    // to the "indirect" placeholder (real example: Медсестра in "Билд от Фотомодели" — her shortest real hop count
+    // happens to be small via an item outside this build, so she displayed *shallower* than Фитнес-тренер/a combo,
+    // whose longer chain is entirely real and in-build). An indirect-only node's depth is meaningless as "distance
+    // from root" — it's not the root's real distance to it, just whatever the unrestricted graph happened to find
+    // first — so every one of them is pushed past the deepest genuinely-explained node instead, guaranteeing
+    // "indirect" never outranks a real connection regardless of its original catalog-wide depth. Must run before
+    // placeCombosInGraph/addContext below, since both derive their own depths from a node's depth.
+    const isIndirectOnly = (node: CascadeLevelNode) =>
+        node.itemId !== rootId && node.parents.length === 1 && node.parents[0].reason === "indirect";
+    const maxRealDepth = Math.max(0, ...nodes.filter((node) => !isIndirectOnly(node)).map((node) => node.depth));
+    for (const node of nodes) {
+        if (isIndirectOnly(node)) node.depth = maxRealDepth + 1;
+    }
+
     placeCombosInGraph(nodes, combos);
     addContext(nodes);
 
@@ -1417,8 +1511,10 @@ export function computeCascadeLevels(
  * but computed generically for *any* mechanic row belonging to the item, not just a PlayerScore payoff row. Kept
  * in lockstep on purpose — `relatedItems`/`relatedBuilds`/`computeBuildConnections` (graph) all read this, and a
  * signal that generates a build but isn't visible here reads as a bug (real example that originally motivated
- * this whole function: Фермер/Ферма — see below). Deliberately does NOT include a generic "no tag, no id, just
- * type+position" match — see the module note by CascadeIndex for why that signal was tried and reverted.
+ * this whole function: Фермер/Ферма — see below). Mostly does NOT include a generic "no tag, no id, just
+ * type+position" match — see the module note by CascadeIndex for why that signal was tried and reverted — with
+ * one narrow, deliberate exception (below): House/Artefact-only, never Card, and only because this function's
+ * output is *never* real generation, only relatedItems' context-node pass (see addRelatedContextNodes).
  * Directional per row (owner -> match), callers should check both directions for an unordered "are these
  * connected" question, same as the existing direct-id-ref check does.
  */
@@ -1523,6 +1619,25 @@ function buildCascadeStyleConnections(items: Item[], mechanics: MechanicRow[]): 
                 for (const id of splitList(row.fields.TargetItemId ?? "")) if (knownIds.has(id)) connect(itemId, id);
                 for (const tag of splitList(row.fields.TargetTag ?? "")) {
                     for (const id of index.itemIdsByTag.get(tag) ?? []) connect(itemId, id);
+                }
+            }
+
+            // Context-only exception to the "no type+position, no tag, no id" rule above (2026-07-28): a
+            // MechActivate/MechAddValue row with a concrete TargetType (House or Artefact specifically — never
+            // Card, ~67% of the catalog and exactly why that generic signal was rejected in the first place) but
+            // no id/tag to anchor it is still a real mechanic effect, just one too generic to safely explain a
+            // *specific* root — real example: Робот/Моряк (`c_chel_activate_near_house_1`/
+            // `c_chel_activate_opposite_side_house_1`) directly activate "2 nearby House"/"the opposite House"
+            // with no further filter, so they could never appear anywhere before this. Connecting them to every
+            // House/Artefact here only ever surfaces as a context node (see addRelatedContextNodes) once some
+            // House/Artefact is *already* a real member of a build — never a real depth-classified feeder, and
+            // never part of computeCascadeBuilds' own generation (findFeedersOf deliberately does not read this).
+            if (row.table === "MechActivate" || row.table === "MechAddValue") {
+                const targetType = (row.fields.TargetType ?? "").trim();
+                const hasId = splitList(row.fields.UseTargetIds ?? "").length > 0;
+                const hasTag = splitList(row.fields.TargetTag ?? "").length > 0;
+                if ((targetType === "House" || targetType === "Artefact") && !hasId && !hasTag) {
+                    for (const id of index.itemIdsByType.get(targetType) ?? []) connect(itemId, id);
                 }
             }
         }

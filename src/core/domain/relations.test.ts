@@ -863,6 +863,63 @@ describe("computeScalingGraph keeps every real edge to an already-placed node, n
         expect(graph.get(root.id)?.parents).toEqual([]);
         expect(graph.get(deeper.id)?.parents).toEqual([{ itemId: root.id, reason: "money-scaler" }]);
     });
+
+    it("a real edge discovered in a later round wins depth over an indirect edge found in round 1 for the same node (2026-07-30)", () => {
+        // X is reachable two ways: directly off root via an "indirect" (itemIdToReplace) edge in round 1, and via
+        // a genuinely real 3-hop chain (root -> realAnchor -> realFeeder -> X) that only gets discovered in round
+        // 3, once realFeeder itself becomes frontier. Naive round-by-round BFS would let the round-1 indirect
+        // edge claim X's depth first; real motivating example: Медсестра (itemIdToReplace into Фотомодель) *also*
+        // turned out to have an independent real edge one hop past another real member, and needed to end up at
+        // that real edge's depth, not stuck at the indirect edge's shallow round-1 depth.
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const realAnchor = makeItem("real_anchor", { tags: ["Bum"] });
+        const realFeeder = makeItem("real_feeder");
+        const x = makeItem("x", { tags: ["Loud"] });
+        const items = [root, realAnchor, realFeeder, x];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum" }),
+            {
+                // realFeeder's own row activates anything tagged Bum — found as realAnchor's child (reason
+                // "activator") when realAnchor itself is expanded, same pattern as the existing realShallow/
+                // realMid fixture above.
+                id: "realFeeder-activates-Bum",
+                table: "MechActivate",
+                itemId: realFeeder.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Bum" },
+            },
+            {
+                id: "realFeeder-listens-Loud",
+                table: "MechAddValue",
+                itemId: realFeeder.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTag: "Loud",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const replaceRules: ReplaceRule[] = [
+            { id: "x-into-root", source: "ReplaceItem", itemIdToReplace: x.id, replacementItem: root.id, fields: {} },
+        ];
+
+        const graph = computeScalingGraph(root.id, items, mechanics, replaceRules);
+
+        expect(graph.get(realAnchor.id)?.depth).toBe(1);
+        expect(graph.get(realFeeder.id)?.depth).toBe(2);
+        const xNode = graph.get(x.id);
+        // Settled by the real chain (depth 3), not left at the indirect edge's round-1 depth — the indirect edge
+        // still shows up, just as an *additional* parent that doesn't win the depth race.
+        expect(xNode?.depth).toBe(3);
+        expect(xNode?.parents).toEqual(
+            expect.arrayContaining([
+                { itemId: realFeeder.id, reason: "activation-subject" },
+                { itemId: root.id, reason: "indirect" },
+            ])
+        );
+        expect(xNode?.parents.length).toBe(2);
+    });
 });
 
 /**
@@ -1065,12 +1122,19 @@ describe("computeCascadeLevels", () => {
         expect(comboNode?.parents).toEqual([{ itemId: rockMusician.id, reason: "combo-result" }]);
         const streetMusicianNode = result.nodes.find((n) => n.itemId === streetMusician.id);
         const producerNode = result.nodes.find((n) => n.itemId === producer.id);
-        expect(streetMusicianNode?.depth).toBe(1); // kept its own real spawner depth, not moved to the combo's
+        // streetMusician's only real edge is itemIdToReplace ("indirect" — 2026-07-30: no longer a full-strength
+        // "spawner", see replacedFromOf) — pushed past the deepest genuinely-connected node (producer, depth 1,
+        // via NeededItem — still "spawner", unaffected) rather than sharing its depth.
+        expect(streetMusicianNode?.depth).toBe(2);
         expect(streetMusicianNode?.parents).toEqual([
-            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: rockMusician.id, reason: "indirect" },
             { itemId: comboNode!.itemId, reason: "combo-ingredient" },
         ]);
         expect(producerNode?.depth).toBe(1);
+        expect(producerNode?.parents).toEqual([
+            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+        ]);
         expect(result.unclassified).toEqual([]);
     });
 
@@ -1106,12 +1170,59 @@ describe("computeCascadeLevels", () => {
 
         const comboNode = result.nodes.find((n) => n.combo);
         const streetMusicianNode = result.nodes.find((n) => n.itemId === streetMusician.id);
+        // Has a genuinely real edge (money-scaler) *in addition to* the weak itemIdToReplace one ("indirect" —
+        // 2026-07-30, see replacedFromOf) — not indirect-only, so the depth-push pass leaves her depth alone.
         expect(streetMusicianNode?.depth).toBe(1);
         expect(streetMusicianNode?.parents).toEqual([
             { itemId: rockMusician.id, reason: "money-scaler" },
-            { itemId: rockMusician.id, reason: "spawner" },
+            { itemId: rockMusician.id, reason: "indirect" },
             { itemId: comboNode!.itemId, reason: "combo-ingredient" },
         ]);
+    });
+
+    it("real Фотомодель shape: Медсестра (ItemIdToReplace) is indirect and deeper than Фитнес-тренер (NeededItem, a real spawner)", () => {
+        // Real data (2026-07-30): a ReplaceItem row has ItemIdToReplace=Медсестра, ReplacementItem=Фотомодель,
+        // NeededItem=Фитнес-тренер. Медсестра "stops existing" when she turns into Фотомодель — she didn't do
+        // anything to earn that spot the way Фитнес-тренер (the active, needed-nearby ingredient) did, so she
+        // should never outrank a genuinely real connection by depth.
+        const photomodel = makeItem("photomodel", { valueMin: 10, valueMax: 10 });
+        const nurse = makeItem("nurse");
+        const fitnessTrainer = makeItem("fitness_trainer");
+        const items = [photomodel, nurse, fitnessTrainer];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(photomodel.id, { ActivatorType: "ItemActivated", ActivatorTag: "Rich" }),
+        ];
+        const replaceRules: ReplaceRule[] = [
+            {
+                id: "nurse-to-photomodel",
+                source: "ReplaceItem",
+                itemIdToReplace: nurse.id,
+                replacementItem: photomodel.id,
+                fields: { NeededItem: fitnessTrainer.id, NeededItemPlace: "Near", NeededItemNumber: "1" },
+            },
+        ];
+        const build = { id: "b", name: "Билд от Фотомодели", items: [photomodel.id, nurse.id, fitnessTrainer.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, replaceRules);
+
+        // nurse + fitnessTrainer is itself a real 2-ingredient combo (both are {itemIdToReplace, NeededItem} of
+        // the same rule and both build members) — both end up with an extra combo-ingredient parent alongside
+        // their own real-vs-indirect edge, same as the rock-musician tests above.
+        const comboNode = result.nodes.find((n) => n.combo);
+        const nurseNode = result.nodes.find((n) => n.itemId === nurse.id);
+        const fitnessNode = result.nodes.find((n) => n.itemId === fitnessTrainer.id);
+        expect(fitnessNode).toMatchObject({
+            depth: 1,
+            parents: [
+                { itemId: photomodel.id, reason: "spawner" },
+                { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+            ],
+        });
+        expect(nurseNode?.parents).toEqual([
+            { itemId: photomodel.id, reason: "indirect" },
+            { itemId: comboNode!.itemId, reason: "combo-ingredient" },
+        ]);
+        expect(nurseNode!.depth).toBeGreaterThan(fitnessNode!.depth);
     });
 });
 
@@ -1328,5 +1439,160 @@ describe("computeCascadeLevels excludes upgrade tiers when options.upgradeChains
 
         expect(result.nodes.some((n) => n.itemId === feederPlus.id)).toBe(false);
         expect(result.nodes.some((n) => n.itemId === stranger.id && n.extra)).toBe(true);
+    });
+});
+
+/**
+ * Regression coverage for the 2026-07-28 "type-only activator as context" polish: real motivating example —
+ * Робот/Моряк (`c_chel_activate_near_house_1`/`c_chel_activate_opposite_side_house_1`) directly activate "any
+ * nearby House"/"the opposite House" via MechActivate with no UseTargetIds and no TargetTag at all, so under the
+ * id/tag-only rule they could never appear in *any* build, even though the mechanic effect is completely real.
+ * buildCascadeStyleConnections now connects a House/Artefact-type-only row to every House/Artefact — but that only
+ * ever surfaces through addRelatedContextNodes (orange, extra:true), and only once a same-typed item is already a
+ * real member — never through findFeedersOf/computeCascadeBuilds (real generation stays untouched).
+ */
+describe("computeCascadeLevels type-only activators (House/Artefact) as context nodes only", () => {
+    function robotFixture() {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5, itemType: "Card" });
+        const houseFeeder = makeItem("house_feeder", { itemType: "House", tags: ["Bum"] }); // real depth-1 anchor
+        const robot = makeItem("robot", { itemType: "Card" });
+        const items = [root, houseFeeder, robot];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum" }),
+            {
+                id: "robot-activate-house",
+                table: "MechActivate",
+                itemId: robot.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "House", TargetPlace: "Near", TargetCount: "2" },
+            },
+        ];
+        return { root, houseFeeder, robot, items, mechanics };
+    }
+
+    it("appears as an extra context node once a real House member is already in the graph", () => {
+        const { root, houseFeeder, robot, items, mechanics } = robotFixture();
+        const build = { id: "b", name: "Билд", items: [root.id, houseFeeder.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        const robotNode = result.nodes.find((n) => n.itemId === robot.id);
+        expect(robotNode?.extra).toBe(true);
+    });
+
+    it("never appears at all when no House/Artefact member is in the graph", () => {
+        const { root, items, mechanics } = robotFixture();
+        const build = { id: "b2", name: "Билд", items: [root.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        expect(result.nodes.some((n) => n.itemId === "robot")).toBe(false);
+    });
+
+    it("never enters real generation (computeCascadeBuilds), regardless of context", () => {
+        const { root, houseFeeder, items, mechanics } = robotFixture();
+        const drafts = computeCascadeBuilds(items, mechanics, [], [], (item) => item.id);
+        const built = drafts.find((d) => d.items[0] === root.id);
+        expect(built?.items).toContain(houseFeeder.id);
+        expect(built?.items).not.toContain("robot");
+    });
+
+    it("does NOT connect via TargetType=Card (only House/Artefact) — Card is ~most of the catalog", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        const cardFeeder = makeItem("card_feeder", { itemType: "Card", tags: ["Bum"] });
+        const genericCardActivator = makeItem("generic_card_activator", { itemType: "Card" });
+        const items = [root, cardFeeder, genericCardActivator];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum" }),
+            {
+                id: "activates-any-card",
+                table: "MechActivate",
+                itemId: genericCardActivator.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetPlace: "Near", TargetCount: "2" },
+            },
+        ];
+        const build = { id: "b3", name: "Билд", items: [root.id, cardFeeder.id], auto: true };
+
+        const result = computeCascadeLevels(build, items, mechanics, [], false, {
+            upgradeChains: [],
+            includeRelatedContext: true,
+        });
+
+        expect(result.nodes.some((n) => n.itemId === genericCardActivator.id)).toBe(false);
+    });
+});
+
+/**
+ * Regression coverage for the 2026-07-28 "indirect depth" fix: real motivating example — Медсестра, in "Билд от
+ * Фотомодели", showed at a *shallower* depth than Фитнес-тренер/a combo, even though her only connection was the
+ * "indirect" fallback (no real parent among this build's own members) while theirs were genuinely real, in-build,
+ * multi-hop connections. Root cause: an indirect node's `depth` came straight from the full, catalog-wide BFS
+ * (computeScalingGraphInternal over every item, not just this build's members), which has no idea the node just
+ * fell back to a placeholder parent — so a small catalog-wide hop count via some non-member item displayed as if
+ * it were a strong, shallow connection.
+ */
+describe("computeCascadeLevels pushes indirect-only members past every genuinely-connected one", () => {
+    it("an indirect member (originally shallower in the full catalog graph) ends up deeper than a real 3-hop in-build chain", () => {
+        const root = makeItem("root", { valueMin: 5, valueMax: 5 });
+        // Real, genuinely in-build 3-hop chain: root -(tag Bum, activation-subject)-> realShallow(1)
+        // -(activates Bum, "activator")-> realMid(2) -(activates Fast, "activator")-> realDeep(3).
+        const realShallow = makeItem("real_shallow", { tags: ["Bum"] });
+        const realMid = makeItem("real_mid", { tags: ["Fast"] });
+        const realDeep = makeItem("real_deep");
+        // indirectMember's *real* catalog-wide feeder is outsider (tag Rich, found directly off root's own Bonus
+        // filter, depth 1) — a genuinely real edge, just not through a member of *this* build, so within this
+        // build she can only be explained by the "indirect" fallback even though her raw catalog-wide depth (2)
+        // is smaller than the real chain's (3).
+        const indirectMember = makeItem("indirect_member", { tags: ["Loud"] });
+        const outsider = makeItem("outsider", { tags: ["Rich"] }); // real catalog-wide feeder, NOT a build member
+        const items = [root, realShallow, realMid, realDeep, indirectMember, outsider];
+        const mechanics: MechanicRow[] = [
+            makeMainValuePayoff(root.id, { ActivatorTag: "Bum", BonusTargetTag: "Rich", BonusCountingType: "ItemMoneyValue" }),
+            {
+                id: "realMid-activates-Bum",
+                table: "MechActivate",
+                itemId: realMid.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Bum" },
+            },
+            {
+                id: "realDeep-activates-Fast",
+                table: "MechActivate",
+                itemId: realDeep.id,
+                fields: { ActivatorType: "BallPass", ActivatorPlace: "MyPosition", TargetType: "Card", TargetTag: "Fast" },
+            },
+            {
+                id: "outsider-listens-Loud",
+                table: "MechAddValue",
+                itemId: outsider.id,
+                fields: {
+                    ActivatorType: "BallPass",
+                    ActivatorTag: "Loud",
+                    TargetType: "Card",
+                    TargetValueType: "MoneyValue",
+                    TargetPlace: "MyPosition",
+                },
+            },
+        ];
+        const build = {
+            id: "b",
+            name: "Билд",
+            items: [root.id, realShallow.id, realMid.id, realDeep.id, indirectMember.id],
+            auto: true,
+        };
+
+        const result = computeCascadeLevels(build, items, mechanics, []);
+
+        const realDeepNode = result.nodes.find((n) => n.itemId === realDeep.id);
+        const indirectNode = result.nodes.find((n) => n.itemId === indirectMember.id);
+        expect(realDeepNode).toMatchObject({ depth: 3, parents: [{ itemId: realMid.id, reason: "activator" }] });
+        expect(indirectNode?.parents).toEqual([{ itemId: root.id, reason: "indirect" }]);
+        // Pushed past the deepest real node (3), not left at her original catalog-wide depth (2) — which used to
+        // display her as shallower than realDeep despite the connection being merely "indirect".
+        expect(indirectNode?.depth).toBe(4);
     });
 });
