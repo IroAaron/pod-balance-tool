@@ -9,6 +9,7 @@ export interface NavigationMenuItem {
 export const menu: NavigationMenuItem[] = [
     { text: "Источники", path: "/sources", icon: "📥" },
     { text: "Предметы", path: "/items", icon: "📦" },
+    { text: "Раунды", path: "/rounds", icon: "🎯" },
     { text: "Билды", path: "/builds", icon: "🧠" },
     { text: "Глоссарий", path: "/glossary", icon: "📖" },
     { text: "Граф", path: "/graph", icon: "🕸" },

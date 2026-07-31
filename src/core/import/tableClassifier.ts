@@ -8,6 +8,7 @@ export type TableType =
     | "Items"
     | "Translations"
     | "UpgradeChains"
+    | "RoundSettings"
     | "Enums"
     | "ReplaceItem"
     | "ReplaceOnTrigger";
@@ -55,6 +56,12 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
 
     if (hasColumn(headers, "UpgradeChainId")) {
         return { type: "UpgradeChains", table };
+    }
+
+    // RoundId doesn't match findIdColumn's exact "id"/"itemid" check below, so this needs its own branch —
+    // otherwise a real RoundSettings sheet falls straight through to Unknown.
+    if (hasColumn(headers, "RoundId")) {
+        return { type: "RoundSettings", table };
     }
 
     // A per-column, ragged list of valid enum values for each parameter dimension — not a row-per-record table.

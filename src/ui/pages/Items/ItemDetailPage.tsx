@@ -84,6 +84,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
     }
 
     const builds = store.buildsForItem(item.id);
+    const attachedRounds = store.rounds.filter((round) => round.invisibleArtefactId === item.id);
     const chain = store.chainForItem(item.id);
     const icon = store.getItemIcon(item.id) ?? "🧩";
 
@@ -342,6 +343,25 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                     </Stack>
                 )}
             </Paper>
+
+            {attachedRounds.length > 0 && (
+                <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                        Раунды
+                    </Typography>
+                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
+                        {attachedRounds.map((round) => (
+                            <Chip
+                                key={round.id}
+                                label={store.roundName(round)}
+                                component={RouterLink}
+                                to={`/rounds/${encodeURIComponent(round.id)}`}
+                                clickable
+                            />
+                        ))}
+                    </Stack>
+                </Paper>
+            )}
 
             {chain && (
                 <Paper sx={{ p: 3 }}>

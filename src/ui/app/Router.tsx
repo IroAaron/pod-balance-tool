@@ -4,6 +4,8 @@ import { Button, Stack, Typography } from "@mui/material";
 import SourcesPage from "../pages/Sources/SourcesPage";
 import ItemsPage from "../pages/Items/ItemsPage";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
+import RoundsPage from "../pages/Rounds/RoundsPage";
+import RoundDetailPage from "../pages/Rounds/RoundDetailPage";
 import BuildsPage from "../pages/Builds/BuildsPage";
 import BuildDetailPage from "../pages/Builds/BuildDetailPage";
 import GlossaryPage from "../pages/Glossary/GlossaryPage";
@@ -26,6 +28,11 @@ function BuildDetailRoute() {
     return <BuildDetailPage key={id} />;
 }
 
+function RoundDetailRoute() {
+    const { id } = useParams();
+    return <RoundDetailPage key={id} />;
+}
+
 function NotFoundPage() {
     return (
         <Stack spacing={2}>
@@ -45,6 +52,8 @@ export default function AppRouter() {
             <Route path="/sources" element={<SourcesPage />} />
             <Route path="/items" element={<ItemsPage />} />
             <Route path="/items/:id" element={<ItemDetailRoute />} />
+            <Route path="/rounds" element={<RoundsPage />} />
+            <Route path="/rounds/:id" element={<RoundDetailRoute />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
             <Route path="/glossary" element={<GlossaryPage />} />

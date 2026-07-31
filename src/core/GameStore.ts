@@ -3,6 +3,7 @@ import type { Build } from "./models/Build";
 import type { Translation } from "./models/Translation";
 import type { MechanicRow } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
+import type { Round } from "./models/Round";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
@@ -107,6 +108,8 @@ export class GameStore {
 
     upgradeChains: UpgradeChain[] = [];
 
+    rounds: Round[] = [];
+
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
@@ -207,6 +210,7 @@ export class GameStore {
             this.translations = cache.importCache.translations;
             this.mechanics = cache.importCache.mechanics;
             this.upgradeChains = cache.importCache.upgradeChains ?? [];
+            this.rounds = cache.importCache.rounds ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
         }
@@ -285,6 +289,10 @@ export class GameStore {
 
     getItem(id: string): Item | undefined {
         return this._itemsById.get(id);
+    }
+
+    getRound(id: string): Round | undefined {
+        return this.rounds.find((round) => round.id === id);
     }
 
     /**
@@ -400,10 +408,11 @@ export class GameStore {
 
     /**
      * Sends every site-edited name/description (not the full 424-item catalog — only what was actually touched
-     * via setTranslationOverride) to the Apps Script's doPost endpoint. Descriptions run through
-     * buildExportDescriptionText first, converting {item:ID}/{tag:Name} tokens and whichever glossary phrases the
-     * site's *current* descriptionMode/enabled settings would actually apply into real [img] BBCode — matches
-     * what the site currently shows, not "every glossary entry unconditionally."
+     * via setTranslationOverride) to the Apps Script's doPost endpoint — covers both items (name+description) and
+     * round descriptions (see Round.descKey/RoundDetailPage; rounds have no editable name). Descriptions run
+     * through buildExportDescriptionText first, converting {item:ID}/{tag:Name} tokens and whichever glossary
+     * phrases the site's *current* descriptionMode/enabled settings would actually apply into real [img] BBCode —
+     * matches what the site currently shows, not "every glossary entry unconditionally."
      */
     async exportEditedTranslations(): Promise<ExportResult> {
         const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
@@ -451,6 +460,22 @@ export class GameStore {
             }
         }
 
+        // Rounds only ever have an editable description (see RoundDetailPage) — no name half, unlike items.
+        for (const round of this.rounds) {
+            const descOverride = this.translationOverrides[round.descKey];
+            if (descOverride) {
+                descriptions[round.descKey] = buildExportDescriptionText(descOverride, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+                sentOverrides[round.descKey] = descOverride;
+            }
+        }
+
         const result = await postExportPayload(this.sources.translationsUrl, { token, names, descriptions });
 
         if (result.ok) {
@@ -465,7 +490,8 @@ export class GameStore {
     }
 
     /**
-     * Sends every item's current name/description — not just ones with a site-authored override. Exists because
+     * Sends every item's current name/description, and every round's current description — not just ones with a
+     * site-authored override. Exists because
      * glossary phrase matches and {tag:Name}/{item:ID} tokens can newly apply to an item's description (e.g. a
      * glossary entry just got a new phrase, or a tag just got an icon) without the description text itself ever
      * being edited on the site — exportEditedTranslations() has no way to notice that, since translationOverrides
@@ -506,6 +532,21 @@ export class GameStore {
             const description = this.getTranslation(item.descKey);
             if (description) {
                 descriptions[descKey] = buildExportDescriptionText(description, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+            }
+        }
+
+        // Rounds only ever have an editable description (see RoundDetailPage) — no name half, unlike items.
+        for (const round of this.rounds) {
+            const description = this.getTranslation(round.descKey);
+            if (description) {
+                descriptions[round.descKey] = buildExportDescriptionText(description, {
                     items: this.allItems,
                     itemIcons: this.itemIcons,
                     tagIcons: this.tagIcons,
@@ -592,6 +633,14 @@ export class GameStore {
         return this.getTranslation(item.descKey) ?? "";
     }
 
+    roundName(round: Round): string {
+        return this.getTranslation(round.id) ?? round.rules ?? round.id;
+    }
+
+    roundDescription(round: Round): string {
+        return this.getTranslation(round.descKey) ?? "";
+    }
+
     /** Tier chains almost always share the exact same description template across + and ++ (only the underlying
      *  values differ, resolved per-item via {ValueOrRange}-style tokens) — this pushes the given item's current
      *  description text onto every later tier in its upgrade chain, so an edit doesn't have to be retyped by hand
@@ -647,6 +696,7 @@ export class GameStore {
             this.translations = mergeByKey(this.translations, result.data.translations);
             this.mechanics = mergeById(this.mechanics, result.data.mechanics);
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
+            this.rounds = mergeById(this.rounds, result.data.rounds);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
@@ -654,6 +704,7 @@ export class GameStore {
                 this.allItems = result.data.items;
                 this.mechanics = result.data.mechanics;
                 this.upgradeChains = result.data.upgradeChains;
+                this.rounds = result.data.rounds;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
             }
@@ -670,6 +721,7 @@ export class GameStore {
             translations: this.translations,
             mechanics: this.mechanics,
             upgradeChains: this.upgradeChains,
+            rounds: this.rounds,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
         });
@@ -720,7 +772,7 @@ export class GameStore {
     }
 
     /**
-     * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, replaceRules,
+     * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, rounds, replaceRules,
      * enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
      * untouched. Exists specifically because CSV uploads always merge by id (`importCsvFiles` above) and never
      * remove anything missing from a new file, so an item deleted from the source spreadsheet lingers on the site
@@ -732,6 +784,7 @@ export class GameStore {
         this.translations = [];
         this.mechanics = [];
         this.upgradeChains = [];
+        this.rounds = [];
         this.replaceRules = [];
         this.enumValues = {};
         this.rebuildDerivedCaches();
@@ -921,6 +974,7 @@ export class GameStore {
             translations: this.translations,
             mechanics: this.mechanics,
             upgradeChains: this.upgradeChains,
+            rounds: this.rounds,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
             builds: this.builds,
@@ -967,6 +1021,7 @@ export class GameStore {
         this.translations = payload.translations;
         this.mechanics = payload.mechanics;
         this.upgradeChains = payload.upgradeChains;
+        this.rounds = payload.rounds;
         this.replaceRules = payload.replaceRules;
         this.enumValues = payload.enumValues;
         this.rebuildDerivedCaches();
@@ -976,6 +1031,7 @@ export class GameStore {
             translations: payload.translations,
             mechanics: payload.mechanics,
             upgradeChains: payload.upgradeChains,
+            rounds: payload.rounds,
             replaceRules: payload.replaceRules,
             enumValues: payload.enumValues,
         });
@@ -1014,6 +1070,7 @@ export class GameStore {
                 translations: this.translations,
                 mechanics: this.mechanics,
                 upgradeChains: this.upgradeChains,
+                rounds: this.rounds,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
             },
@@ -1044,6 +1101,7 @@ export class GameStore {
             this.translations = state.importCache.translations;
             this.mechanics = state.importCache.mechanics;
             this.upgradeChains = state.importCache.upgradeChains ?? [];
+            this.rounds = state.importCache.rounds ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);

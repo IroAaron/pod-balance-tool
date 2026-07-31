@@ -4,6 +4,7 @@ import type { Item } from "../models/Item";
 import type { Translation } from "../models/Translation";
 import type { MechanicRow, MechanicTableName } from "../models/Mechanic";
 import type { UpgradeChain } from "../models/UpgradeChain";
+import type { Round } from "../models/Round";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
 import { tableNameOf } from "./tableNames";
 
@@ -15,6 +16,8 @@ export interface NormalizedData {
     mechanics: MechanicRow[];
 
     upgradeChains: UpgradeChain[];
+
+    rounds: Round[];
 
     replaceRules: ReplaceRule[];
 
@@ -136,6 +139,41 @@ function normalizeUpgradeChainsTable(table: ParsedTable): UpgradeChain[] {
         }));
 }
 
+function numericSuffix(header: string): number {
+    return parseInt(header.match(/\d+/)?.[0] ?? "0", 10);
+}
+
+function normalizeRoundSettingsTable(table: ParsedTable): Round[] {
+    const idColumn = findColumn(table.headers, ["RoundId"]);
+    if (!idColumn) return [];
+
+    const rulesColumn = findColumn(table.headers, ["RoundRules"]);
+    const artefactColumn = findColumn(table.headers, ["AdditionalInvisibleArtefact"]);
+
+    // Papa.parse renames the sheet's repeated "DeckBalls" header to DeckBalls, DeckBalls_1, DeckBalls_2, ... —
+    // sorted numerically (missing suffix = 0) same as normalizeUpgradeChainsTable's tier columns, in case column
+    // order in the source ever changes.
+    const deckBallsColumns = table.headers
+        .filter((header) => /^DeckBalls(_\d+)?$/i.test(header.trim()))
+        .sort((a, b) => numericSuffix(a) - numericSuffix(b));
+
+    return table.rows
+        .filter((row) => (row[idColumn] ?? "").trim() !== "")
+        .map((row): Round => {
+            const id = row[idColumn].trim();
+            return {
+                id,
+                rules: rulesColumn ? row[rulesColumn]?.trim() || undefined : undefined,
+                invisibleArtefactId: artefactColumn ? row[artefactColumn]?.trim() || undefined : undefined,
+                deckBalls: deckBallsColumns
+                    .map((column) => row[column]?.trim())
+                    .filter((value): value is string => Boolean(value)),
+                descKey: `${id}_desc`,
+                raw: row,
+            };
+        });
+}
+
 function normalizeMechanicTable(table: ParsedTable, type: MechanicTableName): MechanicRow[] {
     const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
     if (!idColumn) return [];
@@ -224,6 +262,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const translations: Translation[] = [];
     const mechanics: MechanicRow[] = [];
     const upgradeChains: UpgradeChain[] = [];
+    const rounds: Round[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -256,6 +295,15 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             upgradeChains.push(...normalized);
+        } else if (type === "RoundSettings") {
+            const normalized = normalizeRoundSettingsTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдена колонка RoundId — таблица раундов пропущена",
+                });
+            }
+            rounds.push(...normalized);
         } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
             const normalized = normalizeReplaceRuleTable(table, type);
             if (normalized.length === 0) {
@@ -299,7 +347,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     }
 
     return {
-        data: { items: dedupedItems, translations, mechanics, upgradeChains, replaceRules, enumValues },
+        data: { items: dedupedItems, translations, mechanics, upgradeChains, rounds, replaceRules, enumValues },
         warnings,
     };
 }

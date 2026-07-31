@@ -2,6 +2,7 @@ import type { Item } from "./Item";
 import type { Translation } from "./Translation";
 import type { MechanicRow } from "./Mechanic";
 import type { UpgradeChain } from "./UpgradeChain";
+import type { Round } from "./Round";
 import type { ReplaceRule } from "./ReplaceRule";
 import type { Build } from "./Build";
 import type { GlossaryEntry } from "./GlossaryEntry";
@@ -39,6 +40,8 @@ export interface BalanceSavePayload {
 
     upgradeChains: UpgradeChain[];
 
+    rounds: Round[];
+
     replaceRules: ReplaceRule[];
 
     enumValues: Record<string, string[]>;
@@ -66,6 +69,7 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "translations",
     "mechanics",
     "upgradeChains",
+    "rounds",
     "replaceRules",
     "enumValues",
     "builds",
