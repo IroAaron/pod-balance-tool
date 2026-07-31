@@ -15,7 +15,7 @@ import { ImportService, type ImportReport, type ImportResult } from "./services/
 
 import { computeSuggestedBuilds, computeCascadeBuilds, computeUpgradeTierIds } from "./domain/relations";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
-import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "./domain/descriptionTemplate";
+import { DEFAULT_DESCRIPTION_SETTINGS, getEnabledGlossaryEntries, type DescriptionSettings } from "./domain/descriptionTemplate";
 import { buildExportDescriptionText } from "./domain/exportText";
 import { postExportPayload, type ExportResult } from "./import/sheetSource";
 import { parseOptionalNumber } from "./import/normalize";
@@ -418,7 +418,7 @@ export class GameStore {
             this.descriptionSettings.descriptionMode === "icons-emoji"
                 ? this.glossary
                 : this.descriptionSettings.descriptionMode === "text-icons"
-                  ? this.glossary.filter((entry) => entry.enabled !== false)
+                  ? getEnabledGlossaryEntries(this.glossary)
                   : [];
 
         const names: Record<string, string> = {};
@@ -487,7 +487,7 @@ export class GameStore {
             this.descriptionSettings.descriptionMode === "icons-emoji"
                 ? this.glossary
                 : this.descriptionSettings.descriptionMode === "text-icons"
-                  ? this.glossary.filter((entry) => entry.enabled !== false)
+                  ? getEnabledGlossaryEntries(this.glossary)
                   : [];
 
         const names: Record<string, string> = {};

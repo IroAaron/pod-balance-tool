@@ -239,10 +239,8 @@ function ComboNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNod
     );
 }
 
-// Memoized: with ~200+ nodes on screen, hovering any single one otherwise re-renders every other node too (only
-// its `dimmed` prop actually changes) — memo plus MemoTreeNode's itemId-parameterized onHoverStart/onHoverEnd
-// (stable across BuildTree renders, unlike a fresh per-node closure) means only nodes whose own dimmed value
-// actually flips re-render.
+// Memoized — see MemoTreeNode's own comment below for why (same reasoning, just far fewer combo nodes in
+// practice than real ones).
 const MemoComboNode = memo(ComboNode);
 
 /**
@@ -315,6 +313,10 @@ function TreeNode(props: TreeNodeProps) {
     );
 }
 
+// Memoized: with ~200+ nodes on screen, hovering any single one otherwise re-renders every other node too (only
+// its `dimmed` prop actually changes) — memo plus the itemId-parameterized onHoverStart/onHoverEnd it receives
+// (stable across BuildTree renders via useCallback, unlike a fresh per-node closure) means only nodes whose own
+// dimmed value actually flips re-render, instead of the whole tree on every hover.
 const MemoTreeNode = memo(TreeNode);
 
 type DetailPanelProps = {
@@ -498,10 +500,11 @@ export default function BuildTree({ build }: Props) {
         setHoveredItemId((current) => (current === itemId ? null : current));
     }, []);
 
-    // store.items/mechanics/etc. are getters that return a fresh array on every access, so `nodes` is a new
-    // array reference every render even when its contents are identical — depending the effect on `nodes`
-    // itself would re-run (and setEdges) every render forever. This derived string is stable across renders
-    // that produce the same actual tree, which is what breaks that loop.
+    // Depending the effect below directly on `nodes` would be fragile: `computeCascadeLevels` is a plain
+    // function call inside a useMemo, not something guaranteed to return the same array/object identities forever
+    // as this file evolves, and a reference that ever changed without the actual tree changing would re-run the
+    // effect (and setEdges) every render forever. This derived string only changes when the tree's actual shape
+    // does, which is what keeps that loop from happening regardless of `nodes`' own reference stability.
     const nodesKey = nodes
         .map((node) => `${node.itemId}:${node.depth}:${node.parents.map((p) => p.itemId).join(",")}`)
         .join("|");
