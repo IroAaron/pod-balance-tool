@@ -28,7 +28,14 @@ type Edge = {
     y1: number;
     x2: number;
     y2: number;
+
+    /** Quadratic-bezier control point. Sits exactly on the (x1,y1)-(x2,y2) chord's midpoint — i.e. renders as a
+     *  straight line — unless the edge needed to bow: see computeControlPoint. */
+    cx: number;
+    cy: number;
 };
+
+type Point = { x: number; y: number };
 
 /** Includes `reason` (not just the pair of ids) — the same two items can now be connected by more than one real
  *  edge at once (e.g. both a money-scaler *and* a modifier connection), since a node keeps every real parent it
@@ -63,6 +70,116 @@ function edgeMarkerId(reason: ScalingEdgeReason): string {
     if (reason === "combo-result") return "arrow-combo-result";
     if (reason === "related") return "arrow-related";
     return "arrow-default";
+}
+
+/** Below this |y2-y1|, an edge connects two nodes in (effectively) the same tier row rather than adjacent rows —
+ *  happens for a combo's "additional parent" link when it lands on the same depth as the participant it's linking
+ *  to. A straight line here would run right along the row instead of connecting two boxes vertically, so it always
+ *  gets bowed off the row instead of measured for obstruction. */
+const SAME_TIER_Y_THRESHOLD = 24;
+
+/** How far a same-tier edge bows off the row. Small and fixed — there's no obstruction to clear, just enough
+ *  curve to read as "not part of the row" and to keep two same-tier edges from sitting on the same line. */
+const SAME_TIER_BOW = 22;
+
+/** Margin added around a node's own half-width when checking whether a straight edge would cut through it. */
+const OBSTRUCTION_MARGIN = 10;
+
+/** Ceiling on a computed obstruction-clearing bow — guards against a huge/unstable value when the obstruction
+ *  sits very close to one of the edge's own endpoints (where the bezier's deviation-per-bow-unit is tiny). */
+const MAX_OBSTRUCTION_BOW = 160;
+
+/** A same-tier edge is never more than this far off-center before its own position (not the fallback counter)
+ *  decides which way it bows; an obstruction edge uses the same tolerance against the diagram's horizontal
+ *  center. Small — mainly there so genuinely-centered edges don't flip sign on sub-pixel layout noise. */
+const CENTER_EPSILON = 4;
+
+/**
+ * Picks which side of the chord to bow the control point to, so the whole diagram reads as bowing outward from
+ * its own center — mirror-symmetric — rather than each edge picking a side at random:
+ *   - if the edge's own position is clearly off-center along the relevant axis (its tier's row for a same-tier
+ *     edge, the diagram's horizontal middle for an obstruction edge), it bows further *away* from center;
+ *   - only when it's genuinely centered (no positional signal to go on — the single-item-per-tier case that
+ *     motivated this whole feature) does it fall back to alternating with the next edge that's just as centered,
+ *     so two edges through the same spot still end up mirrored either side instead of both picking the same way.
+ * `desiredDir` is the "positive" reference axis (down for a same-tier bow, right for an obstruction bow) —
+ * `dot(perp, ±desiredDir)` then finds whichever sign of *this edge's own* perpendicular actually points that way,
+ * since perp's sign flips depending on which of the edge's two endpoints happens to be x1/x2 vs y1/y2.
+ */
+function chooseBowSign(
+    offsetFromCenter: number,
+    perp: Point,
+    desiredDir: Point,
+    fallbackCounter: { value: number }
+): 1 | -1 {
+    let awayFromCenter: boolean;
+    if (Math.abs(offsetFromCenter) > CENTER_EPSILON) {
+        awayFromCenter = offsetFromCenter > 0;
+    } else {
+        awayFromCenter = fallbackCounter.value % 2 === 0;
+        fallbackCounter.value += 1;
+    }
+    const desired = awayFromCenter ? desiredDir : { x: -desiredDir.x, y: -desiredDir.y };
+    return perp.x * desired.x + perp.y * desired.y >= 0 ? 1 : -1;
+}
+
+/**
+ * Computes each edge's bezier control point. Defaults to the (x1,y1)-(x2,y2) chord's own midpoint, which renders
+ * as a plain straight line — bowed off that midpoint only when needed:
+ *   - the edge connects two same-tier nodes (see SAME_TIER_Y_THRESHOLD), or
+ *   - the straight chord would cut through some OTHER node's box that isn't this edge's own parent/child. This
+ *     happens whenever a depth has exactly one node, so every node in that column ends up centered on the same x —
+ *     a longer edge skipping past an intervening depth then draws straight through that depth's node (and through
+ *     the shorter edges touching it), which is exactly the "arrows fully overlap" case this exists to fix.
+ * The bow amount for the obstruction case is solved from the actual quadratic-bezier deviation at the
+ * obstruction's own position along the curve (not a flat constant) so it reliably clears the box regardless of
+ * how far along the edge that obstruction sits.
+ */
+function computeControlPoint(
+    edge: Pick<Edge, "parentId" | "childId" | "x1" | "y1" | "x2" | "y2">,
+    nodeBoxes: Map<string, { cx: number; cy: number; halfW: number }>,
+    center: Point,
+    fallbackCounters: { horizontal: { value: number }; vertical: { value: number } }
+): Point {
+    const midX = (edge.x1 + edge.x2) / 2;
+    const midY = (edge.y1 + edge.y2) / 2;
+    const dx = edge.x2 - edge.x1;
+    const dy = edge.y2 - edge.y1;
+    const length = Math.hypot(dx, dy) || 1;
+    // Unit vector perpendicular to the (dx,dy) chord — for a near-horizontal chord this is near-vertical (bows
+    // the row edge up/down) and for a near-vertical chord it's near-horizontal (bows an obstructed edge sideways).
+    const perpX = -dy / length;
+    const perpY = dx / length;
+
+    if (Math.abs(dy) < SAME_TIER_Y_THRESHOLD) {
+        // Bows away from the diagram's vertical center: a same-tier edge in the top half arcs further up, one in
+        // the bottom half arcs further down — reads as radiating outward instead of an arbitrary per-edge choice.
+        const sign = chooseBowSign(midY - center.y, { x: perpX, y: perpY }, { x: 0, y: 1 }, fallbackCounters.horizontal);
+        return { x: midX + perpX * SAME_TIER_BOW * sign, y: midY + perpY * SAME_TIER_BOW * sign };
+    }
+
+    const minY = Math.min(edge.y1, edge.y2);
+    const maxY = Math.max(edge.y1, edge.y2);
+    let neededBow = 0;
+    for (const [id, box] of nodeBoxes) {
+        if (id === edge.parentId || id === edge.childId) continue;
+        if (box.cy <= minY + OBSTRUCTION_MARGIN || box.cy >= maxY - OBSTRUCTION_MARGIN) continue;
+
+        const t = (box.cy - edge.y1) / dy;
+        const lineX = edge.x1 + t * dx;
+        const clearanceNeeded = box.halfW + OBSTRUCTION_MARGIN;
+        if (Math.abs(lineX - box.cx) >= clearanceNeeded) continue;
+
+        // Quadratic-bezier deviation from the straight chord at parameter t is 2*t*(1-t) times the control
+        // point's own offset — solve backwards for the offset that puts the curve exactly clearanceNeeded away.
+        const factor = Math.max(2 * t * (1 - t), 0.08);
+        neededBow = Math.max(neededBow, Math.min(clearanceNeeded / factor, MAX_OBSTRUCTION_BOW));
+    }
+
+    if (neededBow === 0) return { x: midX, y: midY };
+    // Bows away from the diagram's horizontal center, same idea as the same-tier case but on the other axis.
+    const sign = chooseBowSign(midX - center.x, { x: perpX, y: perpY }, { x: 1, y: 0 }, fallbackCounters.vertical);
+    return { x: midX + perpX * neededBow * sign, y: midY + perpY * neededBow * sign };
 }
 
 /** Russian plural form for "N шаг(а/ов) от корня" — 1 шаг, 2-4 шага, 5+/11-14 шагов. */
@@ -376,7 +493,20 @@ export default function BuildTree({ build }: Props) {
 
         const computeEdges = () => {
             const containerRect = container.getBoundingClientRect();
-            const next: Edge[] = [];
+
+            // Every placed node's box in container-relative coordinates — used both as edge endpoints above and,
+            // in computeControlPoint, to detect a straight edge cutting through some unrelated node.
+            const nodeBoxes = new Map<string, { cx: number; cy: number; halfW: number }>();
+            for (const [id, el] of nodeRefs.current) {
+                const rect = el.getBoundingClientRect();
+                nodeBoxes.set(id, {
+                    cx: rect.left + rect.width / 2 - containerRect.left,
+                    cy: rect.top + rect.height / 2 - containerRect.top,
+                    halfW: rect.width / 2,
+                });
+            }
+
+            const raw: Omit<Edge, "cx" | "cy">[] = [];
 
             for (const node of nodes) {
                 const childEl = nodeRefs.current.get(node.itemId);
@@ -394,7 +524,7 @@ export default function BuildTree({ build }: Props) {
                     // defensive position check rather than assuming depth order always matches screen order.
                     const parentIsHigher = parentRect.top + parentRect.height / 2 <= childRect.top + childRect.height / 2;
 
-                    next.push({
+                    raw.push({
                         parentId,
                         childId: node.itemId,
                         reason: parent.reason,
@@ -405,6 +535,15 @@ export default function BuildTree({ build }: Props) {
                     });
                 }
             }
+
+            const center: Point = { x: containerRect.width / 2, y: containerRect.height / 2 };
+            // Fresh per recompute, shared across the edges below so two edges that both land on the ambiguous
+            // (genuinely-centered) fallback still alternate sides against each other, not just against themselves.
+            const fallbackCounters = { horizontal: { value: 0 }, vertical: { value: 0 } };
+            const next: Edge[] = raw.map((edge) => {
+                const control = computeControlPoint(edge, nodeBoxes, center, fallbackCounters);
+                return { ...edge, cx: control.x, cy: control.y };
+            });
 
             setEdges(next);
         };
@@ -513,22 +652,28 @@ export default function BuildTree({ build }: Props) {
                             const key = edgeKey(edge.parentId, edge.childId, edge.reason);
                             const isHighlighted = !highlightedEdgeKeys || highlightedEdgeKeys.has(key);
                             const opacity = isHighlighted ? 0.9 : 0.15;
+                            // A quadratic bezier through the control point — degenerates to a plain straight
+                            // segment when the control point sits on the chord's own midpoint (the common case;
+                            // see computeControlPoint), and bows around same-tier/obstructed edges otherwise.
+                            // Every other reason is drawn child->parent so the arrowhead lands on the parent —
+                            // the item this connection explains, with the tip pointing at exactly who it came
+                            // from (e.g. "spawner" points at what it spawns). A "related" edge reads the other
+                            // way round: the anchor (parent) is the real item already in the graph, and the
+                            // child is the *other*, merely context item it's related to — the anchor is what
+                            // does the influencing (e.g. Маньяк killing), and the child is what's affected
+                            // (Медсестра reacting to it), so the arrow points parent->child instead, same as
+                            // every solid edge reads "arrow points at what's influenced".
+                            const [startX, startY, endX, endY] =
+                                edge.reason === "related"
+                                    ? [edge.x1, edge.y1, edge.x2, edge.y2]
+                                    : [edge.x2, edge.y2, edge.x1, edge.y1];
+                            const path = `M ${startX} ${startY} Q ${edge.cx} ${edge.cy} ${endX} ${endY}`;
+                            const hitPath = `M ${edge.x1} ${edge.y1} Q ${edge.cx} ${edge.cy} ${edge.x2} ${edge.y2}`;
                             return (
                                 <g key={key}>
-                                    {/* Every other reason is drawn child->parent so the arrowhead lands on the
-                                        parent — the item this connection explains, with the tip pointing at
-                                        exactly who it came from (e.g. "spawner" points at what it spawns). A
-                                        "related" edge reads the other way round: the anchor (parent) is the real
-                                        item already in the graph, and the child is the *other*, merely context
-                                        item it's related to — the anchor is what does the influencing (e.g.
-                                        Маньяк killing), and the child is what's affected (Медсестра reacting to
-                                        it), so the arrow points parent->child instead, same as every solid edge
-                                        reads "arrow points at what's influenced". */}
-                                    <line
-                                        x1={edge.reason === "related" ? edge.x1 : edge.x2}
-                                        y1={edge.reason === "related" ? edge.y1 : edge.y2}
-                                        x2={edge.reason === "related" ? edge.x2 : edge.x1}
-                                        y2={edge.reason === "related" ? edge.y2 : edge.y1}
+                                    <path
+                                        d={path}
+                                        fill="none"
                                         stroke={edgeColor(edge.reason)}
                                         strokeWidth={isHighlighted ? 2.5 : 1.5}
                                         strokeDasharray={edge.reason === "related" ? "5 4" : undefined}
@@ -536,12 +681,10 @@ export default function BuildTree({ build }: Props) {
                                         markerEnd={`url(#${edgeMarkerId(edge.reason)})`}
                                         style={{ pointerEvents: "none", transition: "opacity 0.15s" }}
                                     />
-                                    {/* Wider invisible line on top, just for a comfortable hover hit-area on a 1.5px line. */}
-                                    <line
-                                        x1={edge.x1}
-                                        y1={edge.y1}
-                                        x2={edge.x2}
-                                        y2={edge.y2}
+                                    {/* Wider invisible path on top, just for a comfortable hover hit-area on a 1.5px line. */}
+                                    <path
+                                        d={hitPath}
+                                        fill="none"
                                         stroke="transparent"
                                         strokeWidth={14}
                                         style={{ pointerEvents: "stroke", cursor: "pointer" }}
