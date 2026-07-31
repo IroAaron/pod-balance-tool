@@ -6,6 +6,7 @@ import ItemsPage from "../pages/Items/ItemsPage";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import RoundsPage from "../pages/Rounds/RoundsPage";
 import RoundDetailPage from "../pages/Rounds/RoundDetailPage";
+import DecksPage from "../pages/Decks/DecksPage";
 import BuildsPage from "../pages/Builds/BuildsPage";
 import BuildDetailPage from "../pages/Builds/BuildDetailPage";
 import GlossaryPage from "../pages/Glossary/GlossaryPage";
@@ -54,6 +55,7 @@ export default function AppRouter() {
             <Route path="/items/:id" element={<ItemDetailRoute />} />
             <Route path="/rounds" element={<RoundsPage />} />
             <Route path="/rounds/:id" element={<RoundDetailRoute />} />
+            <Route path="/decks" element={<DecksPage />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
             <Route path="/glossary" element={<GlossaryPage />} />

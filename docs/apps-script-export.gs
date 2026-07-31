@@ -27,6 +27,10 @@
 //     newMechanicRows?: {                         // Blueprint Lab — ALWAYS appended, never matched/updated
 //       [table: string]: { [column: string]: string }[],   // e.g. MechActivate, MechAddValue, ...
 //     },
+//     decks?: {                                    // Decks page — REPLACES every row for a given DeckId
+//       Decks?: { [deckId: string]: { [column: string]: string }[] },
+//       DecksShop?: { [deckId: string]: { [column: string]: string }[] },
+//     },
 //   }
 // `items`/`newMechanicRows` only ever write columns present in the payload — a column the site doesn't model
 // (sprite names, unrelated flags, etc.) is left exactly as it already was in the sheet.
@@ -58,6 +62,12 @@ function doPost(e) {
         if (body.newMechanicRows) {
             for (var mechTable in body.newMechanicRows) {
                 result.updated[mechTable] = appendFullRows(ss, mechTable, body.newMechanicRows[mechTable], result);
+            }
+        }
+
+        if (body.decks) {
+            for (var deckTable in body.decks) {
+                result.updated[deckTable] = replaceRowsByGroupId(ss, deckTable, "DeckId", body.decks[deckTable], result);
             }
         }
 
@@ -199,6 +209,69 @@ function appendFullRows(spreadsheet, sheetName, rows, result) {
         sheet.appendRow(newRow);
     }
     return rows.length;
+}
+
+// Decks page export: `rowsByGroupId` is { [groupId]: { column: value, ... }[] } — for each groupId, deletes every
+// existing sheet row whose `groupIdColumnName` cell matches it, then appends the provided rows fresh (each gets
+// the groupId written into `groupIdColumnName` automatically). Unlike upsertFullRows (one row per unique id, patch
+// columns in place) or appendFullRows (always append, no matching at all), this replaces a *variable-size group*
+// of rows sharing one id — the right fit for a deck, whose entries can be added/removed/reordered as a whole, not
+// just column-patched on a fixed row. An empty array for a groupId deletes that group's rows with nothing added
+// back — this is how the site represents "this deck was deleted" without a separate signal.
+function replaceRowsByGroupId(spreadsheet, sheetName, groupIdColumnName, rowsByGroupId, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var header = sheet.getDataRange().getValues()[0];
+    var groupIdCol = header.indexOf(groupIdColumnName);
+    if (groupIdCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + groupIdColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var touched = 0;
+
+    for (var groupId in rowsByGroupId) {
+        // Re-read fresh data/row numbers each iteration — earlier deletions in this same loop shift every row
+        // below them, so a row-number map built once at the top would go stale after the first delete.
+        var data = sheet.getDataRange().getValues();
+        var rowsToDelete = [];
+        for (var i = 1; i < data.length; i++) {
+            if (data[i][groupIdCol] === groupId) {
+                rowsToDelete.push(i + 1); // +1: sheet rows are 1-indexed, data[] is 0-indexed
+            }
+        }
+        // Bottom-to-top, so deleting a row never shifts the index of one still queued for deletion.
+        rowsToDelete.sort(function (a, b) { return b - a; });
+        for (var d = 0; d < rowsToDelete.length; d++) {
+            sheet.deleteRow(rowsToDelete[d]);
+        }
+
+        var newRows = rowsByGroupId[groupId];
+        for (var r = 0; r < newRows.length; r++) {
+            var columns = newRows[r];
+            var newRow = new Array(header.length).fill("");
+            newRow[groupIdCol] = groupId;
+            for (var colName in columns) {
+                var colIndex = header.indexOf(colName);
+                if (colIndex === -1) {
+                    result.errors = result.errors || [];
+                    result.errors.push(sheetName + ": unknown column '" + colName + "', skipped for " + groupId);
+                    continue;
+                }
+                newRow[colIndex] = columns[colName];
+            }
+            sheet.appendRow(newRow);
+        }
+        touched += newRows.length;
+    }
+
+    return touched;
 }
 
 function jsonResponse(payload) {

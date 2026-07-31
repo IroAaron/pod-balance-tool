@@ -106,3 +106,78 @@ describe("RoundSettings", () => {
         ]);
     });
 });
+
+describe("Decks / DecksShop", () => {
+    // Real header shape — identical for both tables, only the sheet's own tab name tells them apart.
+    const headers = ["DeckId", "Item", "Weight", "Cost"];
+
+    function table(sourceName: string, rows: Record<string, string>[]): ParsedTable {
+        return { sourceName, headers, rows };
+    }
+
+    it("classifies by sheet name, not columns, since both tables share identical headers", () => {
+        expect(classifyTable(table("PoD_ конфигурации. Баланс_ Пистолет 2 - Decks", [])).type).toBe("Decks");
+        expect(classifyTable(table("PoD_ конфигурации. Баланс_ Пистолет 2 - DecksShop", [])).type).toBe("DecksShop");
+        expect(classifyTable(table("Decks", [])).type).toBe("Decks");
+        expect(classifyTable(table("DecksShop", [])).type).toBe("DecksShop");
+    });
+
+    it("groups rows by DeckId, preserving real triplicate rows as distinct entries (not deduplicated)", () => {
+        // Real shape from chel_start_deck: c_chel_money_1_1 appears 3 times with the same Weight — confirmed with
+        // the user this represents 3 copies of the card in the starting deck, not a data artifact, so the
+        // normalizer must never collapse duplicate (DeckId, Item) rows.
+        const classified = classifyTable(
+            table("DecksShop", [
+                { DeckId: "chel_start_deck", Item: "c_chel_money_1_1", Weight: "10", Cost: "" },
+                { DeckId: "chel_start_deck", Item: "c_chel_money_1_1", Weight: "10", Cost: "" },
+                { DeckId: "chel_start_deck", Item: "c_chel_money_1_1", Weight: "10", Cost: "" },
+                { DeckId: "chel_start_deck", Item: "c_chel_money_2_1", Weight: "10", Cost: "" },
+                { DeckId: "shop_deck_houses_1_0", Item: "h_money_for_activate_bum_same_side", Weight: "10", Cost: "5" },
+            ])
+        );
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(warnings).toEqual([]);
+        expect(data.decks).toHaveLength(2);
+
+        const startDeck = data.decks.find((deck) => deck.id === "chel_start_deck")!;
+        expect(startDeck.source).toBe("DecksShop");
+        expect(startDeck.entries).toHaveLength(4);
+        expect(startDeck.entries.filter((entry) => entry.itemId === "c_chel_money_1_1")).toHaveLength(3);
+        expect(new Set(startDeck.entries.map((entry) => entry.id)).size).toBe(4); // every entry gets a distinct local id
+
+        const shopDeck = data.decks.find((deck) => deck.id === "shop_deck_houses_1_0")!;
+        expect(shopDeck.entries).toEqual([
+            { id: shopDeck.entries[0].id, itemId: "h_money_for_activate_bum_same_side", weight: 10, cost: 5 },
+        ]);
+    });
+
+    it("blank Weight/Cost parse as undefined, not 0", () => {
+        const classified = classifyTable(
+            table("Decks", [{ DeckId: "artefact_deck", Item: "a_vip_ticket", Weight: "", Cost: "" }])
+        );
+
+        const { data } = normalizeClassifiedTables([classified]);
+
+        expect(data.decks).toEqual([
+            {
+                id: "artefact_deck",
+                source: "Decks",
+                entries: [{ id: data.decks[0].entries[0].id, itemId: "a_vip_ticket", weight: undefined, cost: undefined }],
+            },
+        ]);
+    });
+
+    it("warns and yields no decks when DeckId/Item columns are missing", () => {
+        const classified = { type: "Decks" as const, table: table("Decks", [{ Weight: "10" } as Record<string, string>]) };
+        classified.table.headers = classified.table.headers.filter((h) => h !== "DeckId");
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(data.decks).toEqual([]);
+        expect(warnings).toEqual([
+            { sourceName: "Decks", message: "Не найдены колонки DeckId/Item — таблица колод пропущена" },
+        ]);
+    });
+});

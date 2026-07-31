@@ -63,7 +63,7 @@ export default function BalancePage() {
     return (
         <>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1 }}>
-                <Typography variant="h4">Баланс</Typography>
+                <Typography variant="h4">Сила предметов</Typography>
                 <Tooltip title="Как считается баланс">
                     <IconButton size="small" aria-label="Как считается баланс" onClick={() => setHelpOpen(true)}>
                         <HelpOutlineIcon fontSize="small" />

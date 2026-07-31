@@ -36,7 +36,7 @@ export default function AnalyticsPage() {
 
     return (
         <Stack spacing={3}>
-            <Typography variant="h4">Аналитика</Typography>
+            <Typography variant="h4">Разное</Typography>
 
             <Stack spacing={0.5}>
                 <Typography variant="h6">Неиспользуемые спрайты</Typography>

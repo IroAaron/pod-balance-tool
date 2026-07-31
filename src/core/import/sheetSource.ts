@@ -116,6 +116,10 @@ export interface ExportPayload {
     /** Blueprint Lab brand-new mechanic rows — table -> full rows, always appended, never matched against an
      *  existing row (MechanicRow.id isn't a real spreadsheet key, see GameStore.exportBlueprintChanges's doc). */
     newMechanicRows?: Partial<Record<string, Record<string, string>[]>>;
+
+    /** Decks page edits — table -> DeckId -> full row set for that deck (replaces every existing row for that
+     *  DeckId, see GameStore.exportDeckChanges's doc). An empty array for a DeckId means "delete this deck". */
+    decks?: Partial<Record<"Decks" | "DecksShop", Record<string, Record<string, string>[]>>>;
 }
 
 export interface ExportResult {

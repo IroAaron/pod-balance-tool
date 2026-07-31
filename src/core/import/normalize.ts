@@ -5,6 +5,7 @@ import type { Translation } from "../models/Translation";
 import type { MechanicRow, MechanicTableName } from "../models/Mechanic";
 import type { UpgradeChain } from "../models/UpgradeChain";
 import type { Round } from "../models/Round";
+import type { Deck, DeckEntry, DeckSource } from "../models/Deck";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
 import { tableNameOf } from "./tableNames";
 
@@ -18,6 +19,8 @@ export interface NormalizedData {
     upgradeChains: UpgradeChain[];
 
     rounds: Round[];
+
+    decks: Deck[];
 
     replaceRules: ReplaceRule[];
 
@@ -174,6 +177,45 @@ function normalizeRoundSettingsTable(table: ParsedTable): Round[] {
         });
 }
 
+/**
+ * Decks/DecksShop are row-per-(deck,item)-entry, not row-per-deck — this groups rows by DeckId into one Deck
+ * object each, unlike every other normalizer here (all row -> object, this is row -> group -> object). Rows are
+ * NOT deduplicated by item id within a deck — a repeated (DeckId, Item) row is real data (e.g. it means "N copies
+ * of this card in the deck" for a player deck like chel_start_deck), confirmed with the user, so entries stays a
+ * plain array preserving every row and its original order.
+ */
+function normalizeDecksTable(table: ParsedTable, source: DeckSource): Deck[] {
+    const deckIdColumn = findColumn(table.headers, ["DeckId"]);
+    const itemColumn = findColumn(table.headers, ["Item"]);
+    if (!deckIdColumn || !itemColumn) return [];
+
+    const weightColumn = findColumn(table.headers, ["Weight"]);
+    const costColumn = findColumn(table.headers, ["Cost"]);
+
+    const order: string[] = [];
+    const entriesByDeckId = new Map<string, DeckEntry[]>();
+    let entrySeq = 0;
+
+    for (const row of table.rows) {
+        const deckId = (row[deckIdColumn] ?? "").trim();
+        const itemId = (row[itemColumn] ?? "").trim();
+        if (!deckId || !itemId) continue;
+
+        if (!entriesByDeckId.has(deckId)) {
+            entriesByDeckId.set(deckId, []);
+            order.push(deckId);
+        }
+        entriesByDeckId.get(deckId)!.push({
+            id: `${source}:${deckId}:${entrySeq++}`,
+            itemId,
+            weight: weightColumn ? parseOptionalNumber(row[weightColumn]) : undefined,
+            cost: costColumn ? parseOptionalNumber(row[costColumn]) : undefined,
+        });
+    }
+
+    return order.map((id) => ({ id, source, entries: entriesByDeckId.get(id)! }));
+}
+
 function normalizeMechanicTable(table: ParsedTable, type: MechanicTableName): MechanicRow[] {
     const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
     if (!idColumn) return [];
@@ -263,6 +305,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const mechanics: MechanicRow[] = [];
     const upgradeChains: UpgradeChain[] = [];
     const rounds: Round[] = [];
+    const decks: Deck[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -304,6 +347,15 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             rounds.push(...normalized);
+        } else if (type === "Decks" || type === "DecksShop") {
+            const normalized = normalizeDecksTable(table, type);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдены колонки DeckId/Item — таблица колод пропущена",
+                });
+            }
+            decks.push(...normalized);
         } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
             const normalized = normalizeReplaceRuleTable(table, type);
             if (normalized.length === 0) {
@@ -347,7 +399,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     }
 
     return {
-        data: { items: dedupedItems, translations, mechanics, upgradeChains, rounds, replaceRules, enumValues },
+        data: { items: dedupedItems, translations, mechanics, upgradeChains, rounds, decks, replaceRules, enumValues },
         warnings,
     };
 }

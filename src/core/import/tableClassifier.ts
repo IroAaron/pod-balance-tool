@@ -9,6 +9,8 @@ export type TableType =
     | "Translations"
     | "UpgradeChains"
     | "RoundSettings"
+    | "Decks"
+    | "DecksShop"
     | "Enums"
     | "ReplaceItem"
     | "ReplaceOnTrigger";
@@ -62,6 +64,12 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
     // otherwise a real RoundSettings sheet falls straight through to Unknown.
     if (hasColumn(headers, "RoundId")) {
         return { type: "RoundSettings", table };
+    }
+
+    // Decks and DecksShop share identical columns (DeckId,Item,Weight,Cost) — same as Cards/Houses/Artefacts,
+    // they can only be told apart by the sheet's own tab name, not column shape.
+    if (hasColumn(headers, "DeckId")) {
+        return matchesTableName(sourceName, "DecksShop") ? { type: "DecksShop", table } : { type: "Decks", table };
     }
 
     // A per-column, ragged list of valid enum values for each parameter dimension — not a row-per-record table.

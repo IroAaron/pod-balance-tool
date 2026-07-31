@@ -4,6 +4,7 @@ import type { Translation } from "./models/Translation";
 import type { MechanicRow } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
 import type { Round } from "./models/Round";
+import type { Deck, DeckSource } from "./models/Deck";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
@@ -110,6 +111,8 @@ export class GameStore {
 
     rounds: Round[] = [];
 
+    decks: Deck[] = [];
+
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
@@ -142,6 +145,16 @@ export class GameStore {
     /** MechanicRow ids upserted via upsertMechanicRow (Blueprint Lab) since the last successful
      *  exportBlueprintChanges() — only these (never real, loaded rows) are exportable, see the method's own doc. */
     blueprintNewMechanicRowIds: Set<string> = new Set();
+
+    /** Deck ids created/edited via upsertDeck (Decks page) since the last successful exportDeckChanges() —
+     *  in-memory only, not persisted/synced, same "nothing survives a reload" framing as the Blueprint Lab sets
+     *  above. Independent of blueprintDirtyItemIds/blueprintNewMechanicRowIds — a separate export flow/button. */
+    blueprintDirtyDeckIds: Set<string> = new Set();
+
+    /** Deck id -> which table it came from, for decks removed via deleteDeck since the last successful
+     *  exportDeckChanges() — kept here because once a deck is filtered out of `decks`, there's no other way to
+     *  know which sheet (Decks vs DecksShop) to tell "clear this DeckId's rows" on export. */
+    blueprintDeletedDecks: Map<string, DeckSource> = new Map();
 
     /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
@@ -211,6 +224,7 @@ export class GameStore {
             this.mechanics = cache.importCache.mechanics;
             this.upgradeChains = cache.importCache.upgradeChains ?? [];
             this.rounds = cache.importCache.rounds ?? [];
+            this.decks = cache.importCache.decks ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
         }
@@ -295,6 +309,10 @@ export class GameStore {
         return this.rounds.find((round) => round.id === id);
     }
 
+    getDeck(id: string): Deck | undefined {
+        return this.decks.find((deck) => deck.id === id);
+    }
+
     /**
      * Blueprint Lab's own write path: creates the item if `itemId` doesn't exist yet, otherwise merges `patch`
      * into the existing one — same "upsert by id" semantics the Apps Script side will use when exporting, so a
@@ -354,6 +372,35 @@ export class GameStore {
         this.mechanics = this.mechanics.map((row) =>
             row.id === rowId ? { ...row, fields: { ...row.fields, ...patch } } : row
         );
+        this.notify();
+    }
+
+    /** Full-replace upsert for a whole deck (Decks page) — same "small list, full replace is simpler than
+     *  point-update" precedent as setGlossary/setTagIcons, just per-deck instead of for the whole list. Marks the
+     *  id dirty for exportDeckChanges() and un-marks it as deleted, in case this is re-creating a deck that was
+     *  just removed locally. */
+    upsertDeck(deck: Deck): void {
+        this.decks = mergeById(this.decks, [deck]);
+        this.blueprintDirtyDeckIds.add(deck.id);
+        this.blueprintDeletedDecks.delete(deck.id);
+        this.notify();
+    }
+
+    createDeck(id: string, source: DeckSource): void {
+        const trimmedId = id.trim();
+        if (!trimmedId || this.getDeck(trimmedId)) return;
+        this.upsertDeck({ id: trimmedId, source, entries: [] });
+    }
+
+    /** Removes a deck locally and remembers which sheet it came from (blueprintDeletedDecks), so
+     *  exportDeckChanges() can still tell the sheet to clear that DeckId's rows even though it's no longer in
+     *  `decks` to look up. */
+    deleteDeck(id: string): void {
+        const existing = this.getDeck(id);
+        if (!existing) return;
+        this.blueprintDeletedDecks.set(id, existing.source);
+        this.blueprintDirtyDeckIds.delete(id);
+        this.decks = this.decks.filter((deck) => deck.id !== id);
         this.notify();
     }
 
@@ -625,6 +672,64 @@ export class GameStore {
         return result;
     }
 
+    /** How many Decks-page edits haven't been sent yet — see exportDeckChanges(). Independent of
+     *  blueprintPendingExportCount, a separate export flow with its own button. */
+    get blueprintDeckPendingExportCount(): number {
+        return this.blueprintDirtyDeckIds.size + this.blueprintDeletedDecks.size;
+    }
+
+    /**
+     * Sends Decks-page edits to the same Apps Script `doPost` endpoint, extended with a `decks` branch (see
+     * docs/apps-script-export.gs's replaceRowsByGroupId). Posts to `sources.configUrl`, same reasoning as
+     * exportBlueprintChanges — decks live in the config sheet, not translations.
+     *
+     * Unlike items (upserted by a real unique ItemId) or mechanic rows (append-only, since a row has no stable
+     * key), a deck's *whole row set* for its DeckId is replaced on every export — this sidesteps the "which
+     * spreadsheet row is this edit for" problem entirely, since a deck is naturally edited as a cohesive unit (add/
+     * remove/reorder entries) rather than one fixed row getting column patches. A deleted deck (blueprintDeletedDecks)
+     * sends an empty row array for its DeckId, which the sheet-side helper treats as "clear existing rows, add
+     * nothing back" — i.e. deletion, with no separate signal needed.
+     */
+    async exportDeckChanges(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.configUrl) {
+            throw new Error("Не задан источник конфигурации на странице «Источники»");
+        }
+
+        const decks: NonNullable<Parameters<typeof postExportPayload>[1]["decks"]> = {};
+
+        const entryToRow = (entry: Deck["entries"][number]): Record<string, string> => ({
+            Item: entry.itemId,
+            Weight: entry.weight?.toString() ?? "",
+            Cost: entry.cost?.toString() ?? "",
+        });
+
+        for (const deckId of this.blueprintDirtyDeckIds) {
+            const deck = this.getDeck(deckId);
+            if (!deck) continue;
+            // A row-in-progress (added via "+ Добавить предмет" but no item picked yet) has no itemId — skip it
+            // rather than exporting a blank Item column.
+            (decks[deck.source] ??= {})[deck.id] = deck.entries.filter((entry) => entry.itemId).map(entryToRow);
+        }
+
+        for (const [deckId, source] of this.blueprintDeletedDecks) {
+            (decks[source] ??= {})[deckId] = [];
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, decks });
+
+        if (result.ok) {
+            this.blueprintDirtyDeckIds = new Set();
+            this.blueprintDeletedDecks = new Map();
+            this.notify();
+        }
+
+        return result;
+    }
+
     itemName(item: Item): string {
         return this.getTranslation(item.nameKey) ?? item.nameKey ?? item.id;
     }
@@ -697,6 +802,7 @@ export class GameStore {
             this.mechanics = mergeById(this.mechanics, result.data.mechanics);
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
             this.rounds = mergeById(this.rounds, result.data.rounds);
+            this.decks = mergeById(this.decks, result.data.decks);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
@@ -705,6 +811,7 @@ export class GameStore {
                 this.mechanics = result.data.mechanics;
                 this.upgradeChains = result.data.upgradeChains;
                 this.rounds = result.data.rounds;
+                this.decks = result.data.decks;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
             }
@@ -722,6 +829,7 @@ export class GameStore {
             mechanics: this.mechanics,
             upgradeChains: this.upgradeChains,
             rounds: this.rounds,
+            decks: this.decks,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
         });
@@ -772,8 +880,8 @@ export class GameStore {
     }
 
     /**
-     * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, rounds, replaceRules,
-     * enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
+     * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, rounds, decks,
+     * replaceRules, enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
      * untouched. Exists specifically because CSV uploads always merge by id (`importCsvFiles` above) and never
      * remove anything missing from a new file, so an item deleted from the source spreadsheet lingers on the site
      * forever unless the whole cache is cleared first. After clearing, the next CSV upload or "Скачать
@@ -785,6 +893,7 @@ export class GameStore {
         this.mechanics = [];
         this.upgradeChains = [];
         this.rounds = [];
+        this.decks = [];
         this.replaceRules = [];
         this.enumValues = {};
         this.rebuildDerivedCaches();
@@ -975,6 +1084,7 @@ export class GameStore {
             mechanics: this.mechanics,
             upgradeChains: this.upgradeChains,
             rounds: this.rounds,
+            decks: this.decks,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
             builds: this.builds,
@@ -1022,6 +1132,7 @@ export class GameStore {
         this.mechanics = payload.mechanics;
         this.upgradeChains = payload.upgradeChains;
         this.rounds = payload.rounds;
+        this.decks = payload.decks;
         this.replaceRules = payload.replaceRules;
         this.enumValues = payload.enumValues;
         this.rebuildDerivedCaches();
@@ -1032,6 +1143,7 @@ export class GameStore {
             mechanics: payload.mechanics,
             upgradeChains: payload.upgradeChains,
             rounds: payload.rounds,
+            decks: payload.decks,
             replaceRules: payload.replaceRules,
             enumValues: payload.enumValues,
         });
@@ -1071,6 +1183,7 @@ export class GameStore {
                 mechanics: this.mechanics,
                 upgradeChains: this.upgradeChains,
                 rounds: this.rounds,
+                decks: this.decks,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
             },
@@ -1102,6 +1215,7 @@ export class GameStore {
             this.mechanics = state.importCache.mechanics;
             this.upgradeChains = state.importCache.upgradeChains ?? [];
             this.rounds = state.importCache.rounds ?? [];
+            this.decks = state.importCache.decks ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);
