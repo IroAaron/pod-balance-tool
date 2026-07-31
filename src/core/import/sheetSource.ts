@@ -120,6 +120,10 @@ export interface ExportPayload {
     /** Decks page edits — table -> DeckId -> full row set for that deck (replaces every existing row for that
      *  DeckId, see GameStore.exportDeckChanges's doc). An empty array for a DeckId means "delete this deck". */
     decks?: Partial<Record<"Decks" | "DecksShop", Record<string, Record<string, string>[]>>>;
+
+    /** Packs page edits — PackId -> full row set for that pack (same replace-by-group-id shape as `decks`, see
+     *  GameStore.exportPackChanges's doc). An empty array for a PackId means "delete this pack". */
+    packs?: Record<string, Record<string, string>[]>;
 }
 
 export interface ExportResult {

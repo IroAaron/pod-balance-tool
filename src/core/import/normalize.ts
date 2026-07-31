@@ -6,6 +6,7 @@ import type { MechanicRow, MechanicTableName } from "../models/Mechanic";
 import type { UpgradeChain } from "../models/UpgradeChain";
 import type { Round } from "../models/Round";
 import type { Deck, DeckEntry, DeckSource } from "../models/Deck";
+import type { Pack, PackSourceEntry } from "../models/Pack";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
 import { tableNameOf } from "./tableNames";
 
@@ -21,6 +22,8 @@ export interface NormalizedData {
     rounds: Round[];
 
     decks: Deck[];
+
+    packs: Pack[];
 
     replaceRules: ReplaceRule[];
 
@@ -73,6 +76,12 @@ export function parseOptionalNumber(value: string | undefined): number | undefin
     if (trimmed === "") return undefined;
     const parsed = Number(trimmed.replace(",", "."));
     return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+/** Parses a boolean-shaped config cell (real data only ever uses blank or "1", never "0") — blank is undefined,
+ *  not false, matching parseOptionalNumber's "no value" vs "zero" distinction. */
+export function parseOptionalBoolean(value: string | undefined): boolean | undefined {
+    return (value ?? "").trim() === "1" ? true : undefined;
 }
 
 function normalizeItemsTable(table: ParsedTable): Item[] {
@@ -216,6 +225,66 @@ function normalizeDecksTable(table: ParsedTable, source: DeckSource): Deck[] {
     return order.map((id) => ({ id, source, entries: entriesByDeckId.get(id)! }));
 }
 
+/**
+ * Packs is the same row-per-group shape as Decks — one row per (PackId, SourceDeckId) entry, not one row per
+ * pack. Confirmed with the user: Cost/ItemsToTake/UseWeights/AllowDuplicates are pack-level (read once, from the
+ * first row of each group), while SourceDeckId/ItemNumber/ItemCount/ItemWeight/ItemCost are per-entry (one row
+ * per source deck the pack pulls from — e.g. real start_deck has 3 rows, one per source deck). MetaTag is
+ * captured but confirmed unused/read-only — never edited, never exported.
+ */
+function normalizePacksTable(table: ParsedTable): Pack[] {
+    const packIdColumn = findColumn(table.headers, ["PackId"]);
+    const sourceDeckColumn = findColumn(table.headers, ["SourceDeckId"]);
+    if (!packIdColumn || !sourceDeckColumn) return [];
+
+    const costColumn = findColumn(table.headers, ["Cost"]);
+    const itemsToTakeColumn = findColumn(table.headers, ["ItemsToTake"]);
+    const useWeightsColumn = findColumn(table.headers, ["UseWeights"]);
+    const allowDuplicatesColumn = findColumn(table.headers, ["AllowDuplicates"]);
+    const metaTagColumn = findColumn(table.headers, ["MetaTag"]);
+    const itemNumberColumn = findColumn(table.headers, ["ItemNumber"]);
+    const itemCountColumn = findColumn(table.headers, ["ItemCount"]);
+    const itemWeightColumn = findColumn(table.headers, ["ItemWeight"]);
+    const itemCostColumn = findColumn(table.headers, ["ItemCost"]);
+
+    const order: string[] = [];
+    const packsById = new Map<string, Pack>();
+    let entrySeq = 0;
+
+    for (const row of table.rows) {
+        const packId = (row[packIdColumn] ?? "").trim();
+        const sourceDeckId = (row[sourceDeckColumn] ?? "").trim();
+        if (!packId || !sourceDeckId) continue;
+
+        if (!packsById.has(packId)) {
+            packsById.set(packId, {
+                id: packId,
+                cost: costColumn ? parseOptionalNumber(row[costColumn]) : undefined,
+                itemsToTake: itemsToTakeColumn ? parseOptionalNumber(row[itemsToTakeColumn]) : undefined,
+                useWeights: useWeightsColumn ? parseOptionalBoolean(row[useWeightsColumn]) : undefined,
+                allowDuplicates: allowDuplicatesColumn ? parseOptionalBoolean(row[allowDuplicatesColumn]) : undefined,
+                metaTag: metaTagColumn ? row[metaTagColumn]?.trim() || undefined : undefined,
+                nameKey: packId,
+                descKey: `${packId}_desc`,
+                sources: [],
+            });
+            order.push(packId);
+        }
+
+        const entry: PackSourceEntry = {
+            id: `Packs:${packId}:${entrySeq++}`,
+            sourceDeckId,
+            itemNumber: itemNumberColumn ? parseOptionalNumber(row[itemNumberColumn]) : undefined,
+            itemCount: itemCountColumn ? parseOptionalNumber(row[itemCountColumn]) : undefined,
+            itemWeight: itemWeightColumn ? parseOptionalNumber(row[itemWeightColumn]) : undefined,
+            itemCost: itemCostColumn ? parseOptionalNumber(row[itemCostColumn]) : undefined,
+        };
+        packsById.get(packId)!.sources.push(entry);
+    }
+
+    return order.map((id) => packsById.get(id)!);
+}
+
 function normalizeMechanicTable(table: ParsedTable, type: MechanicTableName): MechanicRow[] {
     const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
     if (!idColumn) return [];
@@ -306,6 +375,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const upgradeChains: UpgradeChain[] = [];
     const rounds: Round[] = [];
     const decks: Deck[] = [];
+    const packs: Pack[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -356,6 +426,15 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             decks.push(...normalized);
+        } else if (type === "Packs") {
+            const normalized = normalizePacksTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдены колонки PackId/SourceDeckId — таблица паков пропущена",
+                });
+            }
+            packs.push(...normalized);
         } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
             const normalized = normalizeReplaceRuleTable(table, type);
             if (normalized.length === 0) {
@@ -399,7 +478,17 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     }
 
     return {
-        data: { items: dedupedItems, translations, mechanics, upgradeChains, rounds, decks, replaceRules, enumValues },
+        data: {
+            items: dedupedItems,
+            translations,
+            mechanics,
+            upgradeChains,
+            rounds,
+            decks,
+            packs,
+            replaceRules,
+            enumValues,
+        },
         warnings,
     };
 }

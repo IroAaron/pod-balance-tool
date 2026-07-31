@@ -31,6 +31,9 @@
 //       Decks?: { [deckId: string]: { [column: string]: string }[] },
 //       DecksShop?: { [deckId: string]: { [column: string]: string }[] },
 //     },
+//     packs?: {                                    // Packs page — REPLACES every row for a given PackId
+//       [packId: string]: { [column: string]: string }[],
+//     },
 //   }
 // `items`/`newMechanicRows` only ever write columns present in the payload — a column the site doesn't model
 // (sprite names, unrelated flags, etc.) is left exactly as it already was in the sheet.
@@ -69,6 +72,12 @@ function doPost(e) {
             for (var deckTable in body.decks) {
                 result.updated[deckTable] = replaceRowsByGroupId(ss, deckTable, "DeckId", body.decks[deckTable], result);
             }
+        }
+
+        // Packs is grouped-by-id the same way Decks/DecksShop are (one row per source-deck entry per pack, no
+        // stable per-row key) — reuses the exact same helper, just against the Packs sheet/PackId column.
+        if (body.packs) {
+            result.updated.Packs = replaceRowsByGroupId(ss, "Packs", "PackId", body.packs, result);
         }
 
         return jsonResponse(result);

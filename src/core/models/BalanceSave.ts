@@ -4,6 +4,7 @@ import type { MechanicRow } from "./Mechanic";
 import type { UpgradeChain } from "./UpgradeChain";
 import type { Round } from "./Round";
 import type { Deck } from "./Deck";
+import type { Pack } from "./Pack";
 import type { ReplaceRule } from "./ReplaceRule";
 import type { Build } from "./Build";
 import type { GlossaryEntry } from "./GlossaryEntry";
@@ -45,6 +46,8 @@ export interface BalanceSavePayload {
 
     decks: Deck[];
 
+    packs: Pack[];
+
     replaceRules: ReplaceRule[];
 
     enumValues: Record<string, string[]>;
@@ -74,6 +77,7 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "upgradeChains",
     "rounds",
     "decks",
+    "packs",
     "replaceRules",
     "enumValues",
     "builds",

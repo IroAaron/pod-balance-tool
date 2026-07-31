@@ -5,6 +5,7 @@ import type { MechanicRow } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
 import type { Round } from "./models/Round";
 import type { Deck, DeckSource } from "./models/Deck";
+import type { Pack, PackSourceEntry } from "./models/Pack";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
@@ -113,6 +114,8 @@ export class GameStore {
 
     decks: Deck[] = [];
 
+    packs: Pack[] = [];
+
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
@@ -155,6 +158,14 @@ export class GameStore {
      *  exportDeckChanges() — kept here because once a deck is filtered out of `decks`, there's no other way to
      *  know which sheet (Decks vs DecksShop) to tell "clear this DeckId's rows" on export. */
     blueprintDeletedDecks: Map<string, DeckSource> = new Map();
+
+    /** Pack ids created/edited via upsertPack (Packs page) since the last successful exportPackChanges() — same
+     *  in-memory-only framing as the Deck/Blueprint Lab sets above. Independent export flow/button. */
+    blueprintDirtyPackIds: Set<string> = new Set();
+
+    /** Pack ids removed via deletePack since the last successful exportPackChanges() — simpler than
+     *  blueprintDeletedDecks (no source-table lookup needed, Packs has only one target sheet). */
+    blueprintDeletedPackIds: Set<string> = new Set();
 
     /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
@@ -225,6 +236,7 @@ export class GameStore {
             this.upgradeChains = cache.importCache.upgradeChains ?? [];
             this.rounds = cache.importCache.rounds ?? [];
             this.decks = cache.importCache.decks ?? [];
+            this.packs = cache.importCache.packs ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
         }
@@ -311,6 +323,10 @@ export class GameStore {
 
     getDeck(id: string): Deck | undefined {
         return this.decks.find((deck) => deck.id === id);
+    }
+
+    getPack(id: string): Pack | undefined {
+        return this.packs.find((pack) => pack.id === id);
     }
 
     /**
@@ -404,6 +420,28 @@ export class GameStore {
         this.notify();
     }
 
+    /** Full-replace upsert for a whole pack (Packs page) — same convention as upsertDeck. */
+    upsertPack(pack: Pack): void {
+        this.packs = mergeById(this.packs, [pack]);
+        this.blueprintDirtyPackIds.add(pack.id);
+        this.blueprintDeletedPackIds.delete(pack.id);
+        this.notify();
+    }
+
+    createPack(id: string): void {
+        const trimmedId = id.trim();
+        if (!trimmedId || this.getPack(trimmedId)) return;
+        this.upsertPack({ id: trimmedId, nameKey: trimmedId, descKey: `${trimmedId}_desc`, sources: [] });
+    }
+
+    deletePack(id: string): void {
+        if (!this.getPack(id)) return;
+        this.blueprintDeletedPackIds.add(id);
+        this.blueprintDirtyPackIds.delete(id);
+        this.packs = this.packs.filter((pack) => pack.id !== id);
+        this.notify();
+    }
+
     getBuild(id: string): Build | undefined {
         return this.builds.find((build) => build.id === id);
     }
@@ -455,11 +493,11 @@ export class GameStore {
 
     /**
      * Sends every site-edited name/description (not the full 424-item catalog — only what was actually touched
-     * via setTranslationOverride) to the Apps Script's doPost endpoint — covers both items (name+description) and
-     * round descriptions (see Round.descKey/RoundDetailPage; rounds have no editable name). Descriptions run
-     * through buildExportDescriptionText first, converting {item:ID}/{tag:Name} tokens and whichever glossary
-     * phrases the site's *current* descriptionMode/enabled settings would actually apply into real [img] BBCode —
-     * matches what the site currently shows, not "every glossary entry unconditionally."
+     * via setTranslationOverride) to the Apps Script's doPost endpoint — covers items and packs (both
+     * name+description) and round descriptions (see Round.descKey/RoundDetailPage; rounds have no editable
+     * name). Descriptions run through buildExportDescriptionText first, converting {item:ID}/{tag:Name} tokens
+     * and whichever glossary phrases the site's *current* descriptionMode/enabled settings would actually apply
+     * into real [img] BBCode — matches what the site currently shows, not "every glossary entry unconditionally."
      */
     async exportEditedTranslations(): Promise<ExportResult> {
         const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
@@ -523,6 +561,28 @@ export class GameStore {
             }
         }
 
+        // Packs have both an editable name and description (see PackDetailPage), same shape as items.
+        for (const pack of this.packs) {
+            const nameOverride = this.translationOverrides[pack.nameKey];
+            if (nameOverride) {
+                names[pack.nameKey] = nameOverride;
+                sentOverrides[pack.nameKey] = nameOverride;
+            }
+
+            const descOverride = this.translationOverrides[pack.descKey];
+            if (descOverride) {
+                descriptions[pack.descKey] = buildExportDescriptionText(descOverride, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+                sentOverrides[pack.descKey] = descOverride;
+            }
+        }
+
         const result = await postExportPayload(this.sources.translationsUrl, { token, names, descriptions });
 
         if (result.ok) {
@@ -537,8 +597,8 @@ export class GameStore {
     }
 
     /**
-     * Sends every item's current name/description, and every round's current description — not just ones with a
-     * site-authored override. Exists because
+     * Sends every item's and pack's current name/description, and every round's current description — not just
+     * ones with a site-authored override. Exists because
      * glossary phrase matches and {tag:Name}/{item:ID} tokens can newly apply to an item's description (e.g. a
      * glossary entry just got a new phrase, or a tag just got an icon) without the description text itself ever
      * being edited on the site — exportEditedTranslations() has no way to notice that, since translationOverrides
@@ -594,6 +654,24 @@ export class GameStore {
             const description = this.getTranslation(round.descKey);
             if (description) {
                 descriptions[round.descKey] = buildExportDescriptionText(description, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+            }
+        }
+
+        // Packs have both an editable name and description (see PackDetailPage), same shape as items.
+        for (const pack of this.packs) {
+            const name = this.getTranslation(pack.nameKey);
+            if (name) names[pack.nameKey] = name;
+
+            const description = this.getTranslation(pack.descKey);
+            if (description) {
+                descriptions[pack.descKey] = buildExportDescriptionText(description, {
                     items: this.allItems,
                     itemIcons: this.itemIcons,
                     tagIcons: this.tagIcons,
@@ -730,6 +808,75 @@ export class GameStore {
         return result;
     }
 
+    /** How many Packs-page config edits haven't been sent yet — see exportPackChanges(). Independent of the
+     *  Decks/Blueprint Lab counters and of the ordinary translations pendingExportCount (name/description edits
+     *  for a pack flow through that existing translations path, not this one — see exportPackChanges's doc). */
+    get blueprintPackPendingExportCount(): number {
+        return this.blueprintDirtyPackIds.size + this.blueprintDeletedPackIds.size;
+    }
+
+    /**
+     * Sends Packs-page **config** edits (Cost/ItemsToTake/UseWeights/AllowDuplicates/sources) to the same Apps
+     * Script `doPost` endpoint, reusing the exact `decks` mechanism (`replaceRowsByGroupId`, see
+     * docs/apps-script-export.gs) — a pack is grouped-by-id the same way a deck is (one row per source-deck
+     * entry, no stable per-row key), so no new server-side helper was needed, just a `packs` payload field.
+     * Deliberately does NOT touch a pack's name/description — those are ordinary translationOverrides
+     * (pack.nameKey/descKey) and already flow through exportEditedTranslations/exportAllTranslations, same as
+     * items; this method only ever sends the `Packs` sheet's own config columns to `sources.configUrl`.
+     *
+     * `MetaTag` is deliberately never included in the exported row (confirmed with the user it's read-only/unused
+     * for now) — since replaceRowsByGroupId fully replaces a pack's rows rather than patching, if a pack's
+     * MetaTag is ever populated on the real sheet later, exporting that pack from here would blank it. Not a
+     * concern today (every real MetaTag cell is empty), but worth remembering if that changes.
+     */
+    async exportPackChanges(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.configUrl) {
+            throw new Error("Не задан источник конфигурации на странице «Источники»");
+        }
+
+        const packs: NonNullable<Parameters<typeof postExportPayload>[1]["packs"]> = {};
+
+        const entryToRow = (pack: Pack, entry: PackSourceEntry): Record<string, string> => ({
+            Cost: pack.cost?.toString() ?? "",
+            ItemsToTake: pack.itemsToTake?.toString() ?? "",
+            SourceDeckId: entry.sourceDeckId,
+            UseWeights: pack.useWeights ? "1" : "",
+            AllowDuplicates: pack.allowDuplicates ? "1" : "",
+            ItemNumber: entry.itemNumber?.toString() ?? "",
+            ItemCount: entry.itemCount?.toString() ?? "",
+            ItemWeight: entry.itemWeight?.toString() ?? "",
+            ItemCost: entry.itemCost?.toString() ?? "",
+        });
+
+        for (const packId of this.blueprintDirtyPackIds) {
+            const pack = this.getPack(packId);
+            if (!pack) continue;
+            // A source-in-progress (added via "+ Добавить источник" but no deck picked yet) has no sourceDeckId
+            // — skip it rather than exporting a blank SourceDeckId column.
+            packs[pack.id] = pack.sources
+                .filter((entry) => entry.sourceDeckId)
+                .map((entry) => entryToRow(pack, entry));
+        }
+
+        for (const packId of this.blueprintDeletedPackIds) {
+            packs[packId] = [];
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, packs });
+
+        if (result.ok) {
+            this.blueprintDirtyPackIds = new Set();
+            this.blueprintDeletedPackIds = new Set();
+            this.notify();
+        }
+
+        return result;
+    }
+
     itemName(item: Item): string {
         return this.getTranslation(item.nameKey) ?? item.nameKey ?? item.id;
     }
@@ -744,6 +891,14 @@ export class GameStore {
 
     roundDescription(round: Round): string {
         return this.getTranslation(round.descKey) ?? "";
+    }
+
+    packName(pack: Pack): string {
+        return this.getTranslation(pack.nameKey) ?? pack.id;
+    }
+
+    packDescription(pack: Pack): string {
+        return this.getTranslation(pack.descKey) ?? "";
     }
 
     /** Tier chains almost always share the exact same description template across + and ++ (only the underlying
@@ -803,6 +958,7 @@ export class GameStore {
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
             this.rounds = mergeById(this.rounds, result.data.rounds);
             this.decks = mergeById(this.decks, result.data.decks);
+            this.packs = mergeById(this.packs, result.data.packs);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
@@ -812,6 +968,7 @@ export class GameStore {
                 this.upgradeChains = result.data.upgradeChains;
                 this.rounds = result.data.rounds;
                 this.decks = result.data.decks;
+                this.packs = result.data.packs;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
             }
@@ -830,6 +987,7 @@ export class GameStore {
             upgradeChains: this.upgradeChains,
             rounds: this.rounds,
             decks: this.decks,
+            packs: this.packs,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
         });
@@ -880,7 +1038,7 @@ export class GameStore {
     }
 
     /**
-     * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, rounds, decks,
+     * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, rounds, decks, packs,
      * replaceRules, enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
      * untouched. Exists specifically because CSV uploads always merge by id (`importCsvFiles` above) and never
      * remove anything missing from a new file, so an item deleted from the source spreadsheet lingers on the site
@@ -894,6 +1052,7 @@ export class GameStore {
         this.upgradeChains = [];
         this.rounds = [];
         this.decks = [];
+        this.packs = [];
         this.replaceRules = [];
         this.enumValues = {};
         this.rebuildDerivedCaches();
@@ -1085,6 +1244,7 @@ export class GameStore {
             upgradeChains: this.upgradeChains,
             rounds: this.rounds,
             decks: this.decks,
+            packs: this.packs,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
             builds: this.builds,
@@ -1133,6 +1293,7 @@ export class GameStore {
         this.upgradeChains = payload.upgradeChains;
         this.rounds = payload.rounds;
         this.decks = payload.decks;
+        this.packs = payload.packs;
         this.replaceRules = payload.replaceRules;
         this.enumValues = payload.enumValues;
         this.rebuildDerivedCaches();
@@ -1144,6 +1305,7 @@ export class GameStore {
             upgradeChains: payload.upgradeChains,
             rounds: payload.rounds,
             decks: payload.decks,
+            packs: payload.packs,
             replaceRules: payload.replaceRules,
             enumValues: payload.enumValues,
         });
@@ -1184,6 +1346,7 @@ export class GameStore {
                 upgradeChains: this.upgradeChains,
                 rounds: this.rounds,
                 decks: this.decks,
+                packs: this.packs,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
             },
@@ -1216,6 +1379,7 @@ export class GameStore {
             this.upgradeChains = state.importCache.upgradeChains ?? [];
             this.rounds = state.importCache.rounds ?? [];
             this.decks = state.importCache.decks ?? [];
+            this.packs = state.importCache.packs ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);

@@ -7,6 +7,8 @@ import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import RoundsPage from "../pages/Rounds/RoundsPage";
 import RoundDetailPage from "../pages/Rounds/RoundDetailPage";
 import DecksPage from "../pages/Decks/DecksPage";
+import PacksPage from "../pages/Packs/PacksPage";
+import PackDetailPage from "../pages/Packs/PackDetailPage";
 import BuildsPage from "../pages/Builds/BuildsPage";
 import BuildDetailPage from "../pages/Builds/BuildDetailPage";
 import GlossaryPage from "../pages/Glossary/GlossaryPage";
@@ -34,6 +36,11 @@ function RoundDetailRoute() {
     return <RoundDetailPage key={id} />;
 }
 
+function PackDetailRoute() {
+    const { id } = useParams();
+    return <PackDetailPage key={id} />;
+}
+
 function NotFoundPage() {
     return (
         <Stack spacing={2}>
@@ -56,6 +63,8 @@ export default function AppRouter() {
             <Route path="/rounds" element={<RoundsPage />} />
             <Route path="/rounds/:id" element={<RoundDetailRoute />} />
             <Route path="/decks" element={<DecksPage />} />
+            <Route path="/packs" element={<PacksPage />} />
+            <Route path="/packs/:id" element={<PackDetailRoute />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
             <Route path="/glossary" element={<GlossaryPage />} />

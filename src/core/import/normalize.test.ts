@@ -181,3 +181,159 @@ describe("Decks / DecksShop", () => {
         ]);
     });
 });
+
+describe("Packs", () => {
+    const headers = [
+        "PackId",
+        "Cost",
+        "ItemsToTake",
+        "SourceDeckId",
+        "UseWeights",
+        "AllowDuplicates",
+        "ItemNumber",
+        "ItemCount",
+        "ItemWeight",
+        "ItemCost",
+        "MetaTag",
+    ];
+
+    function table(rows: Record<string, string>[]): ParsedTable {
+        return { sourceName: "Packs", headers, rows };
+    }
+
+    it("classifies a PackId-headered sheet as Packs", () => {
+        expect(classifyTable(table([])).type).toBe("Packs");
+    });
+
+    it("groups rows by PackId — pack-level fields captured once, per-source fields kept per row (real start_deck shape)", () => {
+        // Real shape: start_deck has 3 rows (one per source deck) — Cost/ItemsToTake/UseWeights/AllowDuplicates
+        // blank/consistent across all 3, SourceDeckId/ItemNumber/ItemCount/ItemWeight differ per row. Confirmed
+        // with the user this pack-level/per-entry split is the real design, not row-per-pack.
+        const classified = classifyTable(
+            table([
+                {
+                    PackId: "start_deck",
+                    Cost: "",
+                    ItemsToTake: "",
+                    SourceDeckId: "char_1_deck_1",
+                    UseWeights: "",
+                    AllowDuplicates: "",
+                    ItemNumber: "1",
+                    ItemCount: "2",
+                    ItemWeight: "55",
+                    ItemCost: "",
+                    MetaTag: "",
+                },
+                {
+                    PackId: "start_deck",
+                    Cost: "",
+                    ItemsToTake: "",
+                    SourceDeckId: "char_1_deck_2",
+                    UseWeights: "",
+                    AllowDuplicates: "",
+                    ItemNumber: "1",
+                    ItemCount: "2",
+                    ItemWeight: "35",
+                    ItemCost: "",
+                    MetaTag: "",
+                },
+                {
+                    PackId: "start_deck",
+                    Cost: "",
+                    ItemsToTake: "",
+                    SourceDeckId: "char_1_deck_3",
+                    UseWeights: "",
+                    AllowDuplicates: "",
+                    ItemNumber: "1",
+                    ItemCount: "1",
+                    ItemWeight: "10",
+                    ItemCost: "",
+                    MetaTag: "",
+                },
+                {
+                    PackId: "shop_sticker1",
+                    Cost: "6",
+                    ItemsToTake: "1",
+                    SourceDeckId: "shop_deck_stickers",
+                    UseWeights: "",
+                    AllowDuplicates: "1",
+                    ItemNumber: "3",
+                    ItemCount: "1",
+                    ItemWeight: "",
+                    ItemCost: "",
+                    MetaTag: "",
+                },
+            ])
+        );
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(warnings).toEqual([]);
+        expect(data.packs).toHaveLength(2);
+
+        const startDeck = data.packs.find((pack) => pack.id === "start_deck")!;
+        expect(startDeck.cost).toBeUndefined();
+        expect(startDeck.itemsToTake).toBeUndefined();
+        expect(startDeck.useWeights).toBeUndefined();
+        expect(startDeck.allowDuplicates).toBeUndefined();
+        expect(startDeck.sources).toHaveLength(3);
+        expect(startDeck.sources.map((s) => s.sourceDeckId)).toEqual(["char_1_deck_1", "char_1_deck_2", "char_1_deck_3"]);
+        expect(startDeck.sources.map((s) => s.itemWeight)).toEqual([55, 35, 10]);
+        expect(new Set(startDeck.sources.map((s) => s.id)).size).toBe(3);
+
+        const sticker = data.packs.find((pack) => pack.id === "shop_sticker1")!;
+        expect(sticker.cost).toBe(6);
+        expect(sticker.itemsToTake).toBe(1);
+        expect(sticker.allowDuplicates).toBe(true);
+        expect(sticker.useWeights).toBeUndefined();
+        expect(sticker.sources).toEqual([
+            {
+                id: sticker.sources[0].id,
+                sourceDeckId: "shop_deck_stickers",
+                itemNumber: 3,
+                itemCount: 1,
+                itemWeight: undefined,
+                itemCost: undefined,
+            },
+        ]);
+    });
+
+    it("parses a negative ItemNumber correctly, not dropped as falsy", () => {
+        const classified = classifyTable(
+            table([
+                {
+                    PackId: "field_fill_1",
+                    Cost: "",
+                    ItemsToTake: "",
+                    SourceDeckId: "chel_deck_1",
+                    UseWeights: "",
+                    AllowDuplicates: "",
+                    ItemNumber: "-1",
+                    ItemCount: "1",
+                    ItemWeight: "",
+                    ItemCost: "",
+                    MetaTag: "",
+                },
+            ])
+        );
+
+        const { data } = normalizeClassifiedTables([classified]);
+
+        expect(data.packs[0].sources[0].itemNumber).toBe(-1);
+    });
+
+    it("warns and yields no packs when PackId/SourceDeckId columns are missing", () => {
+        const classified = {
+            type: "Packs" as const,
+            table: table([{ Cost: "1" } as Record<string, string>]),
+        };
+        classified.table.headers = classified.table.headers.filter((h) => h !== "PackId");
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(data.packs).toEqual([]);
+        expect(warnings).toEqual([
+            { sourceName: "Packs", message: "Не найдены колонки PackId/SourceDeckId — таблица паков пропущена" },
+        ]);
+    });
+});

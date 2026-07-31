@@ -11,6 +11,7 @@ export type TableType =
     | "RoundSettings"
     | "Decks"
     | "DecksShop"
+    | "Packs"
     | "Enums"
     | "ReplaceItem"
     | "ReplaceOnTrigger";
@@ -70,6 +71,11 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
     // they can only be told apart by the sheet's own tab name, not column shape.
     if (hasColumn(headers, "DeckId")) {
         return matchesTableName(sourceName, "DecksShop") ? { type: "DecksShop", table } : { type: "Decks", table };
+    }
+
+    // PackId doesn't match findIdColumn's exact "id"/"itemid" check below either — own branch, same reasoning.
+    if (hasColumn(headers, "PackId")) {
+        return { type: "Packs", table };
     }
 
     // A per-column, ragged list of valid enum values for each parameter dimension — not a row-per-record table.
