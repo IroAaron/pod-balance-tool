@@ -62,7 +62,7 @@ function findColumnContaining(headers: string[], substrings: string[]): string |
 }
 
 /** Parses a numeric config cell — blank/unparseable is undefined, not 0, so callers can tell "no value" from "zero". Some real rows use a comma decimal separator (e.g. "1,01"). */
-function parseOptionalNumber(value: string | undefined): number | undefined {
+export function parseOptionalNumber(value: string | undefined): number | undefined {
     const trimmed = (value ?? "").trim();
     if (trimmed === "") return undefined;
     const parsed = Number(trimmed.replace(",", "."));

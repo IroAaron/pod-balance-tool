@@ -18,6 +18,7 @@ import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistr
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "./domain/descriptionTemplate";
 import { buildExportDescriptionText } from "./domain/exportText";
 import { postExportPayload, type ExportResult } from "./import/sheetSource";
+import { parseOptionalNumber } from "./import/normalize";
 
 import {
     loadImportCache,
@@ -130,6 +131,14 @@ export class GameStore {
 
     /** Snapshot of translationOverrides as of the last successful Sheets export — see pendingExportCount. */
     exportedOverrides: Record<string, string> = {};
+
+    /** Item ids touched via upsertItem (Blueprint Lab) since the last successful exportBlueprintChanges() —
+     *  in-memory only, not persisted/synced, matching the lab's own "nothing survives a reload" framing. */
+    blueprintDirtyItemIds: Set<string> = new Set();
+
+    /** MechanicRow ids upserted via upsertMechanicRow (Blueprint Lab) since the last successful
+     *  exportBlueprintChanges() — only these (never real, loaded rows) are exportable, see the method's own doc. */
+    blueprintNewMechanicRowIds: Set<string> = new Set();
 
     /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
@@ -276,6 +285,68 @@ export class GameStore {
 
     getItem(id: string): Item | undefined {
         return this._itemsById.get(id);
+    }
+
+    /**
+     * Blueprint Lab's own write path: creates the item if `itemId` doesn't exist yet, otherwise merges `patch`
+     * into the existing one — same "upsert by id" semantics the Apps Script side will use when exporting, so a
+     * brand-new drafted item and an edited real one are exactly the same case here. `patch.raw` is merged
+     * shallowly into the item's existing raw bag (untouched real columns — sprite names, RarityVFX, etc. — survive
+     * even though the lab's UI doesn't model every column). `patch.tags`, when given, also overwrites raw.Tags
+     * (comma-joined) so the two stay in sync, matching how normalizeItemsTable derives one from the other on import.
+     */
+    upsertItem(itemId: string, itemType: string, patch: { tags?: string[]; raw?: Record<string, string> }): void {
+        const trimmedId = itemId.trim();
+        if (!trimmedId) return;
+
+        const existing = this.getItem(trimmedId);
+        const tags = patch.tags ?? existing?.tags ?? [];
+        const raw: Record<string, string> = { ...(existing?.raw ?? {}), ItemId: trimmedId, ...(patch.raw ?? {}) };
+        if (patch.tags) raw.Tags = tags.join(", ");
+
+        const next: Item = {
+            id: trimmedId,
+            itemType,
+            tags,
+            icon: existing?.icon,
+            nameKey: existing?.nameKey ?? trimmedId,
+            descKey: existing?.descKey ?? `${trimmedId}_desc`,
+            valueMin: parseOptionalNumber(raw.ValueMin),
+            valueMax: parseOptionalNumber(raw.ValueMax),
+            raw,
+        };
+
+        this.allItems = mergeById(this.allItems, [next]);
+        this.rebuildDerivedCaches();
+        this.blueprintDirtyItemIds.add(trimmedId);
+        this.notify();
+    }
+
+    /**
+     * Upserts a mechanic row authored on the Blueprint Lab canvas (not loaded from real data) — finds an
+     * existing row with the same (synthetic, `blueprint:`-prefixed) id and replaces it, otherwise appends. Safe
+     * to call on every keystroke while the canvas is being edited (idempotent by id, never duplicates a row).
+     * Always marked exportable — unlike updateMechanicRowFields, this id was never a real spreadsheet row, so
+     * there's nothing fragile about appending it on export (see exportBlueprintChanges()'s doc).
+     */
+    upsertMechanicRow(row: MechanicRow): void {
+        const existingIndex = this.mechanics.findIndex((r) => r.id === row.id);
+        if (existingIndex >= 0) {
+            this.mechanics = this.mechanics.map((r, i) => (i === existingIndex ? row : r));
+        } else {
+            this.mechanics = [...this.mechanics, row];
+        }
+        this.blueprintNewMechanicRowIds.add(row.id);
+        this.notify();
+    }
+
+    /** Merges field edits into an existing mechanic row in place (Blueprint Lab) — local-only, deliberately never
+     *  marked for export, see exportBlueprintChanges()'s doc. */
+    updateMechanicRowFields(rowId: string, patch: Record<string, string>): void {
+        this.mechanics = this.mechanics.map((row) =>
+            row.id === rowId ? { ...row, fields: { ...row.fields, ...patch } } : row
+        );
+        this.notify();
     }
 
     getBuild(id: string): Build | undefined {
@@ -454,6 +525,60 @@ export class GameStore {
             void replaceExportedOverridesRemote(this.exportedOverrides).catch((error) =>
                 console.error("exportAllTranslations → Firestore", error)
             );
+        }
+
+        return result;
+    }
+
+    /** How many Blueprint Lab edits haven't been sent yet — see exportBlueprintChanges(). */
+    get blueprintPendingExportCount(): number {
+        return this.blueprintDirtyItemIds.size + this.blueprintNewMechanicRowIds.size;
+    }
+
+    /**
+     * Sends Blueprint Lab's item edits (upsert by ItemId — safe, since it's a real unique key) and brand-new
+     * mechanic rows (always appended — never an update, see upsertMechanicRow's doc for why an existing row
+     * can't be safely targeted) to the same Apps Script `doPost` endpoint the translation export uses, extended
+     * with the `items`/`newMechanicRows` branches (see docs/apps-script-export.gs). Posts to `sources.configUrl`
+     * (items/mechanics live in the config sheet), not `translationsUrl` — if those are two different
+     * spreadsheets in a given deployment, the doPost extension needs to live in the config one specifically.
+     */
+    async exportBlueprintChanges(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.configUrl) {
+            throw new Error("Не задан источник конфигурации на странице «Источники»");
+        }
+
+        const itemTableByType: Record<string, "Cards" | "Houses" | "Artefacts"> = {
+            Card: "Cards",
+            House: "Houses",
+            Artefact: "Artefacts",
+        };
+
+        const items: NonNullable<Parameters<typeof postExportPayload>[1]["items"]> = { Cards: {}, Houses: {}, Artefacts: {} };
+        for (const itemId of this.blueprintDirtyItemIds) {
+            const item = this.getItem(itemId);
+            if (!item) continue;
+            const table = itemTableByType[item.itemType ?? "Card"] ?? "Cards";
+            items[table][itemId] = item.raw;
+        }
+
+        const newMechanicRows: Record<string, Record<string, string>[]> = {};
+        for (const rowId of this.blueprintNewMechanicRowIds) {
+            const row = this.mechanics.find((r) => r.id === rowId);
+            if (!row) continue;
+            (newMechanicRows[row.table] ??= []).push({ ItemId: row.itemId, ...row.fields });
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, items, newMechanicRows });
+
+        if (result.ok) {
+            this.blueprintDirtyItemIds = new Set();
+            this.blueprintNewMechanicRowIds = new Set();
+            this.notify();
         }
 
         return result;
