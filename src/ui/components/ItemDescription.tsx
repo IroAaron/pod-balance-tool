@@ -1,8 +1,13 @@
+import { memo } from "react";
 import { Box, Tooltip } from "@mui/material";
 import { keyframes } from "@emotion/react";
 import { useStore } from "../hooks/useStore";
 import type { Item } from "../../core/models/Item";
-import { parseItemDescription, type DescriptionSettings } from "../../core/domain/descriptionTemplate";
+import {
+    parseItemDescription,
+    getEnabledGlossaryEntries,
+    type DescriptionSettings,
+} from "../../core/domain/descriptionTemplate";
 
 type Props = {
     item: Item;
@@ -37,7 +42,7 @@ function glossaryTooltipSlotProps(tooltipFontSizePx: number) {
  * every glossary entry with an icon/emoji applies, which is useful for reviewing the whole glossary against real
  * descriptions regardless of which entries are currently switched on for normal use.
  */
-export default function ItemDescription({ item, description, settingsOverride }: Props) {
+function ItemDescription({ item, description, settingsOverride }: Props) {
     const store = useStore();
     const settings = settingsOverride ?? store.descriptionSettings;
 
@@ -50,12 +55,15 @@ export default function ItemDescription({ item, description, settingsOverride }:
     }
 
     // "text-icons" only applies entries whose own checkbox is on; "icons-emoji" ("Все записи") bypasses that
-    // filter and applies every entry that has an icon/emoji, regardless of its enabled state.
+    // filter and applies every entry that has an icon/emoji, regardless of its enabled state. Goes through
+    // getEnabledGlossaryEntries (not an inline .filter()) so this returns the same cached array back for the
+    // same store.glossary — a fresh array here would defeat parseItemDescription's own glossary-compile cache,
+    // since that's keyed by array identity (this function runs once per rendered item, e.g. ~300× per page).
     const glossary =
         settings.descriptionMode === "icons-emoji"
             ? store.glossary
             : settings.descriptionMode === "text-icons"
-              ? store.glossary.filter((entry) => entry.enabled !== false)
+              ? getEnabledGlossaryEntries(store.glossary)
               : [];
     const parts = parseItemDescription(item, description, store.mechanics, glossary, {
         items: store.items,
@@ -163,3 +171,9 @@ export default function ItemDescription({ item, description, settingsOverride }:
         </>
     );
 }
+
+// Memoized: `item`/`description` stay referentially/value-stable across an unrelated re-render of whatever list
+// or tree renders this per-entry (e.g. BuildTree re-rendering all ~300 nodes on every hover just to update an
+// unrelated sibling's dimmed style) — without this, every such re-render re-triggers the full glossary/icon-token
+// parse below for every instance, not just the ones whose actual props changed.
+export default memo(ItemDescription);

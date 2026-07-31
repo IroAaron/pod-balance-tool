@@ -229,6 +229,50 @@ export function glossaryIconSrc(icon: string): string {
 
 type PhraseMatch = { phrase: string; entry: GlossaryEntry };
 
+interface CompiledGlossary {
+    matchRe: RegExp;
+    byPhraseLower: Map<string, PhraseMatch>;
+    noteByIconSrc: Map<string, string>;
+}
+
+/** Every real call site re-derives the *same* few glossary arrays (store.glossary itself, or its "enabled-only"
+ *  filter) on every rendered item — without this, `compileGlossary`'s sort/regex/Map-building work (below) would
+ *  redo itself once per item per render (e.g. ~300 items × every hover/list re-render) instead of once per actual
+ *  glossary change. Keyed by array identity: safe because GameStore always *replaces* `glossary` wholesale on a
+ *  real change (never mutates it in place — see subscribeGlossary), so a stale cache entry can't outlive its key. */
+const glossaryCompileCache = new WeakMap<GlossaryEntry[], CompiledGlossary | null>();
+
+function compileGlossary(glossary: GlossaryEntry[]): CompiledGlossary | null {
+    const cached = glossaryCompileCache.get(glossary);
+    if (cached !== undefined) return cached;
+
+    const usable: PhraseMatch[] = [];
+    for (const entry of glossary) {
+        if (!entry.icon && !entry.emoji && !entry.color) continue;
+        for (const phrase of entry.phrases) {
+            if (phrase.trim()) usable.push({ phrase, entry });
+        }
+    }
+    if (usable.length === 0) {
+        glossaryCompileCache.set(glossary, null);
+        return null;
+    }
+
+    const sorted = [...usable].sort((a, b) => b.phrase.length - a.phrase.length);
+    const byPhraseLower = new Map(sorted.map((match) => [match.phrase.toLowerCase(), match]));
+    const matchRe = new RegExp(sorted.map((match) => escapeRegExp(match.phrase)).join("|"), "gi");
+
+    const noteByIconSrc = new Map<string, string>();
+    for (const entry of usable.map((match) => match.entry)) {
+        if (!entry.icon) continue;
+        noteByIconSrc.set(glossaryIconSrc(entry.icon), entry.note?.trim() || entry.phrases[0]);
+    }
+
+    const compiled: CompiledGlossary = { matchRe, byPhraseLower, noteByIconSrc };
+    glossaryCompileCache.set(glossary, compiled);
+    return compiled;
+}
+
 /**
  * Swaps known glossary phrases inside a description's plain-text parts for their icon/emoji, AND annotates any
  * icon already embedded directly via a real `[img]` tag (resolved by parseColorAndImageTags, so it was never a
@@ -243,24 +287,9 @@ type PhraseMatch = { phrase: string; entry: GlossaryEntry };
  * entry with none of icon/emoji/color set is a no-op.
  */
 function applyGlossary(parts: DescriptionPart[], glossary: GlossaryEntry[]): DescriptionPart[] {
-    const usable: PhraseMatch[] = [];
-    for (const entry of glossary) {
-        if (!entry.icon && !entry.emoji && !entry.color) continue;
-        for (const phrase of entry.phrases) {
-            if (phrase.trim()) usable.push({ phrase, entry });
-        }
-    }
-    if (usable.length === 0) return parts;
-
-    const sorted = [...usable].sort((a, b) => b.phrase.length - a.phrase.length);
-    const byPhraseLower = new Map(sorted.map((match) => [match.phrase.toLowerCase(), match]));
-    const matchRe = new RegExp(sorted.map((match) => escapeRegExp(match.phrase)).join("|"), "gi");
-
-    const noteByIconSrc = new Map<string, string>();
-    for (const entry of usable.map((match) => match.entry)) {
-        if (!entry.icon) continue;
-        noteByIconSrc.set(glossaryIconSrc(entry.icon), entry.note?.trim() || entry.phrases[0]);
-    }
+    const compiled = compileGlossary(glossary);
+    if (!compiled) return parts;
+    const { matchRe, byPhraseLower, noteByIconSrc } = compiled;
 
     return parts.flatMap((part): DescriptionPart[] => {
         if (part.kind === "icon" && !part.note) {
@@ -324,6 +353,40 @@ function glossaryEntryIconOrEmoji(entry: GlossaryEntry): { kind: "icon"; src: st
     return undefined;
 }
 
+interface CompiledIconTokenContext {
+    itemsById: Map<string, Item>;
+    tagIconByName: Map<string, TagIcon>;
+    glossaryById: Map<string, GlossaryEntry>;
+}
+
+/** Same rationale as glossaryCompileCache above: `items`/`tagIcons`/`glossary` are each replaced wholesale (never
+ *  mutated in place) whenever their real data changes, so caching the three lookup Maps by this reference triple
+ *  is safe — and turns "rebuild 3 Maps per item per render" into "rebuild once per actual data change". */
+const iconTokenContextCache = new WeakMap<Item[], WeakMap<TagIcon[], WeakMap<GlossaryEntry[], CompiledIconTokenContext>>>();
+
+function compileIconTokenContext(context: IconTokenContext): CompiledIconTokenContext {
+    let byTagIcons = iconTokenContextCache.get(context.items);
+    if (!byTagIcons) {
+        byTagIcons = new WeakMap();
+        iconTokenContextCache.set(context.items, byTagIcons);
+    }
+    let byGlossary = byTagIcons.get(context.tagIcons);
+    if (!byGlossary) {
+        byGlossary = new WeakMap();
+        byTagIcons.set(context.tagIcons, byGlossary);
+    }
+    let compiled = byGlossary.get(context.glossary);
+    if (!compiled) {
+        compiled = {
+            itemsById: new Map(context.items.map((item) => [item.id, item])),
+            tagIconByName: new Map(context.tagIcons.map((entry) => [entry.tag.trim().toLowerCase(), entry])),
+            glossaryById: new Map(context.glossary.map((entry) => [entry.id, entry])),
+        };
+        byGlossary.set(context.glossary, compiled);
+    }
+    return compiled;
+}
+
 /**
  * Resolves `{item:ID}` (an item's own icon — manual emoji override wins, else its real sprite, else the 🧩
  * placeholder, same priority as the ItemIcon component), `{tag:Name}` (looked up in the curated TagIcon list,
@@ -334,9 +397,7 @@ function glossaryEntryIconOrEmoji(entry: GlossaryEntry): { kind: "icon"; src: st
  * unrecognized `res://` prefix elsewhere in this file.
  */
 function applyIconTokens(parts: DescriptionPart[], context: IconTokenContext): DescriptionPart[] {
-    const itemsById = new Map(context.items.map((item) => [item.id, item]));
-    const tagIconByName = new Map(context.tagIcons.map((entry) => [entry.tag.trim().toLowerCase(), entry]));
-    const glossaryById = new Map(context.glossary.map((entry) => [entry.id, entry]));
+    const { itemsById, tagIconByName, glossaryById } = compileIconTokenContext(context);
 
     return parts.flatMap((part): DescriptionPart[] => {
         if (part.kind !== "text") return [part];
@@ -389,6 +450,22 @@ function applyIconTokens(parts: DescriptionPart[], context: IconTokenContext): D
 
         return pieces;
     });
+}
+
+/** Cache for getEnabledGlossaryEntries — same reference-identity rationale as glossaryCompileCache above, so the
+ *  "text-icons" mode's `.filter()` (otherwise redone per item per render) also only redoes on a real change. */
+const enabledGlossaryCache = new WeakMap<GlossaryEntry[], GlossaryEntry[]>();
+
+/** The "text-icons" mode's `enabled !== false` filter — call sites that redo this per-item (ItemDescription) get
+ *  a stable, cached array back for the same underlying `glossary`, instead of a fresh one (and therefore a
+ *  glossaryCompileCache miss) on every call. Callers that only compute this once already (e.g. the export
+ *  methods in GameStore) don't strictly need it, but use it too for one shared definition of the filter. */
+export function getEnabledGlossaryEntries(glossary: GlossaryEntry[]): GlossaryEntry[] {
+    const cached = enabledGlossaryCache.get(glossary);
+    if (cached) return cached;
+    const filtered = glossary.filter((entry) => entry.enabled !== false);
+    enabledGlossaryCache.set(glossary, filtered);
+    return filtered;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { Box, Chip, Paper, Stack, Tooltip, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
@@ -200,8 +200,8 @@ type TreeNodeProps = {
     node: CascadeLevelNode;
     nodeRefs: React.MutableRefObject<Map<string, HTMLElement>>;
     dimmed: boolean;
-    onHoverStart: () => void;
-    onHoverEnd: () => void;
+    onHoverStart: (itemId: string) => void;
+    onHoverEnd: (itemId: string) => void;
     onOpen: (itemId: string) => void;
 };
 
@@ -217,8 +217,8 @@ function ComboNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNod
                     if (el) nodeRefs.current.set(node.itemId, el);
                     else nodeRefs.current.delete(node.itemId);
                 }}
-                onMouseEnter={onHoverStart}
-                onMouseLeave={onHoverEnd}
+                onMouseEnter={() => onHoverStart(node.itemId)}
+                onMouseLeave={() => onHoverEnd(node.itemId)}
                 sx={{
                     display: "flex",
                     alignItems: "center",
@@ -239,6 +239,12 @@ function ComboNode({ node, nodeRefs, dimmed, onHoverStart, onHoverEnd }: TreeNod
     );
 }
 
+// Memoized: with ~200+ nodes on screen, hovering any single one otherwise re-renders every other node too (only
+// its `dimmed` prop actually changes) — memo plus MemoTreeNode's itemId-parameterized onHoverStart/onHoverEnd
+// (stable across BuildTree renders, unlike a fresh per-node closure) means only nodes whose own dimmed value
+// actually flips re-render.
+const MemoComboNode = memo(ComboNode);
+
 /**
  * One tree node: item icon, name + description in the hover tooltip as before — only the *why* (which parent(s)
  * it feeds into, see ScalingNode) moved out, into the side panel (see DetailPanel). A node can have several
@@ -250,7 +256,7 @@ function TreeNode(props: TreeNodeProps) {
     const { node, nodeRefs, dimmed, onHoverStart, onHoverEnd, onOpen } = props;
     const store = useStore();
 
-    if (node.combo) return <ComboNode {...props} />;
+    if (node.combo) return <MemoComboNode {...props} />;
 
     const item = store.getItem(node.itemId);
     const name = item ? store.itemName(item) : node.itemId;
@@ -283,8 +289,8 @@ function TreeNode(props: TreeNodeProps) {
                     event.preventDefault();
                     onOpen(node.itemId);
                 }}
-                onMouseEnter={onHoverStart}
-                onMouseLeave={onHoverEnd}
+                onMouseEnter={() => onHoverStart(node.itemId)}
+                onMouseLeave={() => onHoverEnd(node.itemId)}
                 sx={{
                     display: "flex",
                     alignItems: "center",
@@ -308,6 +314,8 @@ function TreeNode(props: TreeNodeProps) {
         </Tooltip>
     );
 }
+
+const MemoTreeNode = memo(TreeNode);
 
 type DetailPanelProps = {
     node: CascadeLevelNode | undefined;
@@ -478,6 +486,17 @@ export default function BuildTree({ build }: Props) {
     const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
     const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
     const [openItemId, setOpenItemId] = useState<string | null>(null);
+
+    // Stable across every BuildTree render (deps are empty — both only use the setState functions, which React
+    // itself guarantees are stable) so MemoTreeNode's memo comparison isn't defeated by a fresh closure every
+    // render — see MemoTreeNode's own comment for why that matters at ~200 nodes.
+    const handleHoverStart = useCallback((itemId: string) => {
+        setHoveredItemId(itemId);
+        setHoveredEdgeKey(null);
+    }, []);
+    const handleHoverEnd = useCallback((itemId: string) => {
+        setHoveredItemId((current) => (current === itemId ? null : current));
+    }, []);
 
     // store.items/mechanics/etc. are getters that return a fresh array on every access, so `nodes` is a new
     // array reference every render even when its contents are identical — depending the effect on `nodes`
@@ -707,16 +726,13 @@ export default function BuildTree({ build }: Props) {
                                 </Typography>
                                 <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", justifyContent: "center" }}>
                                     {depthNodes.map((node) => (
-                                        <TreeNode
+                                        <MemoTreeNode
                                             key={node.itemId}
                                             node={node}
                                             nodeRefs={nodeRefs}
                                             dimmed={highlightedItemIds !== null && !highlightedItemIds.has(node.itemId)}
-                                            onHoverStart={() => {
-                                                setHoveredItemId(node.itemId);
-                                                setHoveredEdgeKey(null);
-                                            }}
-                                            onHoverEnd={() => setHoveredItemId((current) => (current === node.itemId ? null : current))}
+                                            onHoverStart={handleHoverStart}
+                                            onHoverEnd={handleHoverEnd}
                                             onOpen={setOpenItemId}
                                         />
                                     ))}
