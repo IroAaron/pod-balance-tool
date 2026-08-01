@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useState, type DragEvent } from "react";
 import {
     Autocomplete,
     Chip,
@@ -55,6 +55,12 @@ type Props = {
     onDelete: (id: string) => void;
 
     onDragStart: (id: string) => void;
+
+    /** Fires while another card is being dragged over this one — used by SprintDetailPage to figure out (from
+     *  which half of the card the pointer is over) where the drop placeholder gap should open. */
+    onDragOver: (event: DragEvent<HTMLElement>) => void;
+
+    onDragEnd: () => void;
 };
 
 /** One sprint-round entry — Quota/RewardTickerts/RewardTicketsPerBall (NumberField), RewardPack/HousesInShop/
@@ -65,7 +71,15 @@ type Props = {
  *  real, never dedupe" precedent as Decks' repeated entries, here presumably weighting which round gets picked),
  *  so Chips are keyed/deleted by array index, not by id, and the add-Autocomplete never filters out ids already
  *  in the pool. */
-const SprintRoundCard = memo(function SprintRoundCard({ round, stageCount, onCommit, onDelete, onDragStart }: Props) {
+const SprintRoundCard = memo(function SprintRoundCard({
+    round,
+    stageCount,
+    onCommit,
+    onDelete,
+    onDragStart,
+    onDragOver,
+    onDragEnd,
+}: Props) {
     const store = useStore();
 
     const rewardPack = round.rewardPackId ? store.getPack(round.rewardPackId) : null;
@@ -85,6 +99,8 @@ const SprintRoundCard = memo(function SprintRoundCard({ round, stageCount, onCom
                 event.dataTransfer.effectAllowed = "move";
                 onDragStart(round.id);
             }}
+            onDragOver={onDragOver}
+            onDragEnd={onDragEnd}
             sx={{ p: 2, cursor: "grab" }}
         >
             <Stack spacing={1.5}>

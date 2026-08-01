@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState, type DragEvent } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import {
     Box,
@@ -54,17 +54,41 @@ function makeBlankRound(sprintId: string, stage: number): SprintRound {
     };
 }
 
-/** Inserts/repositions `round` at the END of stage `stage`'s group within `rounds` (which must NOT already
- *  contain `round`) — array order is rebuilt by concatenating stage groups 1..max in order, so uneven counts per
- *  stage are fine and every other round's relative order is preserved. This is the single place that decides
- *  "array position" for the whole page — both the stage-board drag-and-drop and the quick-move Select and
- *  "+ Добавить раунд" all go through it, since array position is the only source of truth for RoundNumber. */
-function placeRoundAtEndOfStage(rounds: SprintRound[], round: SprintRound, stage: number): SprintRound[] {
+/** A small gap that opens up at the hovered insertion slot while dragging a round card — pushes the surrounding
+ *  cards apart just enough to show where it'll land, per the user's own "чуть отодвигать соседей" ask. */
+function DropPlaceholder() {
+    return (
+        <Box
+            sx={{
+                height: 14,
+                borderRadius: 1,
+                border: "2px dashed",
+                borderColor: "primary.main",
+                bgcolor: "primary.main",
+                opacity: 0.2,
+            }}
+        />
+    );
+}
+
+/** Inserts/repositions `round` into stage `stage`'s group within `rounds` (which must NOT already contain
+ *  `round`), at `index` within that stage's own sub-list — or at the END of the stage if `index` is omitted
+ *  (used by the quick-move Select and "+ Добавить раунд", which have no drag position to go on). Array order is
+ *  rebuilt by concatenating stage groups 1..max in order, so uneven counts per stage are fine and every other
+ *  round's relative order is preserved. This is the single place that decides "array position" for the whole
+ *  page — every mutation (drag-and-drop, quick-move, add) goes through it, since array position is the only
+ *  source of truth for RoundNumber. */
+function placeRoundInStage(rounds: SprintRound[], round: SprintRound, stage: number, index?: number): SprintRound[] {
     const maxStage = Math.max(stage, ...rounds.map((r) => r.stage ?? 1));
     const result: SprintRound[] = [];
     for (let s = 1; s <= maxStage; s++) {
-        result.push(...rounds.filter((r) => (r.stage ?? 1) === s));
-        if (s === stage) result.push(round);
+        const stageRounds = rounds.filter((r) => (r.stage ?? 1) === s);
+        if (s === stage) {
+            const insertAt = index === undefined ? stageRounds.length : Math.max(0, Math.min(index, stageRounds.length));
+            result.push(...stageRounds.slice(0, insertAt), round, ...stageRounds.slice(insertAt));
+        } else {
+            result.push(...stageRounds);
+        }
     }
     return result;
 }
@@ -76,6 +100,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     const sprint = id ? store.getSprint(id) : undefined;
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [draggedRoundId, setDraggedRoundId] = useState<string | null>(null);
+    const [dragOverTarget, setDragOverTarget] = useState<{ stage: number; index: number } | null>(null);
 
     if (!sprint) {
         return (
@@ -99,7 +124,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
             const target = sprint.rounds.find((r) => r.id === roundId);
             if (!target) return;
             const rest = sprint.rounds.filter((r) => r.id !== roundId);
-            updateSprint({ rounds: placeRoundAtEndOfStage(rest, { ...target, ...patch }, patch.stage) });
+            updateSprint({ rounds: placeRoundInStage(rest, { ...target, ...patch }, patch.stage) });
             return;
         }
         updateSprint({ rounds: sprint.rounds.map((r) => (r.id === roundId ? { ...r, ...patch } : r)) });
@@ -110,7 +135,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     };
 
     const handleAddRound = (stage: number) => {
-        updateSprint({ rounds: placeRoundAtEndOfStage(sprint.rounds, makeBlankRound(sprint.id, stage), stage) });
+        updateSprint({ rounds: placeRoundInStage(sprint.rounds, makeBlankRound(sprint.id, stage), stage) });
     };
 
     const handleDrop = (stage: number) => {
@@ -118,9 +143,35 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         const target = sprint.rounds.find((r) => r.id === draggedRoundId);
         if (target) {
             const rest = sprint.rounds.filter((r) => r.id !== draggedRoundId);
-            updateSprint({ rounds: placeRoundAtEndOfStage(rest, { ...target, stage }, stage) });
+            const index = dragOverTarget?.stage === stage ? dragOverTarget.index : undefined;
+            updateSprint({ rounds: placeRoundInStage(rest, { ...target, stage }, stage, index) });
         }
         setDraggedRoundId(null);
+        setDragOverTarget(null);
+    };
+
+    const handleDragEnd = () => {
+        setDraggedRoundId(null);
+        setDragOverTarget(null);
+    };
+
+    /** Hovering directly over a card — split into top/bottom halves to decide whether the placeholder opens
+     *  before or after this card. Stops propagation so the column-level fallback below doesn't immediately
+     *  overwrite this with "end of column" as the event bubbles up. */
+    const handleCardDragOver = (event: DragEvent<HTMLElement>, stage: number, index: number) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const isAfter = event.clientY > rect.top + rect.height / 2;
+        setDragOverTarget({ stage, index: index + (isAfter ? 1 : 0) });
+    };
+
+    /** Hovering over the column's own empty space (below the last card, or an empty column) — only reached when
+     *  no card's handler already claimed the event via stopPropagation. */
+    const handleColumnDragOver = (event: DragEvent<HTMLElement>, stage: number) => {
+        event.preventDefault();
+        const count = sprint.rounds.filter((r) => (r.stage ?? 1) === stage && r.id !== draggedRoundId).length;
+        setDragOverTarget({ stage, index: count });
     };
 
     const stages = Array.from({ length: stageCount }, (_, index) => index + 1);
@@ -157,12 +208,21 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                 }}
             >
                 {stages.map((stage) => {
-                    const stageRounds = sprint.rounds.filter((round) => (round.stage ?? 1) === stage);
+                    // The dragged round is left out of every column's list while it's in flight — it's "lifted",
+                    // and DropPlaceholder stands in for it at wherever the pointer currently is.
+                    const stageRounds = sprint.rounds.filter(
+                        (round) => (round.stage ?? 1) === stage && round.id !== draggedRoundId
+                    );
+                    const placeholderIndex =
+                        draggedRoundId !== null && dragOverTarget?.stage === stage
+                            ? Math.max(0, Math.min(dragOverTarget.index, stageRounds.length))
+                            : null;
+
                     return (
                         <Paper
                             key={stage}
                             variant="outlined"
-                            onDragOver={(event) => event.preventDefault()}
+                            onDragOver={(event) => handleColumnDragOver(event, stage)}
                             onDrop={() => handleDrop(stage)}
                             sx={{ p: 2, bgcolor: "action.hover" }}
                         >
@@ -170,19 +230,24 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                                 <Typography variant="h6">Этап {stage}</Typography>
 
                                 <Stack spacing={2}>
-                                    {stageRounds.map((round) => (
-                                        <SprintRoundCard
-                                            key={round.id}
-                                            round={round}
-                                            stageCount={stageCount}
-                                            onCommit={handleRoundCommit}
-                                            onDelete={handleRoundDelete}
-                                            onDragStart={setDraggedRoundId}
-                                        />
+                                    {stageRounds.map((round, index) => (
+                                        <Fragment key={round.id}>
+                                            {placeholderIndex === index && <DropPlaceholder />}
+                                            <SprintRoundCard
+                                                round={round}
+                                                stageCount={stageCount}
+                                                onCommit={handleRoundCommit}
+                                                onDelete={handleRoundDelete}
+                                                onDragStart={setDraggedRoundId}
+                                                onDragOver={(event) => handleCardDragOver(event, stage, index)}
+                                                onDragEnd={handleDragEnd}
+                                            />
+                                        </Fragment>
                                     ))}
+                                    {placeholderIndex === stageRounds.length && <DropPlaceholder />}
                                 </Stack>
 
-                                {stageRounds.length === 0 && (
+                                {stageRounds.length === 0 && placeholderIndex === null && (
                                     <Typography variant="body2" color="text.secondary">
                                         Раундов пока нет.
                                     </Typography>
