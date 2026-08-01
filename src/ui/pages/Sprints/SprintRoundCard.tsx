@@ -91,10 +91,17 @@ type Props = {
     onDragStart: (id: string) => void;
 
     /** Fires while another card is being dragged over this one — used by SprintDetailPage to figure out (from
-     *  which half of the card the pointer is over) where the drop placeholder gap should open. */
-    onDragOver: (event: DragEvent<HTMLElement>) => void;
+     *  which half of the card the pointer is over) where the drop placeholder gap should open. Omitted for the
+     *  card currently being dragged itself (see isDragging). */
+    onDragOver?: (event: DragEvent<HTMLElement>) => void;
 
     onDragEnd: () => void;
+
+    /** True for the one card currently being dragged. It stays fully mounted in its original spot (just dimmed
+     *  and made non-interactive) rather than being removed from the DOM — removing the actual native drag-source
+     *  element mid-drag breaks the browser's own drag-image tracking and can make `dragend`/`drop` stop firing
+     *  reliably on it. */
+    isDragging?: boolean;
 };
 
 /** One sprint-round entry — Quota/RewardTickerts/RewardTicketsPerBall (NumberField), RewardPack/HousesInShop/
@@ -113,6 +120,7 @@ const SprintRoundCard = memo(function SprintRoundCard({
     onDragStart,
     onDragOver,
     onDragEnd,
+    isDragging = false,
 }: Props) {
     const store = useStore();
 
@@ -131,7 +139,12 @@ const SprintRoundCard = memo(function SprintRoundCard({
             }}
             onDragOver={onDragOver}
             onDragEnd={onDragEnd}
-            sx={{ p: 2, cursor: "grab" }}
+            sx={{
+                p: 2,
+                cursor: "grab",
+                opacity: isDragging ? 0.4 : 1,
+                pointerEvents: isDragging ? "none" : "auto",
+            }}
         >
             <Stack spacing={1.5}>
                 <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>

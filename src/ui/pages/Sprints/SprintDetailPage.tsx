@@ -219,14 +219,17 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                 }}
             >
                 {stages.map((stage) => {
-                    // The dragged round is left out of every column's list while it's in flight — it's "lifted",
-                    // and DropPlaceholder stands in for it at wherever the pointer currently is.
-                    const stageRounds = sprint.rounds.filter(
-                        (round) => (round.stage ?? 1) === stage && round.id !== draggedRoundId
-                    );
+                    // The dragged round STAYS mounted (just dimmed, see isDragging below) — removing the actual
+                    // drag-source DOM node mid-drag breaks the browser's own drag-image tracking (the card no
+                    // longer visibly follows the cursor) and can make dragend/drop stop firing reliably (the
+                    // round then never reappears, i.e. "disappears"). `stageRoundsForIndex` excludes it only for
+                    // computing WHERE the placeholder/insertion index should be — a separate, purely positional
+                    // concern from what's actually rendered.
+                    const stageRounds = sprint.rounds.filter((round) => (round.stage ?? 1) === stage);
+                    const stageRoundsForIndex = stageRounds.filter((round) => round.id !== draggedRoundId);
                     const placeholderIndex =
                         draggedRoundId !== null && dragOverTarget?.stage === stage
-                            ? Math.max(0, Math.min(dragOverTarget.index, stageRounds.length))
+                            ? Math.max(0, Math.min(dragOverTarget.index, stageRoundsForIndex.length))
                             : null;
 
                     return (
@@ -241,21 +244,38 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                                 <Typography variant="h6">Этап {stage}</Typography>
 
                                 <Stack spacing={2}>
-                                    {stageRounds.map((round, index) => (
-                                        <Fragment key={round.id}>
-                                            {placeholderIndex === index && <DropPlaceholder />}
-                                            <SprintRoundCard
-                                                round={round}
-                                                stageCount={stageCount}
-                                                onCommit={handleRoundCommit}
-                                                onDelete={handleRoundDelete}
-                                                onDragStart={setDraggedRoundId}
-                                                onDragOver={(event) => handleCardDragOver(event, stage, index)}
-                                                onDragEnd={handleDragEnd}
-                                            />
-                                        </Fragment>
-                                    ))}
-                                    {placeholderIndex === stageRounds.length && <DropPlaceholder />}
+                                    {stageRounds.map((round) => {
+                                        // Both branches below must render the exact same element SHAPE (a
+                                        // Fragment wrapping one SprintRoundCard) — branching between a bare
+                                        // <SprintRoundCard> and a <Fragment><SprintRoundCard/></Fragment> for the
+                                        // same key still makes React treat it as a different element type at that
+                                        // list position and tear the DOM node down and rebuild it, which is
+                                        // exactly the "detach the drag source mid-drag" bug this isDragging path
+                                        // exists to avoid in the first place. Confirmed via a real reconnect check
+                                        // (`node.isConnected`) during manual testing — it went false without this.
+                                        const isDragging = round.id === draggedRoundId;
+                                        const logicalIndex = isDragging ? -1 : stageRoundsForIndex.indexOf(round);
+                                        return (
+                                            <Fragment key={round.id}>
+                                                {!isDragging && placeholderIndex === logicalIndex && <DropPlaceholder />}
+                                                <SprintRoundCard
+                                                    round={round}
+                                                    stageCount={stageCount}
+                                                    onCommit={handleRoundCommit}
+                                                    onDelete={handleRoundDelete}
+                                                    onDragStart={setDraggedRoundId}
+                                                    onDragOver={
+                                                        isDragging
+                                                            ? undefined
+                                                            : (event) => handleCardDragOver(event, stage, logicalIndex)
+                                                    }
+                                                    onDragEnd={handleDragEnd}
+                                                    isDragging={isDragging}
+                                                />
+                                            </Fragment>
+                                        );
+                                    })}
+                                    {placeholderIndex === stageRoundsForIndex.length && <DropPlaceholder />}
                                 </Stack>
 
                                 {stageRounds.length === 0 && placeholderIndex === null && (
