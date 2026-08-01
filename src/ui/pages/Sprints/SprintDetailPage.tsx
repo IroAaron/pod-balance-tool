@@ -155,6 +155,17 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         setDragOverTarget(null);
     };
 
+    /** Only actually updates state (and so only actually triggers a re-render) when the target slot genuinely
+     *  changed — native `dragover` fires continuously (many times a second) for as long as the pointer is over an
+     *  element, even without it moving, so without this bail-out every single one of those ticks re-rendered the
+     *  *entire* board (every stage's every card, ~4 form fields each) regardless of whether anything actually
+     *  moved. That was the real cause of the reported drag lag/mis-drops — the event queue backed up under the
+     *  re-render cost, so by the time `drop` fired, `dragOverTarget` could be several stale ticks behind the
+     *  pointer's real position. */
+    const setDragOverTargetIfChanged = (next: { stage: number; index: number }) => {
+        setDragOverTarget((prev) => (prev?.stage === next.stage && prev.index === next.index ? prev : next));
+    };
+
     /** Hovering directly over a card — split into top/bottom halves to decide whether the placeholder opens
      *  before or after this card. Stops propagation so the column-level fallback below doesn't immediately
      *  overwrite this with "end of column" as the event bubbles up. */
@@ -163,7 +174,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         event.stopPropagation();
         const rect = event.currentTarget.getBoundingClientRect();
         const isAfter = event.clientY > rect.top + rect.height / 2;
-        setDragOverTarget({ stage, index: index + (isAfter ? 1 : 0) });
+        setDragOverTargetIfChanged({ stage, index: index + (isAfter ? 1 : 0) });
     };
 
     /** Hovering over the column's own empty space (below the last card, or an empty column) — only reached when
@@ -171,7 +182,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     const handleColumnDragOver = (event: DragEvent<HTMLElement>, stage: number) => {
         event.preventDefault();
         const count = sprint.rounds.filter((r) => (r.stage ?? 1) === stage && r.id !== draggedRoundId).length;
-        setDragOverTarget({ stage, index: count });
+        setDragOverTargetIfChanged({ stage, index: count });
     };
 
     const stages = Array.from({ length: stageCount }, (_, index) => index + 1);

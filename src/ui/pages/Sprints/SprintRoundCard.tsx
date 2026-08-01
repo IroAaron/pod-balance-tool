@@ -14,7 +14,6 @@ import CloseIcon from "@mui/icons-material/Close";
 import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import { useStore } from "../../hooks/useStore";
 import type { SprintRound } from "../../../core/models/Sprint";
-import type { Pack } from "../../../core/models/Pack";
 import type { Round } from "../../../core/models/Round";
 
 const MAX_ROUND_IDS = 9;
@@ -45,6 +44,41 @@ function NumberField({
     );
 }
 
+/** A clearable pack picker over `store.packs` (rarely more than a few dozen real packs) — a plain `TextField
+ *  select` instead of `Autocomplete`, since `Autocomplete` mounts real filtering/positioning machinery on every
+ *  instance (`useAutocomplete`) even for a small fixed list with no need for free-text search; each SprintRoundCard
+ *  used 3 of these, so across a whole stage board that mount/re-render cost added up to a real, reported lag both
+ *  when first opening a sprint and while dragging (every dragover-triggered re-render recomputed all of them). */
+function PackSelect({
+    label,
+    value,
+    onCommit,
+}: {
+    label: string;
+    value: string | undefined;
+    onCommit: (value: string | undefined) => void;
+}) {
+    const store = useStore();
+    return (
+        <TextField
+            select
+            size="small"
+            label={label}
+            value={value ?? ""}
+            onChange={(event) => onCommit(event.target.value || undefined)}
+        >
+            <MenuItem value="">
+                <em>Нет</em>
+            </MenuItem>
+            {store.packs.map((pack) => (
+                <MenuItem key={pack.id} value={pack.id}>
+                    {pack.id}
+                </MenuItem>
+            ))}
+        </TextField>
+    );
+}
+
 type Props = {
     round: SprintRound;
 
@@ -64,7 +98,7 @@ type Props = {
 };
 
 /** One sprint-round entry — Quota/RewardTickerts/RewardTicketsPerBall (NumberField), RewardPack/HousesInShop/
- *  PackDeckStart (clearable Autocomplete over store.packs), the roundIds pool (Chip list + add-Autocomplete over
+ *  PackDeckStart (PackSelect, clearable, over store.packs), the roundIds pool (Chip list + add-Autocomplete over
  *  store.rounds, capped at 9 — same pattern as RoundDetailPage's deckBalls editor), and a "→ Этап" quick-move
  *  Select — the accessible/testable fallback for the stage board's native drag-and-drop (see SprintDetailPage).
  *  A round id CAN legitimately repeat within one entry's pool (confirmed in the real data — same "duplicates are
@@ -81,10 +115,6 @@ const SprintRoundCard = memo(function SprintRoundCard({
     onDragEnd,
 }: Props) {
     const store = useStore();
-
-    const rewardPack = round.rewardPackId ? store.getPack(round.rewardPackId) : null;
-    const housesInShopPack = round.housesInShopPackId ? store.getPack(round.housesInShopPackId) : null;
-    const packDeckStartPack = round.packDeckStartId ? store.getPack(round.packDeckStartId) : null;
 
     const handleAddRound = (added: Round | null) => {
         if (!added) return;
@@ -137,31 +167,22 @@ const SprintRoundCard = memo(function SprintRoundCard({
                     />
                 </Stack>
 
-                <Autocomplete
-                    size="small"
-                    options={store.packs}
-                    value={rewardPack}
-                    getOptionLabel={(pack: Pack) => pack.id}
-                    onChange={(_event, pack) => onCommit(round.id, { rewardPackId: pack?.id ?? undefined })}
-                    renderInput={(params) => <TextField {...params} label="RewardPack (колода артефактов)" />}
+                <PackSelect
+                    label="RewardPack (колода артефактов)"
+                    value={round.rewardPackId}
+                    onCommit={(v) => onCommit(round.id, { rewardPackId: v })}
                 />
 
-                <Autocomplete
-                    size="small"
-                    options={store.packs}
-                    value={housesInShopPack}
-                    getOptionLabel={(pack: Pack) => pack.id}
-                    onChange={(_event, pack) => onCommit(round.id, { housesInShopPackId: pack?.id ?? undefined })}
-                    renderInput={(params) => <TextField {...params} label="HousesInShop (домики в магазине)" />}
+                <PackSelect
+                    label="HousesInShop (домики в магазине)"
+                    value={round.housesInShopPackId}
+                    onCommit={(v) => onCommit(round.id, { housesInShopPackId: v })}
                 />
 
-                <Autocomplete
-                    size="small"
-                    options={store.packs}
-                    value={packDeckStartPack}
-                    getOptionLabel={(pack: Pack) => pack.id}
-                    onChange={(_event, pack) => onCommit(round.id, { packDeckStartId: pack?.id ?? undefined })}
-                    renderInput={(params) => <TextField {...params} label="PackDeckStart (колода стартового поля)" />}
+                <PackSelect
+                    label="PackDeckStart (колода стартового поля)"
+                    value={round.packDeckStartId}
+                    onCommit={(v) => onCommit(round.id, { packDeckStartId: v })}
                 />
 
                 <Typography variant="caption" color="text.secondary">
