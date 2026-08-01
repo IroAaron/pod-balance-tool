@@ -84,6 +84,14 @@ type Props = {
 
     stageCount: number;
 
+    /** This card's own stage/position, exposed as `data-stage`/`data-index` on the root element so the SHARED,
+     *  stable `onDragOver` handler (see below) can read them at event time instead of needing a per-card closure
+     *  — a closure baking these in (`(event) => onDragOver(event, stage, index)`) would itself be a fresh prop
+     *  value every render, which defeats `memo()` below just as badly as skipping memoization entirely would. */
+    stage: number;
+
+    index: number;
+
     onCommit: (id: string, patch: Partial<SprintRound>) => void;
 
     onDelete: (id: string) => void;
@@ -92,7 +100,8 @@ type Props = {
 
     /** Fires while another card is being dragged over this one — used by SprintDetailPage to figure out (from
      *  which half of the card the pointer is over) where the drop placeholder gap should open. Omitted for the
-     *  card currently being dragged itself (see isDragging). */
+     *  card currently being dragged itself (see isDragging). Reads position from `event.currentTarget.dataset`
+     *  (see `stage`/`index` above), so this is the SAME function reference for every card — keep it that way. */
     onDragOver?: (event: DragEvent<HTMLElement>) => void;
 
     onDragEnd: () => void;
@@ -115,6 +124,8 @@ type Props = {
 const SprintRoundCard = memo(function SprintRoundCard({
     round,
     stageCount,
+    stage,
+    index,
     onCommit,
     onDelete,
     onDragStart,
@@ -133,6 +144,8 @@ const SprintRoundCard = memo(function SprintRoundCard({
         <Paper
             variant="outlined"
             draggable
+            data-stage={stage}
+            data-index={index}
             onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "move";
                 onDragStart(round.id);
