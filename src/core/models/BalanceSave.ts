@@ -73,6 +73,9 @@ export interface BalanceSavePayload {
     glossary: GlossaryEntry[];
 
     tagIcons: TagIcon[];
+
+    /** Curated "Спец. раунд" values, see firestoreStore's subscribeSpecialRoundTypes. */
+    specialRoundTypes: string[];
 }
 
 /** Keys of BalanceSavePayload — each one is written/read as its own `parts/{key}` doc, see firestoreStore.ts. */
@@ -96,4 +99,5 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "exportedOverrides",
     "glossary",
     "tagIcons",
+    "specialRoundTypes",
 ];

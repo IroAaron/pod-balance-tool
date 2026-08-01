@@ -217,6 +217,20 @@ export function replaceTagIconsRemote(entries: TagIcon[]): Promise<void> {
     return setDoc(doc(sharedCol, "tagIcons"), { entries: stripUndefined(entries) });
 }
 
+/** Same independent-doc/full-overwrite pattern as tagIcons — the curated list of "Спец. раунд" values shown in
+ *  RoundDetailPage's rules Autocomplete, user-managed via SpecialRoundTypesPopover. Starts empty (no pre-seeding). */
+export function subscribeSpecialRoundTypes(onChange: (values: string[]) => void): () => void {
+    return onSnapshot(
+        doc(sharedCol, "specialRoundTypes"),
+        (snapshot) => onChange((snapshot.data()?.entries as string[] | undefined) ?? []),
+        (error) => console.error("subscribeSpecialRoundTypes", error)
+    );
+}
+
+export function replaceSpecialRoundTypesRemote(values: string[]): Promise<void> {
+    return setDoc(doc(sharedCol, "specialRoundTypes"), { entries: values });
+}
+
 export function writeBuild(build: Build): Promise<void> {
     return setDoc(doc(buildsCol, build.id), build);
 }
@@ -435,6 +449,7 @@ export async function fetchBalanceSavePayloadRemote(saveId: string): Promise<Bal
         exportedOverrides: (byKey.get("exportedOverrides") as BalanceSavePayload["exportedOverrides"]) ?? {},
         glossary: (byKey.get("glossary") as BalanceSavePayload["glossary"])?.map(normalizeGlossaryEntry) ?? [],
         tagIcons: (byKey.get("tagIcons") as BalanceSavePayload["tagIcons"]) ?? [],
+        specialRoundTypes: (byKey.get("specialRoundTypes") as BalanceSavePayload["specialRoundTypes"]) ?? [],
     };
 }
 

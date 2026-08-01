@@ -61,6 +61,8 @@ import {
     replaceGlossaryRemote,
     subscribeTagIcons,
     replaceTagIconsRemote,
+    subscribeSpecialRoundTypes,
+    replaceSpecialRoundTypesRemote,
     replaceAllBuilds,
     replaceSharedState,
     migrateIfEmpty,
@@ -185,6 +187,11 @@ export class GameStore {
      *  in-memory-only framing as Pack/Deck above. Independent export flow/button. */
     blueprintDirtyBallIds: Set<string> = new Set();
 
+    /** Round ids edited via updateRoundFields (RoundDetailPage) since the last successful exportRoundChanges() —
+     *  same in-memory-only framing as the other dirty sets above. No create/delete — rounds are only ever edited,
+     *  never created or removed on the site. */
+    blueprintDirtyRoundIds: Set<string> = new Set();
+
     /** Ball ids removed via deleteBall since the last successful exportBallChanges(). */
     blueprintDeletedBallIds: Set<string> = new Set();
 
@@ -195,6 +202,10 @@ export class GameStore {
     /** Manually-curated "tag -> icon" entries, used to resolve `{tag:Name}` tokens inserted into descriptions —
      *  see GlossaryPage's "Иконки тегов" tab and descriptionTemplate.ts. Synced independently, like glossary. */
     tagIcons: TagIcon[] = [];
+
+    /** Manually-curated list of valid "Спец. раунд" (RoundRules) values — starts empty, user-managed via
+     *  SpecialRoundTypesPopover on RoundDetailPage. Synced independently, like glossary/tagIcons. */
+    specialRoundTypes: string[] = [];
 
     /** Named point-in-time balance saves — metadata only (see SavesPage). Payload fetched on demand when restoring. */
     balanceSaves: BalanceSaveMeta[] = [];
@@ -210,6 +221,9 @@ export class GameStore {
 
     /** False until the first Firestore `shared/tagIcons` snapshot arrives. */
     tagIconsReady = false;
+
+    /** False until the first Firestore `shared/specialRoundTypes` snapshot arrives. */
+    specialRoundTypesReady = false;
 
     /** False until the first Firestore `balanceSaves` snapshot arrives. */
     balanceSavesReady = false;
@@ -303,6 +317,12 @@ export class GameStore {
         subscribeTagIcons((entries) => {
             this.tagIcons = entries;
             this.tagIconsReady = true;
+            this.notify();
+        });
+
+        subscribeSpecialRoundTypes((values) => {
+            this.specialRoundTypes = values;
+            this.specialRoundTypesReady = true;
             this.notify();
         });
 
@@ -514,6 +534,17 @@ export class GameStore {
         this.blueprintDeletedBallIds.add(id);
         this.blueprintDirtyBallIds.delete(id);
         this.balls = this.balls.filter((ball) => ball.id !== id);
+        this.notify();
+    }
+
+    /** Patches an existing round's editable fields (RoundDetailPage's rules/invisibleArtefactId/tempDeckId/
+     *  deckBalls pickers) and marks it dirty for exportRoundChanges(). No create/delete counterpart — rounds are
+     *  only ever edited on the site, never added or removed (unlike Decks/Packs/Balls above). */
+    updateRoundFields(id: string, patch: Partial<Round>): void {
+        const existing = this.getRound(id);
+        if (!existing) return;
+        this.rounds = this.rounds.map((round) => (round.id === id ? { ...round, ...patch } : round));
+        this.blueprintDirtyRoundIds.add(id);
         this.notify();
     }
 
@@ -1075,6 +1106,60 @@ export class GameStore {
         return result;
     }
 
+    /** How many Rounds-page edits haven't been sent yet — see exportRoundChanges(). No delete/create counterpart
+     *  (see updateRoundFields's doc), so this is just the dirty set's size, unlike Decks/Packs/Balls above. */
+    get blueprintRoundPendingExportCount(): number {
+        return this.blueprintDirtyRoundIds.size;
+    }
+
+    /**
+     * Sends Rounds-page edits (rules/invisibleArtefactId/tempDeckId/deckBalls, see RoundDetailPage) to the same
+     * Apps Script `doPost` endpoint. Unlike Decks/Packs/Balls, this is the FIRST config-export path RoundSettings
+     * has ever had — the sheet mixes both row shapes at once: `RoundRules`/`AdditionalInvisibleArtefact`/`TempDeck`
+     * are ordinary one-column-per-field cells (fits `upsertFullRows`, matched by `RoundId`, same as Balls/Blueprint
+     * Lab items), while `DeckBalls` is the sheet's own repeated-column field (same shape as BallGroups' `Ball`
+     * columns — see docs/apps-script-export.gs's `replaceWideGroupRow`), so it's sent as a second payload field and
+     * written with the same helper built for ball decks. Round name/description are unaffected — rounds still have
+     * no editable name, and description flows through the existing translationOverrides path.
+     */
+    async exportRoundChanges(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.configUrl) {
+            throw new Error("Не задан источник конфигурации на странице «Источники»");
+        }
+
+        const fields: Record<string, Record<string, string>> = {};
+        const deckBalls: Record<string, string[]> = {};
+
+        for (const roundId of this.blueprintDirtyRoundIds) {
+            const round = this.getRound(roundId);
+            if (!round) continue;
+            fields[round.id] = {
+                RoundRules: round.rules ?? "",
+                AdditionalInvisibleArtefact: round.invisibleArtefactId ?? "",
+                TempDeck: round.tempDeckId ?? "",
+            };
+            deckBalls[round.id] = round.deckBalls;
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, {
+            token,
+            names: {},
+            descriptions: {},
+            rounds: { fields, deckBalls },
+        });
+
+        if (result.ok) {
+            this.blueprintDirtyRoundIds = new Set();
+            this.notify();
+        }
+
+        return result;
+    }
+
     itemName(item: Item): string {
         return this.getTranslation(item.nameKey) ?? item.nameKey ?? item.id;
     }
@@ -1448,6 +1533,15 @@ export class GameStore {
         void replaceTagIconsRemote(entries).catch((error) => console.error("setTagIcons → Firestore", error));
     }
 
+    /** Full replace, same reasoning as setTagIcons — see SpecialRoundTypesPopover. */
+    setSpecialRoundTypes(values: string[]): void {
+        this.specialRoundTypes = values;
+        this.notify();
+        void replaceSpecialRoundTypesRemote(values).catch((error) =>
+            console.error("setSpecialRoundTypes → Firestore", error)
+        );
+    }
+
     /** Everything a BalanceSave captures, read straight from live state — see BalanceSavePayload for why `sources`
      *  is deliberately excluded. */
     currentBalancePayload(): BalanceSavePayload {
@@ -1471,6 +1565,7 @@ export class GameStore {
             exportedOverrides: this.exportedOverrides,
             glossary: this.glossary,
             tagIcons: this.tagIcons,
+            specialRoundTypes: this.specialRoundTypes,
         };
     }
 
@@ -1546,6 +1641,7 @@ export class GameStore {
             }),
             replaceGlossaryRemote(payload.glossary),
             replaceTagIconsRemote(payload.tagIcons),
+            replaceSpecialRoundTypesRemote(payload.specialRoundTypes),
         ]);
     }
 

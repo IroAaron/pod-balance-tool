@@ -40,6 +40,14 @@
 //     ballGroups?: {                                // Ball decks ("Колоды шаров") — REPLACES the one row for a
 //       [deckId: string]: string[],                 // given DeckId, writing values across every repeated `Ball`
 //     },                                            // column. Empty array deletes that ball deck's row.
+//     rounds?: {                                    // Rounds page — writes into RoundSettings
+//       fields: {                                    // upserted by RoundId (RoundRules/AdditionalInvisibleArtefact/TempDeck)
+//         [roundId: string]: { [column: string]: string },
+//       },
+//       deckBalls: {                                 // REPLACES the one row for a given RoundId, writing values
+//         [roundId: string]: string[],                // across every repeated `DeckBalls` column
+//       },
+//     },
 //   }
 // `items`/`newMechanicRows` only ever write columns present in the payload — a column the site doesn't model
 // (sprite names, unrelated flags, etc.) is left exactly as it already was in the sheet.
@@ -95,6 +103,13 @@ function doPost(e) {
         // replaceRowsByGroupId both assume a narrow row shape and can't address repeated-name columns.
         if (body.ballGroups) {
             result.updated.BallGroups = replaceWideGroupRow(ss, "BallGroups", "DeckId", "Ball", body.ballGroups, result);
+        }
+
+        // Rounds page — RoundSettings mixes both row shapes: ordinary one-column fields (upsertFullRows) and its
+        // own repeated "DeckBalls" columns (replaceWideGroupRow, same helper BallGroups uses).
+        if (body.rounds) {
+            result.updated.RoundSettings = upsertFullRows(ss, "RoundSettings", "RoundId", body.rounds.fields, result);
+            replaceWideGroupRow(ss, "RoundSettings", "RoundId", "DeckBalls", body.rounds.deckBalls, result);
         }
 
         return jsonResponse(result);

@@ -167,6 +167,7 @@ function normalizeRoundSettingsTable(table: ParsedTable): Round[] {
 
     const rulesColumn = findColumn(table.headers, ["RoundRules"]);
     const artefactColumn = findColumn(table.headers, ["AdditionalInvisibleArtefact"]);
+    const tempDeckColumn = findColumn(table.headers, ["TempDeck"]);
 
     // Papa.parse renames the sheet's repeated "DeckBalls" header to DeckBalls, DeckBalls_1, DeckBalls_2, ... —
     // sorted numerically (missing suffix = 0) same as normalizeUpgradeChainsTable's tier columns, in case column
@@ -183,6 +184,7 @@ function normalizeRoundSettingsTable(table: ParsedTable): Round[] {
                 id,
                 rules: rulesColumn ? row[rulesColumn]?.trim() || undefined : undefined,
                 invisibleArtefactId: artefactColumn ? row[artefactColumn]?.trim() || undefined : undefined,
+                tempDeckId: tempDeckColumn ? row[tempDeckColumn]?.trim() || undefined : undefined,
                 deckBalls: deckBallsColumns
                     .map((column) => row[column]?.trim())
                     .filter((value): value is string => Boolean(value)),

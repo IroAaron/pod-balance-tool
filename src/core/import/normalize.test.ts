@@ -93,6 +93,27 @@ describe("RoundSettings", () => {
         ]);
     });
 
+    it("extracts a non-blank TempDeck column into tempDeckId", () => {
+        const classified = classifyTable(
+            table([
+                {
+                    RoundId: "round_with_shop_deck",
+                    RoundRules: "",
+                    AdditionalInvisibleArtefact: "",
+                    TempDeck: "chel_start_deck",
+                    DeckBalls: "",
+                    DeckBalls_1: "",
+                    DeckBalls_2: "",
+                    DeckBalls_3: "",
+                },
+            ])
+        );
+
+        const { data } = normalizeClassifiedTables([classified]);
+
+        expect(data.rounds[0].tempDeckId).toBe("chel_start_deck");
+    });
+
     it("warns and yields no rounds when RoundId is missing entirely", () => {
         const classified = { type: "RoundSettings" as const, table: table([{ RoundRules: "Marathon" } as Record<string, string>]) };
         // Force-drop RoundId from headers to simulate a sheet that somehow lost its id column post-classification.

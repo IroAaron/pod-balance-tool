@@ -133,6 +133,15 @@ export interface ExportPayload {
      *  `Ball` columns as ONE row per group (see GameStore.exportDeckChanges's doc and the new
      *  `replaceWideGroupRow` Apps Script helper). An empty array for a DeckId means "delete this ball deck". */
     ballGroups?: Record<string, string[]>;
+
+    /** Rounds page edits (see GameStore.exportRoundChanges's doc) — `fields` upserts the ordinary one-column
+     *  RoundRules/AdditionalInvisibleArtefact/TempDeck cells by RoundId (same shape as `balls`); `deckBalls`
+     *  writes across RoundSettings' own repeated `DeckBalls` columns, reusing the same `replaceWideGroupRow`
+     *  helper built for `ballGroups`. No delete signal — rounds are never removed from the site. */
+    rounds?: {
+        fields: Record<string, Record<string, string>>;
+        deckBalls: Record<string, string[]>;
+    };
 }
 
 export interface ExportResult {

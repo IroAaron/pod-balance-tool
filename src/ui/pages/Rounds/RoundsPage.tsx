@@ -1,14 +1,47 @@
 import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { Box, Card, CardActionArea, CardContent, Stack, TextField, Typography } from "@mui/material";
+import {
+    Alert,
+    Box,
+    Button,
+    Card,
+    CardActionArea,
+    CardContent,
+    CircularProgress,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogContentText,
+    DialogTitle,
+    Stack,
+    TextField,
+    Typography,
+} from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
 import { roundAsItemStub } from "./roundAsItemStub";
+import type { ExportResult } from "../../../core/import/sheetSource";
 
 export default function RoundsPage() {
     const store = useStore();
     const [query, setQuery] = useState("");
+    const [confirmingExport, setConfirmingExport] = useState(false);
+    const [exporting, setExporting] = useState(false);
+    const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
+
+    const confirmExport = async () => {
+        setConfirmingExport(false);
+        setExporting(true);
+        setExportResult(null);
+        try {
+            setExportResult(await store.exportRoundChanges());
+        } catch (error) {
+            setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setExporting(false);
+        }
+    };
 
     const filtered = useMemo(() => {
         const trimmed = query.trim().toLowerCase();
@@ -28,7 +61,31 @@ export default function RoundsPage() {
 
     return (
         <Stack spacing={3}>
-            <Typography variant="h4">Раунды</Typography>
+            <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                <Typography variant="h4">Раунды</Typography>
+                <Button
+                    variant="contained"
+                    onClick={() => setConfirmingExport(true)}
+                    disabled={exporting || store.blueprintRoundPendingExportCount === 0}
+                    startIcon={exporting ? <CircularProgress size={16} /> : undefined}
+                >
+                    {exporting ? "Отправка..." : `Экспортировать раунды (${store.blueprintRoundPendingExportCount})`}
+                </Button>
+            </Stack>
+
+            {exportResult &&
+                (exportResult.ok ? (
+                    <Alert severity="success" onClose={() => setExportResult(null)}>
+                        Готово. Обновлено строк:{" "}
+                        {Object.entries(exportResult.updated ?? {})
+                            .map(([sheet, count]) => `${sheet} — ${count}`)
+                            .join(", ") || "0"}
+                    </Alert>
+                ) : (
+                    <Alert severity="error" onClose={() => setExportResult(null)}>
+                        {exportResult.error}
+                    </Alert>
+                ))}
 
             <TextField
                 label="Поиск"
@@ -103,6 +160,23 @@ export default function RoundsPage() {
                     Данных пока нет — загрузите их на странице «Источники».
                 </Typography>
             )}
+
+            <Dialog open={confirmingExport} onClose={() => setConfirmingExport(false)}>
+                <DialogTitle>Экспортировать раунды в Google Sheets?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Запишет изменения {store.blueprintRoundPendingExportCount} раунда(ов) обратно в реальную
+                        таблицу RoundSettings (RoundRules/AdditionalInvisibleArtefact/TempDeck/DeckBalls по колонке
+                        RoundId). Действие необратимо.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingExport(false)}>Отмена</Button>
+                    <Button color="error" onClick={() => void confirmExport()}>
+                        Экспортировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Stack>
     );
 }
