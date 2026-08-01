@@ -76,6 +76,9 @@ export interface BalanceSavePayload {
 
     /** Curated "Спец. раунд" values, see firestoreStore's subscribeSpecialRoundTypes. */
     specialRoundTypes: string[];
+
+    /** Site-only deck/ball-deck display names, keyed by deck id — see firestoreStore's SharedState.deckNames. */
+    deckNames: Record<string, string>;
 }
 
 /** Keys of BalanceSavePayload — each one is written/read as its own `parts/{key}` doc, see firestoreStore.ts. */
@@ -100,4 +103,5 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "glossary",
     "tagIcons",
     "specialRoundTypes",
+    "deckNames",
 ];

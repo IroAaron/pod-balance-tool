@@ -34,6 +34,9 @@ export interface PersistedState {
     /** Depth coefficients + balance constants — see BalancePage's "Константы" tab. */
     balanceConfig: BalanceConfig;
 
+    /** Site-only deck/ball-deck display names, keyed by deck id — see firestoreStore.ts's SharedState.deckNames. */
+    deckNames: Record<string, string>;
+
     importCache: NormalizedData | null;
 
     importCacheTimestamp: string | null;
@@ -48,6 +51,7 @@ const DEFAULT_STATE: PersistedState = {
     translationOverrides: {},
     exportedOverrides: {},
     balanceConfig: DEFAULT_BALANCE_CONFIG,
+    deckNames: {},
     importCache: null,
     importCacheTimestamp: null,
 };
@@ -142,6 +146,7 @@ export async function parseSnapshotFile(file: File): Promise<PersistedState> {
         translationOverrides: parsed.translationOverrides ?? DEFAULT_STATE.translationOverrides,
         exportedOverrides: parsed.exportedOverrides ?? DEFAULT_STATE.exportedOverrides,
         balanceConfig: parsed.balanceConfig ?? DEFAULT_STATE.balanceConfig,
+        deckNames: parsed.deckNames ?? DEFAULT_STATE.deckNames,
         importCache: parsed.importCache ?? null,
         importCacheTimestamp: parsed.importCacheTimestamp ?? null,
     };

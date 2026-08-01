@@ -50,6 +50,7 @@ import {
     linkBuildsRemote,
     unlinkBuildsRemote,
     updateItemIconRemote,
+    updateDeckNameRemote,
     addCustomParamValueRemote,
     updateSourceConfigUrlRemote,
     updateSourceTranslationsUrlRemote,
@@ -132,6 +133,10 @@ export class GameStore {
     builds: Build[] = [];
 
     itemIcons: Record<string, string> = {};
+
+    /** Site-only deck/ball-deck display names, keyed by deck id — pure editing convenience, NEVER exported to
+     *  Google Sheets. See setDeckName/getDeckName and firestoreStore's SharedState.deckNames. */
+    deckNames: Record<string, string> = {};
 
     customParamValues: Record<string, string[]> = {};
 
@@ -298,6 +303,7 @@ export class GameStore {
 
         subscribeShared((shared) => {
             this.itemIcons = shared.itemIcons;
+            this.deckNames = shared.deckNames;
             this.customParamValues = shared.customParamValues;
             this.sources = shared.sources;
             this.descriptionSettings = shared.descriptionSettings;
@@ -1492,6 +1498,21 @@ export class GameStore {
         void updateItemIconRemote(itemId, icon).catch((error) => console.error("setItemIcon → Firestore", error));
     }
 
+    getDeckName(deckId: string): string | undefined {
+        return this.deckNames[deckId];
+    }
+
+    /** Point-update, like setItemIcon — a display name for a Deck/DecksShop/BallGroup id, pure site-side
+     *  convenience never exported. Empty string clears the name entirely (see updateDeckNameRemote). */
+    setDeckName(deckId: string, name: string): void {
+        const trimmed = name.trim();
+        this.deckNames = trimmed
+            ? { ...this.deckNames, [deckId]: trimmed }
+            : Object.fromEntries(Object.entries(this.deckNames).filter(([id]) => id !== deckId));
+        this.notify();
+        void updateDeckNameRemote(deckId, trimmed).catch((error) => console.error("setDeckName → Firestore", error));
+    }
+
     addCustomParamValue(dimension: string, value: string): void {
         const trimmed = value.trim();
         if (!trimmed) return;
@@ -1566,6 +1587,7 @@ export class GameStore {
             glossary: this.glossary,
             tagIcons: this.tagIcons,
             specialRoundTypes: this.specialRoundTypes,
+            deckNames: this.deckNames,
         };
     }
 
@@ -1638,6 +1660,7 @@ export class GameStore {
                 translationOverrides: payload.translationOverrides,
                 exportedOverrides: payload.exportedOverrides,
                 balanceConfig: this.balanceConfig,
+                deckNames: payload.deckNames,
             }),
             replaceGlossaryRemote(payload.glossary),
             replaceTagIconsRemote(payload.tagIcons),
@@ -1655,6 +1678,7 @@ export class GameStore {
             translationOverrides: this.translationOverrides,
             exportedOverrides: this.exportedOverrides,
             balanceConfig: this.balanceConfig,
+            deckNames: this.deckNames,
             importCache: {
                 items: this.allItems,
                 translations: this.translations,
@@ -1686,6 +1710,7 @@ export class GameStore {
                 translationOverrides: state.translationOverrides,
                 exportedOverrides: state.exportedOverrides,
                 balanceConfig: state.balanceConfig,
+                deckNames: state.deckNames,
             }),
         ]);
 

@@ -14,6 +14,7 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useStore } from "../../hooks/useStore";
 import DeckEntryRow from "./DeckEntryRow";
+import DeckNameField from "./DeckNameField";
 import type { Deck, DeckEntry } from "../../../core/models/Deck";
 
 type Props = {
@@ -46,11 +47,17 @@ export default function DeckCard({ deck }: Props) {
     return (
         <Paper variant="outlined" sx={{ p: 2 }}>
             <Stack spacing={2}>
-                <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                         {deck.id}
                     </Typography>
-                    <IconButton aria-label="Удалить колоду" size="small" onClick={() => setConfirmingDelete(true)}>
+                    <DeckNameField deckId={deck.id} />
+                    <IconButton
+                        aria-label="Удалить колоду"
+                        size="small"
+                        onClick={() => setConfirmingDelete(true)}
+                        sx={{ ml: "auto" }}
+                    >
                         <DeleteIcon fontSize="small" />
                     </IconButton>
                 </Stack>

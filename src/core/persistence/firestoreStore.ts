@@ -48,6 +48,11 @@ export interface SharedState {
 
     /** Depth coefficients + balance constants — see BalancePage's "Константы" tab and domain/balance.ts. */
     balanceConfig: BalanceConfig;
+
+    /** Site-only display names for decks/ball decks (any of Decks/DecksShop/BallGroups), keyed by deck id — pure
+     *  editing convenience, NEVER exported to Google Sheets. Point-updated like itemIcons so it survives a config
+     *  re-import (a fresh Decks/BallGroups download fully replaces those arrays, but this side-map is untouched). */
+    deckNames: Record<string, string>;
 }
 
 const DEFAULT_SHARED: SharedState = {
@@ -58,6 +63,7 @@ const DEFAULT_SHARED: SharedState = {
     translationOverrides: {},
     exportedOverrides: {},
     balanceConfig: DEFAULT_BALANCE_CONFIG,
+    deckNames: {},
 };
 
 export interface LegacyLocalState {
@@ -162,6 +168,15 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         (error) => console.error("subscribeShared:balanceConfig", error)
     );
 
+    const unsubDeckNames = onSnapshot(
+        doc(sharedCol, "deckNames"),
+        (snapshot) => {
+            state.deckNames = (snapshot.data() as Record<string, string> | undefined) ?? {};
+            emit();
+        },
+        (error) => console.error("subscribeShared:deckNames", error)
+    );
+
     return () => {
         unsubIcons();
         unsubParamValues();
@@ -170,6 +185,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         unsubTranslationOverrides();
         unsubExportedOverrides();
         unsubBalanceConfig();
+        unsubDeckNames();
     };
 }
 
@@ -303,6 +319,12 @@ export function updateItemIconRemote(itemId: string, icon: string): Promise<void
     return upsertDocField(doc(sharedCol, "itemIcons"), itemId, icon);
 }
 
+/** Site-only deck display name — see SharedState.deckNames's doc. Passing "" deletes the field, same convention
+ *  as updateTranslationOverrideRemote. */
+export function updateDeckNameRemote(deckId: string, name: string): Promise<void> {
+    return upsertDocField(doc(sharedCol, "deckNames"), deckId, name || deleteField());
+}
+
 export function addCustomParamValueRemote(dimension: string, value: string): Promise<void> {
     return upsertDocField(doc(sharedCol, "customParamValues"), dimension, arrayUnion(value));
 }
@@ -351,6 +373,7 @@ export function replaceSharedState(shared: SharedState): Promise<void> {
     batch.set(doc(sharedCol, "translationOverrides"), shared.translationOverrides);
     batch.set(doc(sharedCol, "exportedOverrides"), shared.exportedOverrides);
     batch.set(doc(sharedCol, "balanceConfig"), shared.balanceConfig);
+    batch.set(doc(sharedCol, "deckNames"), shared.deckNames);
     return batch.commit();
 }
 
@@ -450,6 +473,7 @@ export async function fetchBalanceSavePayloadRemote(saveId: string): Promise<Bal
         glossary: (byKey.get("glossary") as BalanceSavePayload["glossary"])?.map(normalizeGlossaryEntry) ?? [],
         tagIcons: (byKey.get("tagIcons") as BalanceSavePayload["tagIcons"]) ?? [],
         specialRoundTypes: (byKey.get("specialRoundTypes") as BalanceSavePayload["specialRoundTypes"]) ?? [],
+        deckNames: (byKey.get("deckNames") as BalanceSavePayload["deckNames"]) ?? {},
     };
 }
 

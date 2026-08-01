@@ -6,6 +6,7 @@ import BallGroupCard from "./BallGroupCard";
 export default function BallGroupList() {
     const store = useStore();
     const [newGroupId, setNewGroupId] = useState("");
+    const [query, setQuery] = useState("");
 
     const trimmedNewId = newGroupId.trim();
     const alreadyExists = trimmedNewId !== "" && store.getBallGroup(trimmedNewId) !== undefined;
@@ -16,9 +17,18 @@ export default function BallGroupList() {
         setNewGroupId("");
     };
 
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = normalizedQuery
+        ? store.ballGroups.filter(
+              (group) =>
+                  group.id.toLowerCase().includes(normalizedQuery) ||
+                  (store.getDeckName(group.id) ?? "").toLowerCase().includes(normalizedQuery)
+          )
+        : store.ballGroups;
+
     return (
         <Stack spacing={2}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start", flexWrap: "wrap" }}>
                 <TextField
                     label="Id новой колоды шаров"
                     size="small"
@@ -33,12 +43,23 @@ export default function BallGroupList() {
                 <Button variant="contained" onClick={handleCreate} disabled={!trimmedNewId || alreadyExists}>
                     + Создать колоду шаров
                 </Button>
+                <TextField
+                    label="Поиск (id или название)"
+                    size="small"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    sx={{ minWidth: 240 }}
+                />
             </Stack>
 
             {store.ballGroups.length === 0 && <Typography color="text.secondary">Колод шаров пока нет.</Typography>}
 
+            {store.ballGroups.length > 0 && filtered.length === 0 && (
+                <Typography color="text.secondary">Ничего не найдено по этому запросу.</Typography>
+            )}
+
             <Stack spacing={2}>
-                {store.ballGroups.map((group) => (
+                {filtered.map((group) => (
                     <BallGroupCard key={group.id} group={group} />
                 ))}
             </Stack>

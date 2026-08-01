@@ -14,6 +14,7 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useStore } from "../../hooks/useStore";
 import BallGroupEntryRow from "./BallGroupEntryRow";
+import DeckNameField from "./DeckNameField";
 import type { BallGroup } from "../../../core/models/BallGroup";
 
 /** Real BallGroups.csv shape: DeckId + up to 7 repeated `Ball` columns — see replaceWideGroupRow's doc. */
@@ -46,11 +47,17 @@ export default function BallGroupCard({ group }: Props) {
     return (
         <Paper variant="outlined" sx={{ p: 2 }}>
             <Stack spacing={2}>
-                <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                         {group.id}
                     </Typography>
-                    <IconButton aria-label="Удалить колоду шаров" size="small" onClick={() => setConfirmingDelete(true)}>
+                    <DeckNameField deckId={group.id} />
+                    <IconButton
+                        aria-label="Удалить колоду шаров"
+                        size="small"
+                        onClick={() => setConfirmingDelete(true)}
+                        sx={{ ml: "auto" }}
+                    >
                         <DeleteIcon fontSize="small" />
                     </IconButton>
                 </Stack>
