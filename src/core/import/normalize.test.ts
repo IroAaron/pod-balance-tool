@@ -490,3 +490,192 @@ describe("BallGroups", () => {
         ]);
     });
 });
+
+describe("Sprints", () => {
+    // Real header shape: SprintId + 9 repeated "RoundSettings" columns, renamed by Papa.parse to RoundSettings,
+    // RoundSettings_1..RoundSettings_8. PacksDeck/Shops are real columns too but confirmed out of scope with the
+    // user — deliberately included here to prove they're never read into the model.
+    const headers = [
+        "SprintId",
+        "RoundNumber",
+        "Quota",
+        "Stage",
+        "RewardTickerts",
+        "RewardTicketsPerBall",
+        "RewardPack",
+        "HousesInShop",
+        "Shops",
+        "PackDeckStart",
+        "PacksDeck",
+        "RoundSettings",
+        "RoundSettings_1",
+        "RoundSettings_2",
+        "RoundSettings_3",
+        "RoundSettings_4",
+        "RoundSettings_5",
+        "RoundSettings_6",
+        "RoundSettings_7",
+        "RoundSettings_8",
+    ];
+
+    function table(rows: Record<string, string>[]): ParsedTable {
+        return { sourceName: "Sprints", headers, rows };
+    }
+
+    it("classifies a SprintId-headered sheet as Sprints", () => {
+        expect(classifyTable(table([])).type).toBe("Sprints");
+    });
+
+    it("groups rows by SprintId, sorts by RoundNumber regardless of row order, and never reads PacksDeck/Shops", () => {
+        // Fed out of order (RoundNumber 3 before 1) to prove the sort-by-RoundNumber step actually runs.
+        const classified = classifyTable(
+            table([
+                {
+                    SprintId: "main_sprint",
+                    RoundNumber: "3",
+                    Quota: "1000",
+                    Stage: "1",
+                    RewardTickerts: "10",
+                    RewardTicketsPerBall: "10",
+                    RewardPack: "artefact_pack",
+                    HousesInShop: "shop_houses1_2",
+                    Shops: "shop_3",
+                    PackDeckStart: "start_field_fill_pack",
+                    PacksDeck: "field_fill_1",
+                    RoundSettings: "round_one_ball_mult_speed",
+                    RoundSettings_1: "round_black_white_0",
+                    RoundSettings_2: "",
+                    RoundSettings_3: "",
+                    RoundSettings_4: "",
+                    RoundSettings_5: "",
+                    RoundSettings_6: "",
+                    RoundSettings_7: "",
+                    RoundSettings_8: "",
+                },
+                {
+                    SprintId: "main_sprint",
+                    RoundNumber: "1",
+                    Quota: "200",
+                    Stage: "1",
+                    RewardTickerts: "10",
+                    RewardTicketsPerBall: "10",
+                    RewardPack: "",
+                    HousesInShop: "shop_houses1_0",
+                    Shops: "shop_1",
+                    PackDeckStart: "start_field_fill_pack",
+                    PacksDeck: "field_fill_start",
+                    RoundSettings: "standart_in_a_activate_all_top_per_loop",
+                    RoundSettings_1: "standart_in_a_activate_all_left_per_loop",
+                    RoundSettings_2: "standart_in_a_money_for_kill_chel_up_side",
+                    RoundSettings_3: "standart_in_a_money_for_kill_chel_right_side",
+                    RoundSettings_4: "standart_in_a_money_for_kill_chel_bottom_side",
+                    RoundSettings_5: "standart_in_a_money_for_kill_chel_left_side",
+                    RoundSettings_6: "standart_in_a_activate_angle_chels_for_ball_stop",
+                    RoundSettings_7: "standart_in_a_value_to_angle_chels_for_activate_angle_chel",
+                    RoundSettings_8: "",
+                },
+            ])
+        );
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(warnings).toEqual([]);
+        expect(data.sprints).toHaveLength(1);
+        const sprint = data.sprints[0];
+        expect(sprint.id).toBe("main_sprint");
+        expect(sprint.rounds).toHaveLength(2);
+
+        // RoundNumber 1 sorted first despite arriving second in the input.
+        expect(sprint.rounds[0]).toEqual({
+            id: sprint.rounds[0].id,
+            quota: 200,
+            stage: 1,
+            rewardTickets: 10,
+            rewardTicketsPerBall: 10,
+            rewardPackId: undefined,
+            housesInShopPackId: "shop_houses1_0",
+            packDeckStartId: "start_field_fill_pack",
+            roundIds: [
+                "standart_in_a_activate_all_top_per_loop",
+                "standart_in_a_activate_all_left_per_loop",
+                "standart_in_a_money_for_kill_chel_up_side",
+                "standart_in_a_money_for_kill_chel_right_side",
+                "standart_in_a_money_for_kill_chel_bottom_side",
+                "standart_in_a_money_for_kill_chel_left_side",
+                "standart_in_a_activate_angle_chels_for_ball_stop",
+                "standart_in_a_value_to_angle_chels_for_activate_angle_chel",
+            ],
+        });
+
+        expect(sprint.rounds[1]).toEqual({
+            id: sprint.rounds[1].id,
+            quota: 1000,
+            stage: 1,
+            rewardTickets: 10,
+            rewardTicketsPerBall: 10,
+            rewardPackId: "artefact_pack",
+            housesInShopPackId: "shop_houses1_2",
+            packDeckStartId: "start_field_fill_pack",
+            roundIds: ["round_one_ball_mult_speed", "round_black_white_0"],
+        });
+
+        // PacksDeck ("field_fill_1"/"field_fill_start") and Shops ("shop_1"/"shop_3") values never surface anywhere.
+        const serialized = JSON.stringify(data.sprints);
+        expect(serialized).not.toContain("field_fill_1");
+        expect(serialized).not.toContain("field_fill_start");
+        expect(serialized).not.toContain("shop_1\"");
+        expect(serialized).not.toContain("shop_3");
+    });
+
+    it("preserves a round id that repeats within one row's RoundSettings pool (confirmed real data, not deduped)", () => {
+        const classified = classifyTable(
+            table([
+                {
+                    SprintId: "main_sprint",
+                    RoundNumber: "8",
+                    Quota: "7000",
+                    Stage: "2",
+                    RewardTickerts: "10",
+                    RewardTicketsPerBall: "10",
+                    RewardPack: "",
+                    HousesInShop: "shop_houses1_2",
+                    Shops: "shop_4",
+                    PackDeckStart: "start_field_fill_pack",
+                    PacksDeck: "field_fill_2",
+                    RoundSettings: "standart_in_a_money_for_bandits",
+                    RoundSettings_1: "standart_in_a_money_for_blue",
+                    RoundSettings_2: "standart_in_a_left_green_houses_plus_value_for_start_spin",
+                    RoundSettings_3: "standart_in_a_left_green_houses_plus_value_for_start_spin",
+                    RoundSettings_4: "standart_in_a_activate_angle_chels_for_ball_stop",
+                    RoundSettings_5: "standart_in_a_value_to_angle_chels_for_activate_angle_chel",
+                    RoundSettings_6: "",
+                    RoundSettings_7: "",
+                    RoundSettings_8: "",
+                },
+            ])
+        );
+
+        const { data } = normalizeClassifiedTables([classified]);
+
+        expect(data.sprints[0].rounds[0].roundIds).toEqual([
+            "standart_in_a_money_for_bandits",
+            "standart_in_a_money_for_blue",
+            "standart_in_a_left_green_houses_plus_value_for_start_spin",
+            "standart_in_a_left_green_houses_plus_value_for_start_spin",
+            "standart_in_a_activate_angle_chels_for_ball_stop",
+            "standart_in_a_value_to_angle_chels_for_activate_angle_chel",
+        ]);
+    });
+
+    it("warns and yields no sprints when SprintId column is missing", () => {
+        const classified = { type: "Sprints" as const, table: table([{ RoundNumber: "1" } as Record<string, string>]) };
+        classified.table.headers = classified.table.headers.filter((h) => h !== "SprintId");
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(data.sprints).toEqual([]);
+        expect(warnings).toEqual([
+            { sourceName: "Sprints", message: "Не найдена колонка SprintId — таблица забегов пропущена" },
+        ]);
+    });
+});

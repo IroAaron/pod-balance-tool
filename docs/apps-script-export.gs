@@ -48,6 +48,12 @@
 //         [roundId: string]: string[],                // across every repeated `DeckBalls` column
 //       },
 //     },
+//     sprints?: {                                    // Sprints page — REPLACES every row for a given SprintId
+//       [sprintId: string]: {
+//         columns: { [column: string]: string },       // ordinary one-column fields, incl. a fresh RoundNumber
+//         repeatedValues: string[],                     // written across every repeated `RoundSettings` column
+//       }[],                                           // one entry per row/round, in order. Empty array deletes.
+//     },
 //   }
 // `items`/`newMechanicRows` only ever write columns present in the payload — a column the site doesn't model
 // (sprite names, unrelated flags, etc.) is left exactly as it already was in the sheet.
@@ -110,6 +116,14 @@ function doPost(e) {
         if (body.rounds) {
             result.updated.RoundSettings = upsertFullRows(ss, "RoundSettings", "RoundId", body.rounds.fields, result);
             replaceWideGroupRow(ss, "RoundSettings", "RoundId", "DeckBalls", body.rounds.deckBalls, result);
+        }
+
+        // Sprints mixes both group-replace shapes on the same row (ordinary columns AND a repeated column) —
+        // neither replaceRowsByGroupId nor replaceWideGroupRow alone fits, see the combined helper below.
+        if (body.sprints) {
+            result.updated.Sprints = replaceRowsByGroupIdWithRepeatedColumn(
+                ss, "Sprints", "SprintId", "RoundSettings", body.sprints, result
+            );
         }
 
         return jsonResponse(result);
@@ -389,6 +403,90 @@ function replaceWideGroupRow(spreadsheet, sheetName, groupIdColumnName, repeated
             }
         }
         touched++;
+    }
+
+    return touched;
+}
+
+// Sprints page export: `rowsByGroupId` is { [groupId]: { columns: {...}, repeatedValues: string[] }[] } — combines
+// replaceRowsByGroupId's technique (delete every existing row for a groupId, then append the fresh row set) with
+// replaceWideGroupRow's technique (spread values across every column sharing a repeated name), because Sprints
+// needs BOTH shapes on the SAME row: ordinary one-column fields (Quota/Stage/RewardTickerts/...) written by name
+// lookup, AND the sheet's own repeated `RoundSettings` columns (the round-id pool) written by index-scan. Each
+// new row gets groupIdColumnName set automatically, its `columns` written by header-name lookup (unknown column
+// names are skipped with a warning, same as replaceRowsByGroupId), and its `repeatedValues` spread across every
+// column index sharing repeatedColumnName's exact name (blanking any slot beyond the provided values). An empty
+// array for a groupId deletes that group's rows with nothing added back, same delete-signal convention as every
+// other group-replace helper here.
+function replaceRowsByGroupIdWithRepeatedColumn(spreadsheet, sheetName, groupIdColumnName, repeatedColumnName, rowsByGroupId, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var header = sheet.getDataRange().getValues()[0];
+    var groupIdCol = header.indexOf(groupIdColumnName);
+    if (groupIdCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + groupIdColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var repeatedCols = [];
+    for (var h = 0; h < header.length; h++) {
+        if (header[h] === repeatedColumnName) {
+            repeatedCols.push(h);
+        }
+    }
+    if (repeatedCols.length === 0) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + repeatedColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var touched = 0;
+
+    for (var groupId in rowsByGroupId) {
+        // Re-read fresh data/row numbers each iteration — earlier deletions in this same loop shift every row
+        // below them, so a row-number map built once at the top would go stale after the first delete.
+        var data = sheet.getDataRange().getValues();
+        var rowsToDelete = [];
+        for (var i = 1; i < data.length; i++) {
+            if (data[i][groupIdCol] === groupId) {
+                rowsToDelete.push(i + 1); // +1: sheet rows are 1-indexed, data[] is 0-indexed
+            }
+        }
+        rowsToDelete.sort(function (a, b) { return b - a; });
+        for (var d = 0; d < rowsToDelete.length; d++) {
+            sheet.deleteRow(rowsToDelete[d]);
+        }
+
+        var newRows = rowsByGroupId[groupId];
+        for (var r = 0; r < newRows.length; r++) {
+            var newRow = new Array(header.length).fill("");
+            newRow[groupIdCol] = groupId;
+
+            var columns = newRows[r].columns;
+            for (var colName in columns) {
+                var colIndex = header.indexOf(colName);
+                if (colIndex === -1) {
+                    result.errors = result.errors || [];
+                    result.errors.push(sheetName + ": unknown column '" + colName + "', skipped for " + groupId);
+                    continue;
+                }
+                newRow[colIndex] = columns[colName];
+            }
+
+            var values = newRows[r].repeatedValues;
+            for (var c = 0; c < repeatedCols.length; c++) {
+                newRow[repeatedCols[c]] = c < values.length ? values[c] : "";
+            }
+
+            sheet.appendRow(newRow);
+        }
+        touched += newRows.length;
     }
 
     return touched;

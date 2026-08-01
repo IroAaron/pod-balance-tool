@@ -9,6 +9,7 @@ import type { Deck, DeckEntry, DeckSource } from "../models/Deck";
 import type { Pack, PackSourceEntry } from "../models/Pack";
 import type { Ball } from "../models/Ball";
 import type { BallGroup } from "../models/BallGroup";
+import type { Sprint, SprintRound } from "../models/Sprint";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
 import { tableNameOf } from "./tableNames";
 
@@ -30,6 +31,8 @@ export interface NormalizedData {
     balls: Ball[];
 
     ballGroups: BallGroup[];
+
+    sprints: Sprint[];
 
     replaceRules: ReplaceRule[];
 
@@ -351,6 +354,74 @@ function normalizeBallGroupsTable(table: ParsedTable): BallGroup[] {
         }));
 }
 
+/**
+ * Sprints combines both shapes above: narrow row-per-(SprintId, RoundNumber) entry, like Decks/Packs (grouped by
+ * SprintId, one array entry per row), AND each row has its own wide repeated `RoundSettings` columns (up to 9,
+ * literally same-named in the real sheet), like BallGroups' `Ball` columns — just harvested per-row instead of
+ * once-per-group. `RoundNumber` itself is read only to SORT each group's rows into the right order, then
+ * discarded — confirmed with the user it's purely derived from row position ("автоматически подставляется"), so
+ * from here on array order alone is the source of truth (see Sprint.rounds' doc). `PacksDeck`/`Shops` columns are
+ * real but confirmed out of scope with the user — deliberately never looked up here.
+ */
+function normalizeSprintsTable(table: ParsedTable): Sprint[] {
+    const sprintIdColumn = findColumn(table.headers, ["SprintId"]);
+    if (!sprintIdColumn) return [];
+
+    const roundNumberColumn = findColumn(table.headers, ["RoundNumber"]);
+    const quotaColumn = findColumn(table.headers, ["Quota"]);
+    const stageColumn = findColumn(table.headers, ["Stage"]);
+    const rewardTicketsColumn = findColumn(table.headers, ["RewardTickerts"]);
+    const rewardTicketsPerBallColumn = findColumn(table.headers, ["RewardTicketsPerBall"]);
+    const rewardPackColumn = findColumn(table.headers, ["RewardPack"]);
+    const housesInShopColumn = findColumn(table.headers, ["HousesInShop"]);
+    const packDeckStartColumn = findColumn(table.headers, ["PackDeckStart"]);
+
+    const roundSettingsColumns = table.headers
+        .filter((header) => /^RoundSettings(_\d+)?$/i.test(header.trim()))
+        .sort((a, b) => numericSuffix(a) - numericSuffix(b));
+
+    const order: string[] = [];
+    const roundsBySprintId = new Map<string, { round: SprintRound; roundNumber: number }[]>();
+    let entrySeq = 0;
+
+    for (const row of table.rows) {
+        const sprintId = (row[sprintIdColumn] ?? "").trim();
+        if (!sprintId) continue;
+
+        if (!roundsBySprintId.has(sprintId)) {
+            roundsBySprintId.set(sprintId, []);
+            order.push(sprintId);
+        }
+
+        const round: SprintRound = {
+            id: `Sprints:${sprintId}:${entrySeq++}`,
+            quota: quotaColumn ? parseOptionalNumber(row[quotaColumn]) : undefined,
+            stage: stageColumn ? parseOptionalNumber(row[stageColumn]) : undefined,
+            rewardTickets: rewardTicketsColumn ? parseOptionalNumber(row[rewardTicketsColumn]) : undefined,
+            rewardTicketsPerBall: rewardTicketsPerBallColumn
+                ? parseOptionalNumber(row[rewardTicketsPerBallColumn])
+                : undefined,
+            rewardPackId: rewardPackColumn ? row[rewardPackColumn]?.trim() || undefined : undefined,
+            housesInShopPackId: housesInShopColumn ? row[housesInShopColumn]?.trim() || undefined : undefined,
+            packDeckStartId: packDeckStartColumn ? row[packDeckStartColumn]?.trim() || undefined : undefined,
+            roundIds: roundSettingsColumns
+                .map((column) => row[column]?.trim())
+                .filter((value): value is string => Boolean(value)),
+        };
+
+        const roundNumber = roundNumberColumn ? (parseOptionalNumber(row[roundNumberColumn]) ?? 0) : 0;
+        roundsBySprintId.get(sprintId)!.push({ round, roundNumber });
+    }
+
+    return order.map((id) => ({
+        id,
+        rounds: roundsBySprintId
+            .get(id)!
+            .sort((a, b) => a.roundNumber - b.roundNumber)
+            .map((entry) => entry.round),
+    }));
+}
+
 function normalizeMechanicTable(table: ParsedTable, type: MechanicTableName): MechanicRow[] {
     const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
     if (!idColumn) return [];
@@ -444,6 +515,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const packs: Pack[] = [];
     const balls: Ball[] = [];
     const ballGroups: BallGroup[] = [];
+    const sprints: Sprint[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -521,6 +593,15 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             ballGroups.push(...normalized);
+        } else if (type === "Sprints") {
+            const normalized = normalizeSprintsTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдена колонка SprintId — таблица забегов пропущена",
+                });
+            }
+            sprints.push(...normalized);
         } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
             const normalized = normalizeReplaceRuleTable(table, type);
             if (normalized.length === 0) {
@@ -574,6 +655,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             packs,
             balls,
             ballGroups,
+            sprints,
             replaceRules,
             enumValues,
         },

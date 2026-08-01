@@ -142,6 +142,14 @@ export interface ExportPayload {
         fields: Record<string, Record<string, string>>;
         deckBalls: Record<string, string[]>;
     };
+
+    /** Sprints page edits (see GameStore.exportSprintChanges's doc) — SprintId -> full row set for that sprint,
+     *  same replace-by-group-id shape as `decks`/`packs`, except each row ALSO carries `repeatedValues` written
+     *  across the sheet's own repeated `RoundSettings` columns (same technique as `ballGroups`/`rounds.deckBalls`,
+     *  combined onto one row via the new `replaceRowsByGroupIdWithRepeatedColumn` Apps Script helper). `columns`
+     *  includes a freshly-computed `RoundNumber` (1-indexed row position) on every row. An empty array for a
+     *  SprintId means "delete this sprint". */
+    sprints?: Record<string, { columns: Record<string, string>; repeatedValues: string[] }[]>;
 }
 
 export interface ExportResult {

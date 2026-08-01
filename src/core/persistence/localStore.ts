@@ -37,6 +37,9 @@ export interface PersistedState {
     /** Site-only deck/ball-deck display names, keyed by deck id — see firestoreStore.ts's SharedState.deckNames. */
     deckNames: Record<string, string>;
 
+    /** Site-only sprint stage-count overrides — see firestoreStore.ts's SharedState.sprintStageCounts. */
+    sprintStageCounts: Record<string, number>;
+
     importCache: NormalizedData | null;
 
     importCacheTimestamp: string | null;
@@ -52,6 +55,7 @@ const DEFAULT_STATE: PersistedState = {
     exportedOverrides: {},
     balanceConfig: DEFAULT_BALANCE_CONFIG,
     deckNames: {},
+    sprintStageCounts: {},
     importCache: null,
     importCacheTimestamp: null,
 };
@@ -147,6 +151,7 @@ export async function parseSnapshotFile(file: File): Promise<PersistedState> {
         exportedOverrides: parsed.exportedOverrides ?? DEFAULT_STATE.exportedOverrides,
         balanceConfig: parsed.balanceConfig ?? DEFAULT_STATE.balanceConfig,
         deckNames: parsed.deckNames ?? DEFAULT_STATE.deckNames,
+        sprintStageCounts: parsed.sprintStageCounts ?? DEFAULT_STATE.sprintStageCounts,
         importCache: parsed.importCache ?? null,
         importCacheTimestamp: parsed.importCacheTimestamp ?? null,
     };

@@ -31,6 +31,7 @@ export const menu: NavigationMenuEntry[] = [
             { text: "Колоды", path: "/decks", icon: "🎴" },
             { text: "Паки", path: "/packs", icon: "🎁" },
             { text: "Шары", path: "/balls", icon: "🎱" },
+            { text: "Забеги", path: "/sprints", icon: "🏃" },
         ],
     },
     {

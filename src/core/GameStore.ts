@@ -8,6 +8,7 @@ import type { Deck, DeckSource } from "./models/Deck";
 import type { Pack, PackSourceEntry } from "./models/Pack";
 import type { Ball } from "./models/Ball";
 import type { BallGroup } from "./models/BallGroup";
+import type { Sprint } from "./models/Sprint";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
@@ -51,6 +52,7 @@ import {
     unlinkBuildsRemote,
     updateItemIconRemote,
     updateDeckNameRemote,
+    updateSprintStageCountRemote,
     addCustomParamValueRemote,
     updateSourceConfigUrlRemote,
     updateSourceTranslationsUrlRemote,
@@ -125,6 +127,8 @@ export class GameStore {
 
     ballGroups: BallGroup[] = [];
 
+    sprints: Sprint[] = [];
+
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
@@ -137,6 +141,10 @@ export class GameStore {
     /** Site-only deck/ball-deck display names, keyed by deck id — pure editing convenience, NEVER exported to
      *  Google Sheets. See setDeckName/getDeckName and firestoreStore's SharedState.deckNames. */
     deckNames: Record<string, string> = {};
+
+    /** Site-only sprint stage-count overrides, keyed by sprint id — see getSprintStageCount/setSprintStageCount
+     *  and firestoreStore's SharedState.sprintStageCounts. */
+    sprintStageCounts: Record<string, number> = {};
 
     customParamValues: Record<string, string[]> = {};
 
@@ -199,6 +207,14 @@ export class GameStore {
 
     /** Ball ids removed via deleteBall since the last successful exportBallChanges(). */
     blueprintDeletedBallIds: Set<string> = new Set();
+
+    /** Sprint ids created/edited via upsertSprint (Sprints page) since the last successful exportSprintChanges() —
+     *  same in-memory-only framing as Pack/Deck/Ball above. Independent export flow/button. */
+    blueprintDirtySprintIds: Set<string> = new Set();
+
+    /** Sprint ids removed via deleteSprint — simple Set like blueprintDeletedPackIds/BallIds (only one target
+     *  sheet, no source-table lookup needed). */
+    blueprintDeletedSprintIds: Set<string> = new Set();
 
     /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
@@ -279,6 +295,7 @@ export class GameStore {
             this.packs = cache.importCache.packs ?? [];
             this.balls = cache.importCache.balls ?? [];
             this.ballGroups = cache.importCache.ballGroups ?? [];
+            this.sprints = cache.importCache.sprints ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
         }
@@ -304,6 +321,7 @@ export class GameStore {
         subscribeShared((shared) => {
             this.itemIcons = shared.itemIcons;
             this.deckNames = shared.deckNames;
+            this.sprintStageCounts = shared.sprintStageCounts;
             this.customParamValues = shared.customParamValues;
             this.sources = shared.sources;
             this.descriptionSettings = shared.descriptionSettings;
@@ -384,6 +402,10 @@ export class GameStore {
 
     getBallGroup(id: string): BallGroup | undefined {
         return this.ballGroups.find((group) => group.id === id);
+    }
+
+    getSprint(id: string): Sprint | undefined {
+        return this.sprints.find((sprint) => sprint.id === id);
     }
 
     /**
@@ -540,6 +562,30 @@ export class GameStore {
         this.blueprintDeletedBallIds.add(id);
         this.blueprintDirtyBallIds.delete(id);
         this.balls = this.balls.filter((ball) => ball.id !== id);
+        this.notify();
+    }
+
+    /** Full-replace upsert for a whole sprint (Sprints page) — same convention as upsertPack/upsertBall. Round-
+     *  entry-level edits (add/remove/move-between-stages) all go through this one call with the whole `rounds`
+     *  array replaced, same "whole-array replace from the card" pattern as DeckCard.updateEntries. */
+    upsertSprint(sprint: Sprint): void {
+        this.sprints = mergeById(this.sprints, [sprint]);
+        this.blueprintDirtySprintIds.add(sprint.id);
+        this.blueprintDeletedSprintIds.delete(sprint.id);
+        this.notify();
+    }
+
+    createSprint(id: string): void {
+        const trimmedId = id.trim();
+        if (!trimmedId || this.getSprint(trimmedId)) return;
+        this.upsertSprint({ id: trimmedId, rounds: [] });
+    }
+
+    deleteSprint(id: string): void {
+        if (!this.getSprint(id)) return;
+        this.blueprintDeletedSprintIds.add(id);
+        this.blueprintDirtySprintIds.delete(id);
+        this.sprints = this.sprints.filter((sprint) => sprint.id !== id);
         this.notify();
     }
 
@@ -1166,6 +1212,67 @@ export class GameStore {
         return result;
     }
 
+    /** How many Sprints-page edits haven't been sent yet — see exportSprintChanges(). */
+    get blueprintSprintPendingExportCount(): number {
+        return this.blueprintDirtySprintIds.size + this.blueprintDeletedSprintIds.size;
+    }
+
+    /**
+     * Sends Sprints-page edits to the same Apps Script `doPost` endpoint, reusing the `decks`/`packs` replace-by-
+     * group-id shape — but Sprints uniquely needs BOTH that shape AND the repeated-column-spreading shape
+     * `ballGroups`/`rounds.deckBalls` use, on the SAME row: each row has ordinary one-column fields (Quota/Stage/
+     * RewardTickerts/RewardTicketsPerBall/RewardPack/HousesInShop/PackDeckStart) plus the sheet's own repeated
+     * `RoundSettings` columns (the round-id pool). Neither `replaceRowsByGroupId` nor `replaceWideGroupRow` alone
+     * fits, so this uses the new `replaceRowsByGroupIdWithRepeatedColumn` helper (docs/apps-script-export.gs),
+     * which combines both.
+     *
+     * `RoundNumber` is never stored on `SprintRound` (see Sprint.ts's doc) — it's computed here, fresh, from each
+     * round's position in the array, since array order IS the order the user arranged via the stage board.
+     */
+    async exportSprintChanges(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.configUrl) {
+            throw new Error("Не задан источник конфигурации на странице «Источники»");
+        }
+
+        const sprints: NonNullable<Parameters<typeof postExportPayload>[1]["sprints"]> = {};
+
+        for (const sprintId of this.blueprintDirtySprintIds) {
+            const sprint = this.getSprint(sprintId);
+            if (!sprint) continue;
+            sprints[sprint.id] = sprint.rounds.map((round, index) => ({
+                columns: {
+                    RoundNumber: String(index + 1),
+                    Quota: round.quota?.toString() ?? "",
+                    Stage: round.stage?.toString() ?? "",
+                    RewardTickerts: round.rewardTickets?.toString() ?? "",
+                    RewardTicketsPerBall: round.rewardTicketsPerBall?.toString() ?? "",
+                    RewardPack: round.rewardPackId ?? "",
+                    HousesInShop: round.housesInShopPackId ?? "",
+                    PackDeckStart: round.packDeckStartId ?? "",
+                },
+                repeatedValues: round.roundIds,
+            }));
+        }
+
+        for (const sprintId of this.blueprintDeletedSprintIds) {
+            sprints[sprintId] = [];
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, sprints });
+
+        if (result.ok) {
+            this.blueprintDirtySprintIds = new Set();
+            this.blueprintDeletedSprintIds = new Set();
+            this.notify();
+        }
+
+        return result;
+    }
+
     itemName(item: Item): string {
         return this.getTranslation(item.nameKey) ?? item.nameKey ?? item.id;
     }
@@ -1258,6 +1365,7 @@ export class GameStore {
             this.packs = mergeById(this.packs, result.data.packs);
             this.balls = mergeById(this.balls, result.data.balls);
             this.ballGroups = mergeById(this.ballGroups, result.data.ballGroups);
+            this.sprints = mergeById(this.sprints, result.data.sprints);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
@@ -1270,6 +1378,7 @@ export class GameStore {
                 this.packs = result.data.packs;
                 this.balls = result.data.balls;
                 this.ballGroups = result.data.ballGroups;
+                this.sprints = result.data.sprints;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
             }
@@ -1291,6 +1400,7 @@ export class GameStore {
             packs: this.packs,
             balls: this.balls,
             ballGroups: this.ballGroups,
+            sprints: this.sprints,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
         });
@@ -1342,7 +1452,7 @@ export class GameStore {
 
     /**
      * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, rounds, decks, packs,
-     * balls, ballGroups, replaceRules, enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
+     * balls, ballGroups, sprints, replaceRules, enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
      * untouched. Exists specifically because CSV uploads always merge by id (`importCsvFiles` above) and never
      * remove anything missing from a new file, so an item deleted from the source spreadsheet lingers on the site
      * forever unless the whole cache is cleared first. After clearing, the next CSV upload or "Скачать
@@ -1358,6 +1468,7 @@ export class GameStore {
         this.packs = [];
         this.balls = [];
         this.ballGroups = [];
+        this.sprints = [];
         this.replaceRules = [];
         this.enumValues = {};
         this.rebuildDerivedCaches();
@@ -1513,6 +1624,26 @@ export class GameStore {
         void updateDeckNameRemote(deckId, trimmed).catch((error) => console.error("setDeckName → Firestore", error));
     }
 
+    /** Effective number of stage columns the SprintDetailPage board shows — the stored override (defaulting to 1)
+     *  widened to fit every real Stage value already present, so real data is never hidden even if the override
+     *  is stale (e.g. a round was pushed into a higher stage from elsewhere and the override was never bumped). */
+    getSprintStageCount(sprintId: string): number {
+        const stored = this.sprintStageCounts[sprintId] ?? 1;
+        const sprint = this.getSprint(sprintId);
+        const highestRealStage = sprint ? Math.max(1, ...sprint.rounds.map((round) => round.stage ?? 1)) : 1;
+        return Math.max(stored, highestRealStage);
+    }
+
+    /** Point-update, like setDeckName — a site-only "how many stage columns to show" override, never exported
+     *  (there's no MaxStages column in the real sheet). */
+    setSprintStageCount(sprintId: string, count: number): void {
+        this.sprintStageCounts = { ...this.sprintStageCounts, [sprintId]: count };
+        this.notify();
+        void updateSprintStageCountRemote(sprintId, count).catch((error) =>
+            console.error("setSprintStageCount → Firestore", error)
+        );
+    }
+
     addCustomParamValue(dimension: string, value: string): void {
         const trimmed = value.trim();
         if (!trimmed) return;
@@ -1576,6 +1707,7 @@ export class GameStore {
             packs: this.packs,
             balls: this.balls,
             ballGroups: this.ballGroups,
+            sprints: this.sprints,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
             builds: this.builds,
@@ -1588,6 +1720,7 @@ export class GameStore {
             tagIcons: this.tagIcons,
             specialRoundTypes: this.specialRoundTypes,
             deckNames: this.deckNames,
+            sprintStageCounts: this.sprintStageCounts,
         };
     }
 
@@ -1629,6 +1762,7 @@ export class GameStore {
         this.packs = payload.packs;
         this.balls = payload.balls;
         this.ballGroups = payload.ballGroups;
+        this.sprints = payload.sprints;
         this.replaceRules = payload.replaceRules;
         this.enumValues = payload.enumValues;
         this.rebuildDerivedCaches();
@@ -1643,6 +1777,7 @@ export class GameStore {
             packs: payload.packs,
             balls: payload.balls,
             ballGroups: payload.ballGroups,
+            sprints: payload.sprints,
             replaceRules: payload.replaceRules,
             enumValues: payload.enumValues,
         });
@@ -1661,6 +1796,7 @@ export class GameStore {
                 exportedOverrides: payload.exportedOverrides,
                 balanceConfig: this.balanceConfig,
                 deckNames: payload.deckNames,
+                sprintStageCounts: payload.sprintStageCounts,
             }),
             replaceGlossaryRemote(payload.glossary),
             replaceTagIconsRemote(payload.tagIcons),
@@ -1679,6 +1815,7 @@ export class GameStore {
             exportedOverrides: this.exportedOverrides,
             balanceConfig: this.balanceConfig,
             deckNames: this.deckNames,
+            sprintStageCounts: this.sprintStageCounts,
             importCache: {
                 items: this.allItems,
                 translations: this.translations,
@@ -1689,6 +1826,7 @@ export class GameStore {
                 packs: this.packs,
                 balls: this.balls,
                 ballGroups: this.ballGroups,
+                sprints: this.sprints,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
             },
@@ -1711,6 +1849,7 @@ export class GameStore {
                 exportedOverrides: state.exportedOverrides,
                 balanceConfig: state.balanceConfig,
                 deckNames: state.deckNames,
+                sprintStageCounts: state.sprintStageCounts,
             }),
         ]);
 
@@ -1725,6 +1864,7 @@ export class GameStore {
             this.packs = state.importCache.packs ?? [];
             this.balls = state.importCache.balls ?? [];
             this.ballGroups = state.importCache.ballGroups ?? [];
+            this.sprints = state.importCache.sprints ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);
