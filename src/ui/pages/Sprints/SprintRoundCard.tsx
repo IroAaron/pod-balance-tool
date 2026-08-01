@@ -1,6 +1,7 @@
 import { memo, useState, type DragEvent } from "react";
 import {
     Autocomplete,
+    Box,
     Chip,
     IconButton,
     MenuItem,
@@ -141,119 +142,126 @@ const SprintRoundCard = memo(function SprintRoundCard({
     };
 
     return (
-        <Paper
-            variant="outlined"
-            draggable
-            data-stage={stage}
-            data-index={index}
-            onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                onDragStart(round.id);
-            }}
-            onDragOver={onDragOver}
-            onDragEnd={onDragEnd}
-            sx={{
-                p: 2,
-                cursor: "grab",
-                opacity: isDragging ? 0.4 : 1,
-                pointerEvents: isDragging ? "none" : "auto",
-            }}
-        >
-            <Stack spacing={1.5}>
-                <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                    <DragIndicatorIcon fontSize="small" color="disabled" />
-                    <Select
-                        size="small"
-                        value={round.stage ?? 1}
-                        onChange={(event) => onCommit(round.id, { stage: Number(event.target.value) })}
-                        sx={{ minWidth: 110 }}
-                    >
-                        {Array.from({ length: stageCount }, (_, index) => index + 1).map((stage) => (
-                            <MenuItem key={stage} value={stage}>
-                                → Этап {stage}
-                            </MenuItem>
-                        ))}
-                    </Select>
-                    <IconButton aria-label="Удалить раунд из забега" size="small" onClick={() => onDelete(round.id)}>
-                        <CloseIcon fontSize="small" />
-                    </IconButton>
-                </Stack>
-
-                <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap" }}>
-                    <NumberField label="Quota" value={round.quota} onCommit={(v) => onCommit(round.id, { quota: v })} />
-                    <NumberField
-                        label="RewardTickerts"
-                        value={round.rewardTickets}
-                        onCommit={(v) => onCommit(round.id, { rewardTickets: v })}
-                    />
-                    <NumberField
-                        label="RewardTicketsPerBall"
-                        value={round.rewardTicketsPerBall}
-                        onCommit={(v) => onCommit(round.id, { rewardTicketsPerBall: v })}
-                    />
-                </Stack>
-
-                <PackSelect
-                    label="RewardPack (колода артефактов)"
-                    value={round.rewardPackId}
-                    onCommit={(v) => onCommit(round.id, { rewardPackId: v })}
-                />
-
-                <PackSelect
-                    label="HousesInShop (домики в магазине)"
-                    value={round.housesInShopPackId}
-                    onCommit={(v) => onCommit(round.id, { housesInShopPackId: v })}
-                />
-
-                <PackSelect
-                    label="PackDeckStart (колода стартового поля)"
-                    value={round.packDeckStartId}
-                    onCommit={(v) => onCommit(round.id, { packDeckStartId: v })}
-                />
-
-                <Typography variant="caption" color="text.secondary">
-                    RoundSettings (список раундов)
-                </Typography>
-                <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
-                    {round.roundIds.map((roundId, index) => (
-                        <Chip
-                            key={`${roundId}-${index}`}
-                            label={roundId}
+        // The drag-over-sensitive area is this OUTER Box, not just the visual Paper inside it — its `py`
+        // padding extends the hoverable/insertion-detection zone into what used to be a dead gap between cards
+        // (the Stack that lists these no longer supplies its own `spacing`, see SprintDetailPage), so landing
+        // "insert before/after this card" no longer needs pixel-precise aim right at a card's own edge.
+        <Box data-stage={stage} data-index={index} onDragOver={onDragOver} sx={{ py: 1 }}>
+            <Paper
+                variant="outlined"
+                draggable
+                onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    onDragStart(round.id);
+                }}
+                onDragEnd={onDragEnd}
+                sx={{
+                    p: 2,
+                    cursor: "grab",
+                    opacity: isDragging ? 0.4 : 1,
+                    pointerEvents: isDragging ? "none" : "auto",
+                }}
+            >
+                <Stack spacing={1.5}>
+                    <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                        <DragIndicatorIcon fontSize="small" color="disabled" />
+                        <Select
                             size="small"
-                            onDelete={() =>
-                                onCommit(round.id, {
-                                    roundIds: round.roundIds.filter((_id, i) => i !== index),
-                                })
-                            }
-                        />
-                    ))}
-                    {round.roundIds.length === 0 && (
-                        <Typography variant="body2" color="text.secondary">
-                            Раундов пока нет.
-                        </Typography>
-                    )}
-                </Stack>
+                            value={round.stage ?? 1}
+                            onChange={(event) => onCommit(round.id, { stage: Number(event.target.value) })}
+                            sx={{ minWidth: 110 }}
+                        >
+                            {Array.from({ length: stageCount }, (_, index) => index + 1).map((stage) => (
+                                <MenuItem key={stage} value={stage}>
+                                    → Этап {stage}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                        <IconButton aria-label="Удалить раунд из забега" size="small" onClick={() => onDelete(round.id)}>
+                            <CloseIcon fontSize="small" />
+                        </IconButton>
+                    </Stack>
 
-                <Autocomplete
-                    size="small"
-                    disabled={round.roundIds.length >= MAX_ROUND_IDS}
-                    options={store.rounds}
-                    value={null}
-                    getOptionLabel={(r: Round) => `${store.roundName(r)} (${r.id})`}
-                    onChange={(_event, added) => handleAddRound(added)}
-                    renderInput={(params) => (
-                        <TextField
-                            {...params}
-                            label={
-                                round.roundIds.length >= MAX_ROUND_IDS
-                                    ? "Достигнут предел (9)"
-                                    : "+ Добавить раунд в список"
-                            }
+                    <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap" }}>
+                        <NumberField
+                            label="Quota"
+                            value={round.quota}
+                            onCommit={(v) => onCommit(round.id, { quota: v })}
                         />
-                    )}
-                />
-            </Stack>
-        </Paper>
+                        <NumberField
+                            label="RewardTickerts"
+                            value={round.rewardTickets}
+                            onCommit={(v) => onCommit(round.id, { rewardTickets: v })}
+                        />
+                        <NumberField
+                            label="RewardTicketsPerBall"
+                            value={round.rewardTicketsPerBall}
+                            onCommit={(v) => onCommit(round.id, { rewardTicketsPerBall: v })}
+                        />
+                    </Stack>
+
+                    <PackSelect
+                        label="RewardPack (колода артефактов)"
+                        value={round.rewardPackId}
+                        onCommit={(v) => onCommit(round.id, { rewardPackId: v })}
+                    />
+
+                    <PackSelect
+                        label="HousesInShop (домики в магазине)"
+                        value={round.housesInShopPackId}
+                        onCommit={(v) => onCommit(round.id, { housesInShopPackId: v })}
+                    />
+
+                    <PackSelect
+                        label="PackDeckStart (колода стартового поля)"
+                        value={round.packDeckStartId}
+                        onCommit={(v) => onCommit(round.id, { packDeckStartId: v })}
+                    />
+
+                    <Typography variant="caption" color="text.secondary">
+                        RoundSettings (список раундов)
+                    </Typography>
+                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
+                        {round.roundIds.map((roundId, roundIdIndex) => (
+                            <Chip
+                                key={`${roundId}-${roundIdIndex}`}
+                                label={roundId}
+                                size="small"
+                                onDelete={() =>
+                                    onCommit(round.id, {
+                                        roundIds: round.roundIds.filter((_id, i) => i !== roundIdIndex),
+                                    })
+                                }
+                            />
+                        ))}
+                        {round.roundIds.length === 0 && (
+                            <Typography variant="body2" color="text.secondary">
+                                Раундов пока нет.
+                            </Typography>
+                        )}
+                    </Stack>
+
+                    <Autocomplete
+                        size="small"
+                        disabled={round.roundIds.length >= MAX_ROUND_IDS}
+                        options={store.rounds}
+                        value={null}
+                        getOptionLabel={(r: Round) => `${store.roundName(r)} (${r.id})`}
+                        onChange={(_event, added) => handleAddRound(added)}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label={
+                                    round.roundIds.length >= MAX_ROUND_IDS
+                                        ? "Достигнут предел (9)"
+                                        : "+ Добавить раунд в список"
+                                }
+                            />
+                        )}
+                    />
+                </Stack>
+            </Paper>
+        </Box>
     );
 });
 

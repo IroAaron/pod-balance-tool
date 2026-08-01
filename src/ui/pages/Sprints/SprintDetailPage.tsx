@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useState, type DragEvent } from "react";
+import { Fragment, useCallback, useRef, useState, type DragEvent } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import {
     Box,
@@ -54,20 +54,24 @@ function makeBlankRound(sprintId: string, stage: number): SprintRound {
     };
 }
 
-/** A small gap that opens up at the hovered insertion slot while dragging a round card — pushes the surrounding
- *  cards apart just enough to show where it'll land, per the user's own "чуть отодвигать соседей" ask. */
+/** A gap that opens up at the hovered insertion slot while dragging a round card — pushes the surrounding cards
+ *  apart just enough to show where it'll land, per the user's own "чуть отодвигать соседей" ask. Wrapped in the
+ *  same vertical padding as each card (see the cards' own wrapping Box) so it sits at the same rhythm now that
+ *  the Stack's own `spacing` was removed in favor of per-item padding (see SprintDetailPage's card-list Stack). */
 function DropPlaceholder() {
     return (
-        <Box
-            sx={{
-                height: 14,
-                borderRadius: 1,
-                border: "2px dashed",
-                borderColor: "primary.main",
-                bgcolor: "primary.main",
-                opacity: 0.2,
-            }}
-        />
+        <Box sx={{ py: 1 }}>
+            <Box
+                sx={{
+                    height: 20,
+                    borderRadius: 1,
+                    border: "2px dashed",
+                    borderColor: "primary.main",
+                    bgcolor: "primary.main",
+                    opacity: 0.25,
+                }}
+            />
+        </Box>
     );
 }
 
@@ -101,6 +105,13 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [draggedRoundId, setDraggedRoundId] = useState<string | null>(null);
     const [dragOverTarget, setDragOverTarget] = useState<{ stage: number; index: number } | null>(null);
+    // Native `dragover` only fires while the pointer is over a listening element — there's no native "you've left
+    // every drop target" event that's reliable across browsers (dragleave fires on every inter-element boundary
+    // crossing too, including between a card and its own children, so it flickers constantly). Instead: every
+    // dragover resets a short timer; if none arrives before it fires, nothing is being hovered anymore, so the
+    // placeholder clears and the dragged card visually settles back into its own spot (it never actually left —
+    // see isDragging's own doc — so "clearing the placeholder" IS "the card returns to its position").
+    const dragOverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
     // Every handler passed down to a card is wrapped in useCallback so SprintRoundCard's memo() can actually bail
     // out re-rendering the ~17 cards NOT involved in a given interaction — a plain function value here would be a
@@ -142,10 +153,18 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         [sprint, updateSprint]
     );
 
+    const clearDragOverTimeout = useCallback(() => {
+        if (dragOverClearTimeoutRef.current !== undefined) {
+            clearTimeout(dragOverClearTimeoutRef.current);
+            dragOverClearTimeoutRef.current = undefined;
+        }
+    }, []);
+
     const handleDragEnd = useCallback(() => {
+        clearDragOverTimeout();
         setDraggedRoundId(null);
         setDragOverTarget(null);
-    }, []);
+    }, [clearDragOverTimeout]);
 
     /** Only actually updates state (and so only actually triggers a re-render) when the target slot genuinely
      *  changed — native `dragover` fires continuously (many times a second) for as long as the pointer is over an
@@ -154,9 +173,18 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
      *  moved. That was the real cause of the reported drag lag/mis-drops — the event queue backed up under the
      *  re-render cost, so by the time `drop` fired, `dragOverTarget` could be several stale ticks behind the
      *  pointer's real position. Uses the functional setState form so it has zero external dependencies and can
-     *  stay a permanently stable reference (see handleCardDragOver below). */
+     *  stay a permanently stable reference (see handleCardDragOver below).
+     *
+     *  Also re-arms the "nothing is being hovered" timeout (see dragOverClearTimeoutRef's own doc) on every call,
+     *  whether or not the target actually changed — the timer needs resetting on every live dragover regardless,
+     *  purely to prove the pointer is still over *something* valid. */
     const setDragOverTargetIfChanged = useCallback((next: { stage: number; index: number }) => {
         setDragOverTarget((prev) => (prev?.stage === next.stage && prev.index === next.index ? prev : next));
+        if (dragOverClearTimeoutRef.current !== undefined) clearTimeout(dragOverClearTimeoutRef.current);
+        dragOverClearTimeoutRef.current = setTimeout(() => {
+            dragOverClearTimeoutRef.current = undefined;
+            setDragOverTarget(null);
+        }, 150);
     }, []);
 
     /** Hovering directly over a card — split into top/bottom halves to decide whether the placeholder opens
@@ -201,6 +229,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
 
     const handleDrop = (stage: number) => {
         if (!draggedRoundId) return;
+        clearDragOverTimeout();
         const target = sprint.rounds.find((r) => r.id === draggedRoundId);
         if (target) {
             const rest = sprint.rounds.filter((r) => r.id !== draggedRoundId);
@@ -278,7 +307,10 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                             <Stack spacing={2}>
                                 <Typography variant="h6">Этап {stage}</Typography>
 
-                                <Stack spacing={2}>
+                                {/* No `spacing` here — each card supplies its own vertical padding instead (see
+                                    SprintRoundCard's wrapping Box), so its dragover-sensitive area extends into
+                                    what would otherwise be a dead gap between cards that no element listens on. */}
+                                <Stack>
                                     {stageRounds.map((round) => {
                                         // Both branches below must render the exact same element SHAPE (a
                                         // Fragment wrapping one SprintRoundCard) — branching between a bare
