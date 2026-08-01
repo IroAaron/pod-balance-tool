@@ -337,3 +337,76 @@ describe("Packs", () => {
         ]);
     });
 });
+
+describe("Balls", () => {
+    const headers = [
+        "ItemId",
+        "RunMin",
+        "RunMax",
+        "InertiaMin",
+        "InertiaMax",
+        "ValueMin",
+        "ValueMax",
+        "Color",
+        "MetaTag",
+    ];
+
+    function table(rows: Record<string, string>[]): ParsedTable {
+        return { sourceName: "Balls", headers, rows };
+    }
+
+    it("classifies as Balls, NOT Items — real ItemId+MetaTag columns would otherwise trip the Items tag/type fallback", () => {
+        // ItemId matches findIdColumn's exact check, and "MetaTag" contains the substring "tag", so without
+        // Balls' own early signature branch this table would be misclassified as Items by the generic fallback.
+        expect(classifyTable(table([])).type).toBe("Balls");
+    });
+
+    it("parses real-shaped rows, including the comma-decimal Inertia values", () => {
+        const classified = classifyTable(
+            table([
+                {
+                    ItemId: "standart_ball_red",
+                    RunMin: "56",
+                    RunMax: "70",
+                    InertiaMin: "0,4",
+                    InertiaMax: "0,6",
+                    ValueMin: "0",
+                    ValueMax: "0",
+                    Color: "Red",
+                    MetaTag: "",
+                },
+            ])
+        );
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(warnings).toEqual([]);
+        expect(data.balls).toEqual([
+            {
+                id: "standart_ball_red",
+                runMin: 56,
+                runMax: 70,
+                inertiaMin: 0.4,
+                inertiaMax: 0.6,
+                valueMin: 0,
+                valueMax: 0,
+                color: "Red",
+                metaTag: undefined,
+                nameKey: "standart_ball_red",
+                descKey: "standart_ball_red_desc",
+            },
+        ]);
+    });
+
+    it("warns and yields no balls when ItemId column is missing", () => {
+        const classified = { type: "Balls" as const, table: table([{ RunMin: "56" } as Record<string, string>]) };
+        classified.table.headers = classified.table.headers.filter((h) => h !== "ItemId");
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(data.balls).toEqual([]);
+        expect(warnings).toEqual([
+            { sourceName: "Balls", message: "Не найдена колонка ItemId — таблица шаров пропущена" },
+        ]);
+    });
+});

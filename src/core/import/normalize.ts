@@ -7,6 +7,7 @@ import type { UpgradeChain } from "../models/UpgradeChain";
 import type { Round } from "../models/Round";
 import type { Deck, DeckEntry, DeckSource } from "../models/Deck";
 import type { Pack, PackSourceEntry } from "../models/Pack";
+import type { Ball } from "../models/Ball";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
 import { tableNameOf } from "./tableNames";
 
@@ -24,6 +25,8 @@ export interface NormalizedData {
     decks: Deck[];
 
     packs: Pack[];
+
+    balls: Ball[];
 
     replaceRules: ReplaceRule[];
 
@@ -285,6 +288,41 @@ function normalizePacksTable(table: ParsedTable): Pack[] {
     return order.map((id) => packsById.get(id)!);
 }
 
+/** Balls is a flat row-per-object table, like Items — no grouping. Id column is "ItemId" (see the classifier's
+ *  hazard note: this collides with the generic id-column path, hence Balls' own early classifier branch). */
+function normalizeBallsTable(table: ParsedTable): Ball[] {
+    const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
+    if (!idColumn) return [];
+
+    const runMinColumn = findColumn(table.headers, ["RunMin"]);
+    const runMaxColumn = findColumn(table.headers, ["RunMax"]);
+    const inertiaMinColumn = findColumn(table.headers, ["InertiaMin"]);
+    const inertiaMaxColumn = findColumn(table.headers, ["InertiaMax"]);
+    const valueMinColumn = findColumn(table.headers, ["ValueMin"]);
+    const valueMaxColumn = findColumn(table.headers, ["ValueMax"]);
+    const colorColumn = findColumn(table.headers, ["Color"]);
+    const metaTagColumn = findColumn(table.headers, ["MetaTag"]);
+
+    return table.rows
+        .filter((row) => (row[idColumn] ?? "").trim() !== "")
+        .map((row): Ball => {
+            const id = row[idColumn].trim();
+            return {
+                id,
+                runMin: runMinColumn ? parseOptionalNumber(row[runMinColumn]) : undefined,
+                runMax: runMaxColumn ? parseOptionalNumber(row[runMaxColumn]) : undefined,
+                inertiaMin: inertiaMinColumn ? parseOptionalNumber(row[inertiaMinColumn]) : undefined,
+                inertiaMax: inertiaMaxColumn ? parseOptionalNumber(row[inertiaMaxColumn]) : undefined,
+                valueMin: valueMinColumn ? parseOptionalNumber(row[valueMinColumn]) : undefined,
+                valueMax: valueMaxColumn ? parseOptionalNumber(row[valueMaxColumn]) : undefined,
+                color: colorColumn ? row[colorColumn]?.trim() || undefined : undefined,
+                metaTag: metaTagColumn ? row[metaTagColumn]?.trim() || undefined : undefined,
+                nameKey: id,
+                descKey: `${id}_desc`,
+            };
+        });
+}
+
 function normalizeMechanicTable(table: ParsedTable, type: MechanicTableName): MechanicRow[] {
     const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
     if (!idColumn) return [];
@@ -376,6 +414,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const rounds: Round[] = [];
     const decks: Deck[] = [];
     const packs: Pack[] = [];
+    const balls: Ball[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -435,6 +474,15 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             packs.push(...normalized);
+        } else if (type === "Balls") {
+            const normalized = normalizeBallsTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдена колонка ItemId — таблица шаров пропущена",
+                });
+            }
+            balls.push(...normalized);
         } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
             const normalized = normalizeReplaceRuleTable(table, type);
             if (normalized.length === 0) {
@@ -486,6 +534,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             rounds,
             decks,
             packs,
+            balls,
             replaceRules,
             enumValues,
         },

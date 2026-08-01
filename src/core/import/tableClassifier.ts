@@ -12,6 +12,7 @@ export type TableType =
     | "Decks"
     | "DecksShop"
     | "Packs"
+    | "Balls"
     | "Enums"
     | "ReplaceItem"
     | "ReplaceOnTrigger";
@@ -76,6 +77,13 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
     // PackId doesn't match findIdColumn's exact "id"/"itemid" check below either — own branch, same reasoning.
     if (hasColumn(headers, "PackId")) {
         return { type: "Packs", table };
+    }
+
+    // Balls' id column is "ItemId" (matches findIdColumn below) and it has a "MetaTag" column (contains "tag") —
+    // without this early signature check, it would fall into the generic idColumn branch below and get
+    // misclassified as "Items" by the tag/type fallback heuristic. Checked by its own distinctive columns, not name.
+    if (hasAllColumns(headers, ["RunMin", "RunMax", "InertiaMin", "InertiaMax"])) {
+        return { type: "Balls", table };
     }
 
     // A per-column, ragged list of valid enum values for each parameter dimension — not a row-per-record table.

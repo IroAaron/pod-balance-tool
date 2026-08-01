@@ -6,6 +6,7 @@ import type { UpgradeChain } from "./models/UpgradeChain";
 import type { Round } from "./models/Round";
 import type { Deck, DeckSource } from "./models/Deck";
 import type { Pack, PackSourceEntry } from "./models/Pack";
+import type { Ball } from "./models/Ball";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
@@ -116,6 +117,8 @@ export class GameStore {
 
     packs: Pack[] = [];
 
+    balls: Ball[] = [];
+
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
@@ -166,6 +169,13 @@ export class GameStore {
     /** Pack ids removed via deletePack since the last successful exportPackChanges() — simpler than
      *  blueprintDeletedDecks (no source-table lookup needed, Packs has only one target sheet). */
     blueprintDeletedPackIds: Set<string> = new Set();
+
+    /** Ball ids created/edited via upsertBall (Balls page) since the last successful exportBallChanges() — same
+     *  in-memory-only framing as Pack/Deck above. Independent export flow/button. */
+    blueprintDirtyBallIds: Set<string> = new Set();
+
+    /** Ball ids removed via deleteBall since the last successful exportBallChanges(). */
+    blueprintDeletedBallIds: Set<string> = new Set();
 
     /** Manually-curated "description phrase -> icon/emoji" entries — see GlossaryPage and the "icons-emoji"
      *  description mode. Synced independently of the other shared/* docs — see initRemoteSync(). */
@@ -237,6 +247,7 @@ export class GameStore {
             this.rounds = cache.importCache.rounds ?? [];
             this.decks = cache.importCache.decks ?? [];
             this.packs = cache.importCache.packs ?? [];
+            this.balls = cache.importCache.balls ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
         }
@@ -327,6 +338,10 @@ export class GameStore {
 
     getPack(id: string): Pack | undefined {
         return this.packs.find((pack) => pack.id === id);
+    }
+
+    getBall(id: string): Ball | undefined {
+        return this.balls.find((ball) => ball.id === id);
     }
 
     /**
@@ -439,6 +454,28 @@ export class GameStore {
         this.blueprintDeletedPackIds.add(id);
         this.blueprintDirtyPackIds.delete(id);
         this.packs = this.packs.filter((pack) => pack.id !== id);
+        this.notify();
+    }
+
+    /** Full-replace upsert for a whole ball (Balls page) — same convention as upsertPack. */
+    upsertBall(ball: Ball): void {
+        this.balls = mergeById(this.balls, [ball]);
+        this.blueprintDirtyBallIds.add(ball.id);
+        this.blueprintDeletedBallIds.delete(ball.id);
+        this.notify();
+    }
+
+    createBall(id: string): void {
+        const trimmedId = id.trim();
+        if (!trimmedId || this.getBall(trimmedId)) return;
+        this.upsertBall({ id: trimmedId, nameKey: trimmedId, descKey: `${trimmedId}_desc` });
+    }
+
+    deleteBall(id: string): void {
+        if (!this.getBall(id)) return;
+        this.blueprintDeletedBallIds.add(id);
+        this.blueprintDirtyBallIds.delete(id);
+        this.balls = this.balls.filter((ball) => ball.id !== id);
         this.notify();
     }
 
@@ -583,6 +620,28 @@ export class GameStore {
             }
         }
 
+        // Balls have both an editable name and description (see BallDetailPage), same shape as items/packs.
+        for (const ball of this.balls) {
+            const nameOverride = this.translationOverrides[ball.nameKey];
+            if (nameOverride) {
+                names[ball.nameKey] = nameOverride;
+                sentOverrides[ball.nameKey] = nameOverride;
+            }
+
+            const descOverride = this.translationOverrides[ball.descKey];
+            if (descOverride) {
+                descriptions[ball.descKey] = buildExportDescriptionText(descOverride, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+                sentOverrides[ball.descKey] = descOverride;
+            }
+        }
+
         const result = await postExportPayload(this.sources.translationsUrl, { token, names, descriptions });
 
         if (result.ok) {
@@ -672,6 +731,24 @@ export class GameStore {
             const description = this.getTranslation(pack.descKey);
             if (description) {
                 descriptions[pack.descKey] = buildExportDescriptionText(description, {
+                    items: this.allItems,
+                    itemIcons: this.itemIcons,
+                    tagIcons: this.tagIcons,
+                    allGlossaryEntries: this.glossary,
+                    glossaryToApply,
+                    spriteWidthPx: this.descriptionSettings.spriteWidthPx,
+                });
+            }
+        }
+
+        // Balls have both an editable name and description (see BallDetailPage), same shape as items/packs.
+        for (const ball of this.balls) {
+            const name = this.getTranslation(ball.nameKey);
+            if (name) names[ball.nameKey] = name;
+
+            const description = this.getTranslation(ball.descKey);
+            if (description) {
+                descriptions[ball.descKey] = buildExportDescriptionText(description, {
                     items: this.allItems,
                     itemIcons: this.itemIcons,
                     tagIcons: this.tagIcons,
@@ -877,6 +954,57 @@ export class GameStore {
         return result;
     }
 
+    /** How many Balls-page config edits haven't been sent yet — see exportBallChanges(). Independent of the
+     *  ordinary translations pendingExportCount (a ball's name/description flows through that existing path). */
+    get blueprintBallPendingExportCount(): number {
+        return this.blueprintDirtyBallIds.size;
+    }
+
+    /**
+     * Sends Balls-page **config** edits (RunMin/RunMax/InertiaMin/InertiaMax/ValueMin/ValueMax/Color) to the same
+     * Apps Script `doPost` endpoint, reusing the *existing* `upsertFullRows` mechanism Blueprint Lab's own item
+     * export already uses — Balls is a flat row-per-object table (unlike Decks/Packs, no grouping), so it fits
+     * the same `items`-style {id -> full column bag} shape exactly, no new server-side helper needed. Deliberately
+     * does NOT touch a ball's name/description (existing translationOverrides path, same split as Packs).
+     *
+     * Note: like Blueprint Lab's item export, this has no delete signal — `upsertFullRows` only ever upserts, so
+     * a locally `deleteBall`'d ball simply stops being sent, it is never removed from the real sheet by exporting.
+     */
+    async exportBallChanges(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.configUrl) {
+            throw new Error("Не задан источник конфигурации на странице «Источники»");
+        }
+
+        const balls: NonNullable<Parameters<typeof postExportPayload>[1]["balls"]> = {};
+
+        for (const ballId of this.blueprintDirtyBallIds) {
+            const ball = this.getBall(ballId);
+            if (!ball) continue;
+            balls[ball.id] = {
+                RunMin: ball.runMin?.toString() ?? "",
+                RunMax: ball.runMax?.toString() ?? "",
+                InertiaMin: ball.inertiaMin?.toString() ?? "",
+                InertiaMax: ball.inertiaMax?.toString() ?? "",
+                ValueMin: ball.valueMin?.toString() ?? "",
+                ValueMax: ball.valueMax?.toString() ?? "",
+                Color: ball.color ?? "",
+            };
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, balls });
+
+        if (result.ok) {
+            this.blueprintDirtyBallIds = new Set();
+            this.notify();
+        }
+
+        return result;
+    }
+
     itemName(item: Item): string {
         return this.getTranslation(item.nameKey) ?? item.nameKey ?? item.id;
     }
@@ -899,6 +1027,14 @@ export class GameStore {
 
     packDescription(pack: Pack): string {
         return this.getTranslation(pack.descKey) ?? "";
+    }
+
+    ballName(ball: Ball): string {
+        return this.getTranslation(ball.nameKey) ?? ball.id;
+    }
+
+    ballDescription(ball: Ball): string {
+        return this.getTranslation(ball.descKey) ?? "";
     }
 
     /** Tier chains almost always share the exact same description template across + and ++ (only the underlying
@@ -959,6 +1095,7 @@ export class GameStore {
             this.rounds = mergeById(this.rounds, result.data.rounds);
             this.decks = mergeById(this.decks, result.data.decks);
             this.packs = mergeById(this.packs, result.data.packs);
+            this.balls = mergeById(this.balls, result.data.balls);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
@@ -969,6 +1106,7 @@ export class GameStore {
                 this.rounds = result.data.rounds;
                 this.decks = result.data.decks;
                 this.packs = result.data.packs;
+                this.balls = result.data.balls;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
             }
@@ -988,6 +1126,7 @@ export class GameStore {
             rounds: this.rounds,
             decks: this.decks,
             packs: this.packs,
+            balls: this.balls,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
         });
@@ -1039,7 +1178,7 @@ export class GameStore {
 
     /**
      * Wipes the entire imported config/translations cache (items, mechanics, upgradeChains, rounds, decks, packs,
-     * replaceRules, enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
+     * balls, replaceRules, enumValues, translations) back to empty, local to this browser only — builds/icons/etc. in Firestore are
      * untouched. Exists specifically because CSV uploads always merge by id (`importCsvFiles` above) and never
      * remove anything missing from a new file, so an item deleted from the source spreadsheet lingers on the site
      * forever unless the whole cache is cleared first. After clearing, the next CSV upload or "Скачать
@@ -1053,6 +1192,7 @@ export class GameStore {
         this.rounds = [];
         this.decks = [];
         this.packs = [];
+        this.balls = [];
         this.replaceRules = [];
         this.enumValues = {};
         this.rebuildDerivedCaches();
@@ -1245,6 +1385,7 @@ export class GameStore {
             rounds: this.rounds,
             decks: this.decks,
             packs: this.packs,
+            balls: this.balls,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
             builds: this.builds,
@@ -1294,6 +1435,7 @@ export class GameStore {
         this.rounds = payload.rounds;
         this.decks = payload.decks;
         this.packs = payload.packs;
+        this.balls = payload.balls;
         this.replaceRules = payload.replaceRules;
         this.enumValues = payload.enumValues;
         this.rebuildDerivedCaches();
@@ -1306,6 +1448,7 @@ export class GameStore {
             rounds: payload.rounds,
             decks: payload.decks,
             packs: payload.packs,
+            balls: payload.balls,
             replaceRules: payload.replaceRules,
             enumValues: payload.enumValues,
         });
@@ -1347,6 +1490,7 @@ export class GameStore {
                 rounds: this.rounds,
                 decks: this.decks,
                 packs: this.packs,
+                balls: this.balls,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
             },
@@ -1380,6 +1524,7 @@ export class GameStore {
             this.rounds = state.importCache.rounds ?? [];
             this.decks = state.importCache.decks ?? [];
             this.packs = state.importCache.packs ?? [];
+            this.balls = state.importCache.balls ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);

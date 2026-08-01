@@ -124,6 +124,10 @@ export interface ExportPayload {
     /** Packs page edits — PackId -> full row set for that pack (same replace-by-group-id shape as `decks`, see
      *  GameStore.exportPackChanges's doc). An empty array for a PackId means "delete this pack". */
     packs?: Record<string, Record<string, string>[]>;
+
+    /** Balls page edits — ItemId -> full column bag, upserted by ItemId (same shape as `items`, Balls is a flat
+     *  row-per-object table like Items, no grouping — see GameStore.exportBallChanges's doc). */
+    balls?: Record<string, Record<string, string>>;
 }
 
 export interface ExportResult {

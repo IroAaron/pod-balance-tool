@@ -421,6 +421,7 @@ export async function fetchBalanceSavePayloadRemote(saveId: string): Promise<Bal
         rounds: (byKey.get("rounds") as BalanceSavePayload["rounds"]) ?? [],
         decks: (byKey.get("decks") as BalanceSavePayload["decks"]) ?? [],
         packs: (byKey.get("packs") as BalanceSavePayload["packs"]) ?? [],
+        balls: (byKey.get("balls") as BalanceSavePayload["balls"]) ?? [],
         replaceRules: (byKey.get("replaceRules") as BalanceSavePayload["replaceRules"]) ?? [],
         enumValues: (byKey.get("enumValues") as BalanceSavePayload["enumValues"]) ?? {},
         builds: (byKey.get("builds") as BalanceSavePayload["builds"]) ?? [],
