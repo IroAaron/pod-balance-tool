@@ -8,6 +8,7 @@ import type { Round } from "../models/Round";
 import type { Deck, DeckEntry, DeckSource } from "../models/Deck";
 import type { Pack, PackSourceEntry } from "../models/Pack";
 import type { Ball } from "../models/Ball";
+import type { BallGroup } from "../models/BallGroup";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
 import { tableNameOf } from "./tableNames";
 
@@ -27,6 +28,8 @@ export interface NormalizedData {
     packs: Pack[];
 
     balls: Ball[];
+
+    ballGroups: BallGroup[];
 
     replaceRules: ReplaceRule[];
 
@@ -323,6 +326,29 @@ function normalizeBallsTable(table: ParsedTable): Ball[] {
         });
 }
 
+/**
+ * BallGroups is one wide row per group (up to 7 "Ball" slots as same-named repeated columns), NOT the narrow
+ * row-per-entry shape Decks/DecksShop use — structurally the same as normalizeUpgradeChainsTable's tier columns
+ * (or RoundSettings' own DeckBalls columns), just with a "Ball" prefix instead of "UpgradeId"/"DeckBalls".
+ */
+function normalizeBallGroupsTable(table: ParsedTable): BallGroup[] {
+    const deckIdColumn = findColumn(table.headers, ["DeckId"]);
+    if (!deckIdColumn) return [];
+
+    const ballColumns = table.headers
+        .filter((header) => /^Ball(_\d+)?$/i.test(header.trim()))
+        .sort((a, b) => numericSuffix(a) - numericSuffix(b));
+
+    return table.rows
+        .filter((row) => (row[deckIdColumn] ?? "").trim() !== "")
+        .map((row): BallGroup => ({
+            id: row[deckIdColumn].trim(),
+            ballIds: ballColumns
+                .map((column) => row[column]?.trim())
+                .filter((value): value is string => Boolean(value)),
+        }));
+}
+
 function normalizeMechanicTable(table: ParsedTable, type: MechanicTableName): MechanicRow[] {
     const idColumn = findColumn(table.headers, ["ItemId", "Id"]);
     if (!idColumn) return [];
@@ -415,6 +441,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const decks: Deck[] = [];
     const packs: Pack[] = [];
     const balls: Ball[] = [];
+    const ballGroups: BallGroup[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -483,6 +510,15 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             balls.push(...normalized);
+        } else if (type === "BallGroups") {
+            const normalized = normalizeBallGroupsTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдена колонка DeckId — таблица колод шаров пропущена",
+                });
+            }
+            ballGroups.push(...normalized);
         } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
             const normalized = normalizeReplaceRuleTable(table, type);
             if (normalized.length === 0) {
@@ -535,6 +571,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             decks,
             packs,
             balls,
+            ballGroups,
             replaceRules,
             enumValues,
         },

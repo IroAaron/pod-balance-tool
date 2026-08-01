@@ -13,6 +13,7 @@ export type TableType =
     | "DecksShop"
     | "Packs"
     | "Balls"
+    | "BallGroups"
     | "Enums"
     | "ReplaceItem"
     | "ReplaceOnTrigger";
@@ -69,8 +70,13 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
     }
 
     // Decks and DecksShop share identical columns (DeckId,Item,Weight,Cost) — same as Cards/Houses/Artefacts,
-    // they can only be told apart by the sheet's own tab name, not column shape.
+    // they can only be told apart by the sheet's own tab name, not column shape. BallGroups also keys by DeckId
+    // but uses a "Ball" column instead of "Item" (and is a wide one-row-per-group table, not narrow) — checked
+    // first since it's unambiguous by column name alone, no name-based guessing needed.
     if (hasColumn(headers, "DeckId")) {
+        if (hasColumn(headers, "Ball")) {
+            return { type: "BallGroups", table };
+        }
         return matchesTableName(sourceName, "DecksShop") ? { type: "DecksShop", table } : { type: "Decks", table };
     }
 

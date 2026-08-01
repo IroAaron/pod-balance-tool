@@ -37,6 +37,9 @@
 //     balls?: {                                    // Balls page — upserted by the sheet's `ItemId` column
 //       [itemId: string]: { [column: string]: string },
 //     },
+//     ballGroups?: {                                // Ball decks ("Колоды шаров") — REPLACES the one row for a
+//       [deckId: string]: string[],                 // given DeckId, writing values across every repeated `Ball`
+//     },                                            // column. Empty array deletes that ball deck's row.
 //   }
 // `items`/`newMechanicRows` only ever write columns present in the payload — a column the site doesn't model
 // (sprite names, unrelated flags, etc.) is left exactly as it already was in the sheet.
@@ -86,6 +89,12 @@ function doPost(e) {
         // Balls is a flat row-per-object table like Items — reuses upsertFullRows as-is, no new helper needed.
         if (body.balls) {
             result.updated.Balls = upsertFullRows(ss, "Balls", "ItemId", body.balls, result);
+        }
+
+        // BallGroups is a WIDE one-row-per-group table (7 same-named "Ball" columns) — upsertFullRows/
+        // replaceRowsByGroupId both assume a narrow row shape and can't address repeated-name columns.
+        if (body.ballGroups) {
+            result.updated.BallGroups = replaceWideGroupRow(ss, "BallGroups", "DeckId", "Ball", body.ballGroups, result);
         }
 
         return jsonResponse(result);
@@ -286,6 +295,85 @@ function replaceRowsByGroupId(spreadsheet, sheetName, groupIdColumnName, rowsByG
             sheet.appendRow(newRow);
         }
         touched += newRows.length;
+    }
+
+    return touched;
+}
+
+// Ball decks / Round DeckBalls export: `rowsByGroupId` is { [groupId]: string[] } — for each groupId, writes the
+// values into the SINGLE existing row's repeated `repeatedColumnName` columns (e.g. all 7 "Ball" columns), or
+// appends a brand-new row if the groupId isn't found yet. An empty array deletes that row entirely. This exists
+// because the real sheet has multiple columns sharing the EXACT SAME literal header name (unlike the client-side
+// Papa.parse view, which renames duplicates to Ball_1, Ball_2, ...) — header.indexOf only ever finds the first
+// match, so every other helper here (which assumes one column per name) can't address the rest. This scans the
+// header once for ALL matching column indices instead, and writes/clears exactly that many slots, blanking any
+// leftover slots beyond the provided values (e.g. shrinking a deck from 5 balls to 3 must clear the old 4th/5th).
+function replaceWideGroupRow(spreadsheet, sheetName, groupIdColumnName, repeatedColumnName, rowsByGroupId, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var header = sheet.getDataRange().getValues()[0];
+    var groupIdCol = header.indexOf(groupIdColumnName);
+    if (groupIdCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + groupIdColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var repeatedCols = [];
+    for (var h = 0; h < header.length; h++) {
+        if (header[h] === repeatedColumnName) {
+            repeatedCols.push(h);
+        }
+    }
+    if (repeatedCols.length === 0) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + repeatedColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var touched = 0;
+
+    for (var groupId in rowsByGroupId) {
+        // Re-read fresh data/row numbers each iteration — earlier deletions in this same loop shift every row
+        // below them, so a row-number map built once at the top would go stale after the first delete.
+        var data = sheet.getDataRange().getValues();
+        var sheetRow = -1;
+        for (var i = 1; i < data.length; i++) {
+            if (data[i][groupIdCol] === groupId) {
+                sheetRow = i + 1; // +1: sheet rows are 1-indexed, data[] is 0-indexed
+                break;
+            }
+        }
+
+        var values = rowsByGroupId[groupId];
+
+        if (values.length === 0) {
+            if (sheetRow !== -1) {
+                sheet.deleteRow(sheetRow);
+            }
+            touched++;
+            continue;
+        }
+
+        if (sheetRow === -1) {
+            var newRow = new Array(header.length).fill("");
+            newRow[groupIdCol] = groupId;
+            for (var n = 0; n < repeatedCols.length; n++) {
+                newRow[repeatedCols[n]] = n < values.length ? values[n] : "";
+            }
+            sheet.appendRow(newRow);
+        } else {
+            for (var c = 0; c < repeatedCols.length; c++) {
+                var value = c < values.length ? values[c] : "";
+                sheet.getRange(sheetRow, repeatedCols[c] + 1).setValue(value);
+            }
+        }
+        touched++;
     }
 
     return touched;

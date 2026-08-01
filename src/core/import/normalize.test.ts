@@ -410,3 +410,62 @@ describe("Balls", () => {
         ]);
     });
 });
+
+describe("BallGroups", () => {
+    it("classifies as BallGroups, not Decks — DeckId+Ball columns disambiguate from DeckId+Item", () => {
+        const table: ParsedTable = {
+            sourceName: "BallGroups",
+            headers: ["DeckId", "Ball", "Ball_1", "Ball_2"],
+            rows: [],
+        };
+
+        expect(classifyTable(table).type).toBe("BallGroups");
+    });
+
+    it("groups the wide repeated Ball columns into one ordered ballIds array per DeckId, filtering blanks", () => {
+        const classified = {
+            type: "BallGroups" as const,
+            table: {
+                sourceName: "BallGroups",
+                headers: ["DeckId", "Ball", "Ball_1", "Ball_2", "Ball_3"],
+                rows: [
+                    {
+                        DeckId: "ball_deck_basic",
+                        Ball: "standart_ball_red",
+                        Ball_1: "standart_ball_blue",
+                        Ball_2: "",
+                        Ball_3: "standart_ball_green",
+                    },
+                ],
+            },
+        };
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(warnings).toEqual([]);
+        expect(data.ballGroups).toEqual([
+            {
+                id: "ball_deck_basic",
+                ballIds: ["standart_ball_red", "standart_ball_blue", "standart_ball_green"],
+            },
+        ]);
+    });
+
+    it("warns and yields no ball groups when DeckId column is missing", () => {
+        const classified = {
+            type: "BallGroups" as const,
+            table: {
+                sourceName: "BallGroups",
+                headers: ["Ball"],
+                rows: [{ Ball: "standart_ball_red" }],
+            },
+        };
+
+        const { data, warnings } = normalizeClassifiedTables([classified]);
+
+        expect(data.ballGroups).toEqual([]);
+        expect(warnings).toEqual([
+            { sourceName: "BallGroups", message: "Не найдена колонка DeckId — таблица колод шаров пропущена" },
+        ]);
+    });
+});

@@ -128,6 +128,11 @@ export interface ExportPayload {
     /** Balls page edits — ItemId -> full column bag, upserted by ItemId (same shape as `items`, Balls is a flat
      *  row-per-object table like Items, no grouping — see GameStore.exportBallChanges's doc). */
     balls?: Record<string, Record<string, string>>;
+
+    /** Ball decks ("Колоды шаров" tab) edits — DeckId -> ball id array, written across the sheet's repeated
+     *  `Ball` columns as ONE row per group (see GameStore.exportDeckChanges's doc and the new
+     *  `replaceWideGroupRow` Apps Script helper). An empty array for a DeckId means "delete this ball deck". */
+    ballGroups?: Record<string, string[]>;
 }
 
 export interface ExportResult {

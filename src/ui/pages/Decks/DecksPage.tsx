@@ -16,8 +16,9 @@ import {
 import { useStore } from "../../hooks/useStore";
 import type { ExportResult } from "../../../core/import/sheetSource";
 import DeckList from "./DeckList";
+import BallGroupList from "./BallGroupList";
 
-type TabKey = "decks" | "decksShop";
+type TabKey = "decks" | "decksShop" | "ballGroups";
 
 export default function DecksPage() {
     const store = useStore();
@@ -70,17 +71,20 @@ export default function DecksPage() {
             <Tabs value={tab} onChange={(_event, next: TabKey) => setTab(next)}>
                 <Tab value="decks" label="Колоды" />
                 <Tab value="decksShop" label="Колоды магазина" />
+                <Tab value="ballGroups" label="Колоды шаров" />
             </Tabs>
 
-            {tab === "decks" ? <DeckList source="Decks" /> : <DeckList source="DecksShop" />}
+            {tab === "decks" && <DeckList source="Decks" />}
+            {tab === "decksShop" && <DeckList source="DecksShop" />}
+            {tab === "ballGroups" && <BallGroupList />}
 
             <Dialog open={confirmingExport} onClose={() => setConfirmingExport(false)}>
                 <DialogTitle>Экспортировать колоды в Google Sheets?</DialogTitle>
                 <DialogContent>
                     <DialogContentText>
                         Запишет изменения {store.blueprintDeckPendingExportCount} колод(ы) обратно в реальные
-                        таблицы Decks/DecksShop (по колонке DeckId — все строки этой колоды заменяются
-                        текущим набором предметов). Действие необратимо.
+                        таблицы Decks/DecksShop/BallGroups (по колонке DeckId — все строки этой колоды заменяются
+                        текущим набором предметов или шаров). Действие необратимо.
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>
