@@ -189,17 +189,27 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     }, [clearDragOverTimeout]);
 
     /** Only actually updates state (and so only actually triggers a re-render) when the target slot genuinely
-     *  changed — native `dragover` fires continuously (many times a second) for as long as the pointer is over an
-     *  element, even without it moving, so without this bail-out every single one of those ticks re-rendered the
-     *  *entire* board regardless of whether anything actually moved. Also re-arms the "nothing is being hovered"
-     *  timeout on every call, whether or not the target actually changed. */
+     *  changed — native `dragover` fires continuously for as long as the pointer is over an element, even without
+     *  it moving, so without this bail-out every single one of those ticks re-rendered the *entire* board
+     *  regardless of whether anything actually moved. Also re-arms the "nothing is being hovered" timeout on every
+     *  call, whether or not the target actually changed.
+     *
+     *  That timeout must stay comfortably ABOVE the browser's own native re-fire interval for a stationary
+     *  pointer: per the HTML Drag and Drop spec, the user agent only re-dispatches `dragover` roughly every
+     *  350ms while nothing changes, NOT continuously — a shorter clear-timeout (150ms was tried first) means
+     *  every time the pointer genuinely stops moving, even while still sitting over a perfectly valid slot, our
+     *  own timer fires and clears the target before the next native tick has a chance to re-arm it, which read as
+     *  the cards "changing their mind" and un-shifting the moment the pointer held still. 500ms gives enough
+     *  margin above that ~350ms interval that a stationary-but-still-hovering pointer never gets cleared, while a
+     *  pointer that's truly left every drop target still resolves to "return to original position" well within
+     *  half a second. */
     const setDragOverTargetIfChanged = useCallback((next: { stage: number; index: number }) => {
         setDragOverTarget((prev) => (prev?.stage === next.stage && prev.index === next.index ? prev : next));
         if (dragOverClearTimeoutRef.current !== undefined) clearTimeout(dragOverClearTimeoutRef.current);
         dragOverClearTimeoutRef.current = setTimeout(() => {
             dragOverClearTimeoutRef.current = undefined;
             setDragOverTarget(null);
-        }, 150);
+        }, 500);
     }, []);
 
     /**
