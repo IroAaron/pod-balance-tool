@@ -110,6 +110,17 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     // anything unless dragOverTarget is actually set at drop time, so a drop with no settled target is a no-op.
     const dragOverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+    // Snapshot of every card's own rect (keyed by round id), taken ONCE at dragstart — see handleRoundDragStart —
+    // and read (never re-measured) by handleColumnDragOver for the rest of the drag. Measuring live instead (the
+    // first version of this did) creates a feedback loop: the placeholder's own presence pushes the cards below it
+    // down, which shifts their rects, which the very next dragover tick (native dragover fires continuously even
+    // with the pointer dead still) reads back and can compute a DIFFERENT target index from, moving the placeholder
+    // again, shifting the cards again — an endless back-and-forth the user sees as cards "settling" and then
+    // immediately un-settling. A frozen pre-drag snapshot removes the feedback: the layout used for hit-testing
+    // never itself changes during the drag, only the *cursor* position does.
+    const boardRef = useRef<HTMLDivElement | null>(null);
+    const cardRectsRef = useRef<Map<string, DOMRect>>(new Map());
+
     // Every handler passed down to a card is wrapped in useCallback so SprintRoundCard's memo() can actually bail
     // out re-rendering the ~17 cards NOT involved in a given interaction — a plain function value here would be a
     // brand-new reference every render regardless of memo, defeating it entirely. `sprint` itself stays the same
@@ -150,6 +161,20 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         [sprint, updateSprint]
     );
 
+    /** Captures the pre-drag layout snapshot (see cardRectsRef's own doc) before marking anything as dragging —
+     *  at this exact instant no placeholder exists anywhere yet, so every card's rect reflects its true rest
+     *  position. Scoped to boardRef since a round can move between stage columns, so the whole board needs
+     *  capturing, not just the column the drag started in. */
+    const handleRoundDragStart = useCallback((id: string) => {
+        const rects = new Map<string, DOMRect>();
+        boardRef.current?.querySelectorAll<HTMLElement>("[data-round-id]").forEach((el) => {
+            const roundId = el.dataset.roundId;
+            if (roundId) rects.set(roundId, el.getBoundingClientRect());
+        });
+        cardRectsRef.current = rects;
+        setDraggedRoundId(id);
+    }, []);
+
     const clearDragOverTimeout = useCallback(() => {
         if (dragOverClearTimeoutRef.current !== undefined) {
             clearTimeout(dragOverClearTimeoutRef.current);
@@ -189,15 +214,20 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
      * same geometric-comparison technique standard drag-reorder libraries (dnd-kit, SortableJS, etc.) use, and it
      * needed no `data-*`/per-card-closure plumbing at all once the "compare against real element positions" idea
      * replaced "guess from which nested element received the event."
+     *
+     * Reads rects from `cardRectsRef`'s frozen pre-drag snapshot, NOT a live query of the DOM — see that ref's own
+     * doc for why measuring live here creates a placeholder-vs-layout feedback loop.
      */
     const handleColumnDragOver = (event: DragEvent<HTMLElement>, stage: number) => {
         event.preventDefault();
-        if (!draggedRoundId) return;
-        const cardEls = event.currentTarget.querySelectorAll<HTMLElement>('[data-sprint-round-card="true"]');
-        let index = cardEls.length;
-        for (let i = 0; i < cardEls.length; i++) {
-            const rect = cardEls[i].getBoundingClientRect();
-            if (event.clientY < rect.top + rect.height / 2) {
+        if (!draggedRoundId || !sprint) return;
+        const stageRoundIds = sprint.rounds
+            .filter((round) => (round.stage ?? 1) === stage && round.id !== draggedRoundId)
+            .map((round) => round.id);
+        let index = stageRoundIds.length;
+        for (let i = 0; i < stageRoundIds.length; i++) {
+            const rect = cardRectsRef.current.get(stageRoundIds[i]);
+            if (rect && event.clientY < rect.top + rect.height / 2) {
                 index = i;
                 break;
             }
@@ -268,6 +298,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
             </Stack>
 
             <Box
+                ref={boardRef}
                 sx={{
                     display: "grid",
                     gridTemplateColumns: `repeat(${stages.length}, minmax(280px, 1fr))`,
@@ -320,7 +351,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                                                     stageCount={stageCount}
                                                     onCommit={handleRoundCommit}
                                                     onDelete={handleRoundDelete}
-                                                    onDragStart={setDraggedRoundId}
+                                                    onDragStart={handleRoundDragStart}
                                                     onDragEnd={handleDragEnd}
                                                     isDragging={isDragging}
                                                 />

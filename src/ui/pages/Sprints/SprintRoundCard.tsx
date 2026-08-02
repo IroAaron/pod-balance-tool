@@ -134,6 +134,7 @@ const SprintRoundCard = memo(function SprintRoundCard({
             variant="outlined"
             draggable
             data-sprint-round-card={isDragging ? undefined : "true"}
+            data-round-id={round.id}
             onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = "move";
                 onDragStart(round.id);
