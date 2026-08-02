@@ -1,7 +1,6 @@
-import { memo, useState, type DragEvent } from "react";
+import { memo, useState } from "react";
 import {
     Autocomplete,
-    Box,
     Chip,
     IconButton,
     MenuItem,
@@ -85,32 +84,20 @@ type Props = {
 
     stageCount: number;
 
-    /** This card's own stage/position, exposed as `data-stage`/`data-index` on the root element so the SHARED,
-     *  stable `onDragOver` handler (see below) can read them at event time instead of needing a per-card closure
-     *  — a closure baking these in (`(event) => onDragOver(event, stage, index)`) would itself be a fresh prop
-     *  value every render, which defeats `memo()` below just as badly as skipping memoization entirely would. */
-    stage: number;
-
-    index: number;
-
     onCommit: (id: string, patch: Partial<SprintRound>) => void;
 
     onDelete: (id: string) => void;
 
     onDragStart: (id: string) => void;
 
-    /** Fires while another card is being dragged over this one — used by SprintDetailPage to figure out (from
-     *  which half of the card the pointer is over) where the drop placeholder gap should open. Omitted for the
-     *  card currently being dragged itself (see isDragging). Reads position from `event.currentTarget.dataset`
-     *  (see `stage`/`index` above), so this is the SAME function reference for every card — keep it that way. */
-    onDragOver?: (event: DragEvent<HTMLElement>) => void;
-
     onDragEnd: () => void;
 
     /** True for the one card currently being dragged. It stays fully mounted in its original spot (just dimmed
      *  and made non-interactive) rather than being removed from the DOM — removing the actual native drag-source
      *  element mid-drag breaks the browser's own drag-image tracking and can make `dragend`/`drop` stop firing
-     *  reliably on it. */
+     *  reliably on it. It also doesn't get the `data-sprint-round-card` marker (see below) while dragging, so
+     *  SprintDetailPage's position scan naturally skips it — it isn't really "in the list" positionally right now.
+     */
     isDragging?: boolean;
 };
 
@@ -121,16 +108,17 @@ type Props = {
  *  A round id CAN legitimately repeat within one entry's pool (confirmed in the real data — same "duplicates are
  *  real, never dedupe" precedent as Decks' repeated entries, here presumably weighting which round gets picked),
  *  so Chips are keyed/deleted by array index, not by id, and the add-Autocomplete never filters out ids already
- *  in the pool. */
+ *  in the pool.
+ *
+ *  Note there's no `onDragOver` here at all — SprintDetailPage's ONE per-column handler measures this card's own
+ *  `data-sprint-round-card` element position directly via `getBoundingClientRect()` rather than listening for
+ *  events on each card individually (see that handler's own doc for why). */
 const SprintRoundCard = memo(function SprintRoundCard({
     round,
     stageCount,
-    stage,
-    index,
     onCommit,
     onDelete,
     onDragStart,
-    onDragOver,
     onDragEnd,
     isDragging = false,
 }: Props) {
@@ -142,126 +130,117 @@ const SprintRoundCard = memo(function SprintRoundCard({
     };
 
     return (
-        // The drag-over-sensitive area is this OUTER Box, not just the visual Paper inside it — its `py`
-        // padding extends the hoverable/insertion-detection zone into what used to be a dead gap between cards
-        // (the Stack that lists these no longer supplies its own `spacing`, see SprintDetailPage), so landing
-        // "insert before/after this card" no longer needs pixel-precise aim right at a card's own edge.
-        <Box data-stage={stage} data-index={index} onDragOver={onDragOver} sx={{ py: 1 }}>
-            <Paper
-                variant="outlined"
-                draggable
-                onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "move";
-                    onDragStart(round.id);
-                }}
-                onDragEnd={onDragEnd}
-                sx={{
-                    p: 2,
-                    cursor: "grab",
-                    opacity: isDragging ? 0.4 : 1,
-                    pointerEvents: isDragging ? "none" : "auto",
-                }}
-            >
-                <Stack spacing={1.5}>
-                    <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                        <DragIndicatorIcon fontSize="small" color="disabled" />
-                        <Select
-                            size="small"
-                            value={round.stage ?? 1}
-                            onChange={(event) => onCommit(round.id, { stage: Number(event.target.value) })}
-                            sx={{ minWidth: 110 }}
-                        >
-                            {Array.from({ length: stageCount }, (_, index) => index + 1).map((stage) => (
-                                <MenuItem key={stage} value={stage}>
-                                    → Этап {stage}
-                                </MenuItem>
-                            ))}
-                        </Select>
-                        <IconButton aria-label="Удалить раунд из забега" size="small" onClick={() => onDelete(round.id)}>
-                            <CloseIcon fontSize="small" />
-                        </IconButton>
-                    </Stack>
-
-                    <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap" }}>
-                        <NumberField
-                            label="Quota"
-                            value={round.quota}
-                            onCommit={(v) => onCommit(round.id, { quota: v })}
-                        />
-                        <NumberField
-                            label="RewardTickerts"
-                            value={round.rewardTickets}
-                            onCommit={(v) => onCommit(round.id, { rewardTickets: v })}
-                        />
-                        <NumberField
-                            label="RewardTicketsPerBall"
-                            value={round.rewardTicketsPerBall}
-                            onCommit={(v) => onCommit(round.id, { rewardTicketsPerBall: v })}
-                        />
-                    </Stack>
-
-                    <PackSelect
-                        label="RewardPack (колода артефактов)"
-                        value={round.rewardPackId}
-                        onCommit={(v) => onCommit(round.id, { rewardPackId: v })}
-                    />
-
-                    <PackSelect
-                        label="HousesInShop (домики в магазине)"
-                        value={round.housesInShopPackId}
-                        onCommit={(v) => onCommit(round.id, { housesInShopPackId: v })}
-                    />
-
-                    <PackSelect
-                        label="PackDeckStart (колода стартового поля)"
-                        value={round.packDeckStartId}
-                        onCommit={(v) => onCommit(round.id, { packDeckStartId: v })}
-                    />
-
-                    <Typography variant="caption" color="text.secondary">
-                        RoundSettings (список раундов)
-                    </Typography>
-                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
-                        {round.roundIds.map((roundId, roundIdIndex) => (
-                            <Chip
-                                key={`${roundId}-${roundIdIndex}`}
-                                label={roundId}
-                                size="small"
-                                onDelete={() =>
-                                    onCommit(round.id, {
-                                        roundIds: round.roundIds.filter((_id, i) => i !== roundIdIndex),
-                                    })
-                                }
-                            />
-                        ))}
-                        {round.roundIds.length === 0 && (
-                            <Typography variant="body2" color="text.secondary">
-                                Раундов пока нет.
-                            </Typography>
-                        )}
-                    </Stack>
-
-                    <Autocomplete
+        <Paper
+            variant="outlined"
+            draggable
+            data-sprint-round-card={isDragging ? undefined : "true"}
+            onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                onDragStart(round.id);
+            }}
+            onDragEnd={onDragEnd}
+            sx={{
+                p: 2,
+                cursor: "grab",
+                opacity: isDragging ? 0.4 : 1,
+                pointerEvents: isDragging ? "none" : "auto",
+            }}
+        >
+            <Stack spacing={1.5}>
+                <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                    <DragIndicatorIcon fontSize="small" color="disabled" />
+                    <Select
                         size="small"
-                        disabled={round.roundIds.length >= MAX_ROUND_IDS}
-                        options={store.rounds}
-                        value={null}
-                        getOptionLabel={(r: Round) => `${store.roundName(r)} (${r.id})`}
-                        onChange={(_event, added) => handleAddRound(added)}
-                        renderInput={(params) => (
-                            <TextField
-                                {...params}
-                                label={
-                                    round.roundIds.length >= MAX_ROUND_IDS
-                                        ? "Достигнут предел (9)"
-                                        : "+ Добавить раунд в список"
-                                }
-                            />
-                        )}
+                        value={round.stage ?? 1}
+                        onChange={(event) => onCommit(round.id, { stage: Number(event.target.value) })}
+                        sx={{ minWidth: 110 }}
+                    >
+                        {Array.from({ length: stageCount }, (_, index) => index + 1).map((stage) => (
+                            <MenuItem key={stage} value={stage}>
+                                → Этап {stage}
+                            </MenuItem>
+                        ))}
+                    </Select>
+                    <IconButton aria-label="Удалить раунд из забега" size="small" onClick={() => onDelete(round.id)}>
+                        <CloseIcon fontSize="small" />
+                    </IconButton>
+                </Stack>
+
+                <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap" }}>
+                    <NumberField label="Quota" value={round.quota} onCommit={(v) => onCommit(round.id, { quota: v })} />
+                    <NumberField
+                        label="RewardTickerts"
+                        value={round.rewardTickets}
+                        onCommit={(v) => onCommit(round.id, { rewardTickets: v })}
+                    />
+                    <NumberField
+                        label="RewardTicketsPerBall"
+                        value={round.rewardTicketsPerBall}
+                        onCommit={(v) => onCommit(round.id, { rewardTicketsPerBall: v })}
                     />
                 </Stack>
-            </Paper>
-        </Box>
+
+                <PackSelect
+                    label="RewardPack (колода артефактов)"
+                    value={round.rewardPackId}
+                    onCommit={(v) => onCommit(round.id, { rewardPackId: v })}
+                />
+
+                <PackSelect
+                    label="HousesInShop (домики в магазине)"
+                    value={round.housesInShopPackId}
+                    onCommit={(v) => onCommit(round.id, { housesInShopPackId: v })}
+                />
+
+                <PackSelect
+                    label="PackDeckStart (колода стартового поля)"
+                    value={round.packDeckStartId}
+                    onCommit={(v) => onCommit(round.id, { packDeckStartId: v })}
+                />
+
+                <Typography variant="caption" color="text.secondary">
+                    RoundSettings (список раундов)
+                </Typography>
+                <Stack direction="row" sx={{ flexWrap: "wrap", gap: 0.5 }}>
+                    {round.roundIds.map((roundId, roundIdIndex) => (
+                        <Chip
+                            key={`${roundId}-${roundIdIndex}`}
+                            label={roundId}
+                            size="small"
+                            onDelete={() =>
+                                onCommit(round.id, {
+                                    roundIds: round.roundIds.filter((_id, i) => i !== roundIdIndex),
+                                })
+                            }
+                        />
+                    ))}
+                    {round.roundIds.length === 0 && (
+                        <Typography variant="body2" color="text.secondary">
+                            Раундов пока нет.
+                        </Typography>
+                    )}
+                </Stack>
+
+                <Autocomplete
+                    size="small"
+                    disabled={round.roundIds.length >= MAX_ROUND_IDS}
+                    options={store.rounds}
+                    value={null}
+                    getOptionLabel={(r: Round) => `${store.roundName(r)} (${r.id})`}
+                    onChange={(_event, added) => handleAddRound(added)}
+                    renderInput={(params) => (
+                        <TextField
+                            {...params}
+                            label={
+                                round.roundIds.length >= MAX_ROUND_IDS
+                                    ? "Достигнут предел (9)"
+                                    : "+ Добавить раунд в список"
+                            }
+                        />
+                    )}
+                />
+            </Stack>
+        </Paper>
     );
 });
 

@@ -55,23 +55,19 @@ function makeBlankRound(sprintId: string, stage: number): SprintRound {
 }
 
 /** A gap that opens up at the hovered insertion slot while dragging a round card — pushes the surrounding cards
- *  apart just enough to show where it'll land, per the user's own "чуть отодвигать соседей" ask. Wrapped in the
- *  same vertical padding as each card (see the cards' own wrapping Box) so it sits at the same rhythm now that
- *  the Stack's own `spacing` was removed in favor of per-item padding (see SprintDetailPage's card-list Stack). */
+ *  apart just enough to show where it'll land, per the user's own "чуть отодвигать соседей" ask. */
 function DropPlaceholder() {
     return (
-        <Box sx={{ py: 1 }}>
-            <Box
-                sx={{
-                    height: 20,
-                    borderRadius: 1,
-                    border: "2px dashed",
-                    borderColor: "primary.main",
-                    bgcolor: "primary.main",
-                    opacity: 0.25,
-                }}
-            />
-        </Box>
+        <Box
+            sx={{
+                height: 20,
+                borderRadius: 1,
+                border: "2px dashed",
+                borderColor: "primary.main",
+                bgcolor: "primary.main",
+                opacity: 0.25,
+            }}
+        />
     );
 }
 
@@ -109,8 +105,9 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     // every drop target" event that's reliable across browsers (dragleave fires on every inter-element boundary
     // crossing too, including between a card and its own children, so it flickers constantly). Instead: every
     // dragover resets a short timer; if none arrives before it fires, nothing is being hovered anymore, so the
-    // placeholder clears and the dragged card visually settles back into its own spot (it never actually left —
-    // see isDragging's own doc — so "clearing the placeholder" IS "the card returns to its position").
+    // placeholder clears. Since the dragged card never actually left its own slot (see isDragging's own doc),
+    // clearing the placeholder IS "the card returns to its position" — and handleDrop below refuses to move
+    // anything unless dragOverTarget is actually set at drop time, so a drop with no settled target is a no-op.
     const dragOverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
     // Every handler passed down to a card is wrapped in useCallback so SprintRoundCard's memo() can actually bail
@@ -169,15 +166,8 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     /** Only actually updates state (and so only actually triggers a re-render) when the target slot genuinely
      *  changed — native `dragover` fires continuously (many times a second) for as long as the pointer is over an
      *  element, even without it moving, so without this bail-out every single one of those ticks re-rendered the
-     *  *entire* board (every stage's every card, ~4 form fields each) regardless of whether anything actually
-     *  moved. That was the real cause of the reported drag lag/mis-drops — the event queue backed up under the
-     *  re-render cost, so by the time `drop` fired, `dragOverTarget` could be several stale ticks behind the
-     *  pointer's real position. Uses the functional setState form so it has zero external dependencies and can
-     *  stay a permanently stable reference (see handleCardDragOver below).
-     *
-     *  Also re-arms the "nothing is being hovered" timeout (see dragOverClearTimeoutRef's own doc) on every call,
-     *  whether or not the target actually changed — the timer needs resetting on every live dragover regardless,
-     *  purely to prove the pointer is still over *something* valid. */
+     *  *entire* board regardless of whether anything actually moved. Also re-arms the "nothing is being hovered"
+     *  timeout on every call, whether or not the target actually changed. */
     const setDragOverTargetIfChanged = useCallback((next: { stage: number; index: number }) => {
         setDragOverTarget((prev) => (prev?.stage === next.stage && prev.index === next.index ? prev : next));
         if (dragOverClearTimeoutRef.current !== undefined) clearTimeout(dragOverClearTimeoutRef.current);
@@ -187,28 +177,33 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         }, 150);
     }, []);
 
-    /** Hovering directly over a card — split into top/bottom halves to decide whether the placeholder opens
-     *  before or after this card. Stops propagation so the column-level fallback below doesn't immediately
-     *  overwrite this with "end of column" as the event bubbles up. Reads `stage`/`index` from the card's own
-     *  `data-*` attributes instead of a JS closure, so this ONE function reference can be shared, unchanged,
-     *  across all 18 cards — a per-card closure (`(event) => handleCardDragOver(event, stage, index)`) would
-     *  itself be a fresh prop value every render, defeating memo() just as badly as an unmemoized handler would.
-     *  This turned out to be the real remaining cause of the reported "several seconds to even start dragging" /
-     *  "~10 seconds to see the gap" lag — `setDragOverTargetIfChanged`'s equality-gate alone only helped once a
-     *  re-render was already cheap; with every card's props churning every render, memo() could never bail, so
-     *  every single dragover tick still re-rendered and re-reconciled all 18 cards' full field sets regardless. */
-    const handleCardDragOver = useCallback(
-        (event: DragEvent<HTMLElement>) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const stage = Number(event.currentTarget.dataset.stage);
-            const index = Number(event.currentTarget.dataset.index);
-            const rect = event.currentTarget.getBoundingClientRect();
-            const isAfter = event.clientY > rect.top + rect.height / 2;
-            setDragOverTargetIfChanged({ stage, index: index + (isAfter ? 1 : 0) });
-        },
-        [setDragOverTargetIfChanged]
-    );
+    /**
+     * Fires for ANY dragover anywhere within a stage column — there's exactly ONE of these per column (3 total),
+     * attached to the column's own Paper, not one per card. Rather than relying on WHICH specific card element the
+     * event happens to bubble from (the earlier per-card-delegation design — that meant the only "sensitive" zone
+     * for a given insertion point was whatever DOM element the browser's hit-testing picked for that exact pixel,
+     * which in practice meant needing near-pixel-perfect aim right at a card's own edge to land a specific
+     * position), this measures the pointer's Y position against every currently-rendered (non-dragged) card's own
+     * midpoint directly via `getBoundingClientRect()`, and picks whichever slot it's actually closest to being
+     * above. This is correct and forgiving for EVERY point in the column, not just the boundary pixels — it's the
+     * same geometric-comparison technique standard drag-reorder libraries (dnd-kit, SortableJS, etc.) use, and it
+     * needed no `data-*`/per-card-closure plumbing at all once the "compare against real element positions" idea
+     * replaced "guess from which nested element received the event."
+     */
+    const handleColumnDragOver = (event: DragEvent<HTMLElement>, stage: number) => {
+        event.preventDefault();
+        if (!draggedRoundId) return;
+        const cardEls = event.currentTarget.querySelectorAll<HTMLElement>('[data-sprint-round-card="true"]');
+        let index = cardEls.length;
+        for (let i = 0; i < cardEls.length; i++) {
+            const rect = cardEls[i].getBoundingClientRect();
+            if (event.clientY < rect.top + rect.height / 2) {
+                index = i;
+                break;
+            }
+        }
+        setDragOverTargetIfChanged({ stage, index });
+    };
 
     if (!sprint) {
         return (
@@ -227,26 +222,24 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         updateSprint({ rounds: placeRoundInStage(sprint.rounds, makeBlankRound(sprint.id, stage), stage) });
     };
 
+    /** Only actually moves the round if `dragOverTarget` is still set AND points at this exact stage — i.e. only
+     *  if the pointer was genuinely hovering a real position here right before the drop. If it's null (cleared by
+     *  the "nothing hovered" timeout above) or points elsewhere, the round is left exactly where it started —
+     *  dropping without ever settling on a specific position cancels the move instead of guessing "append to the
+     *  end of whichever column happened to be under the cursor," which is what used to happen and read as the
+     *  round "flying to the end of its stage" for no clear reason. */
     const handleDrop = (stage: number) => {
         if (!draggedRoundId) return;
         clearDragOverTimeout();
-        const target = sprint.rounds.find((r) => r.id === draggedRoundId);
-        if (target) {
-            const rest = sprint.rounds.filter((r) => r.id !== draggedRoundId);
-            const index = dragOverTarget?.stage === stage ? dragOverTarget.index : undefined;
-            updateSprint({ rounds: placeRoundInStage(rest, { ...target, stage }, stage, index) });
+        if (dragOverTarget?.stage === stage) {
+            const target = sprint.rounds.find((r) => r.id === draggedRoundId);
+            if (target) {
+                const rest = sprint.rounds.filter((r) => r.id !== draggedRoundId);
+                updateSprint({ rounds: placeRoundInStage(rest, { ...target, stage }, stage, dragOverTarget.index) });
+            }
         }
         setDraggedRoundId(null);
         setDragOverTarget(null);
-    };
-
-    /** Hovering over the column's own empty space (below the last card, or an empty column) — only reached when
-     *  no card's handler already claimed the event via stopPropagation. One per stage (3 total), not per card, so
-     *  it isn't part of the same memo-defeating multiplication problem and doesn't need the data-attribute trick. */
-    const handleColumnDragOver = (event: DragEvent<HTMLElement>, stage: number) => {
-        event.preventDefault();
-        const count = sprint.rounds.filter((r) => (r.stage ?? 1) === stage && r.id !== draggedRoundId).length;
-        setDragOverTargetIfChanged({ stage, index: count });
     };
 
     const stages = Array.from({ length: stageCount }, (_, index) => index + 1);
@@ -307,10 +300,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                             <Stack spacing={2}>
                                 <Typography variant="h6">Этап {stage}</Typography>
 
-                                {/* No `spacing` here — each card supplies its own vertical padding instead (see
-                                    SprintRoundCard's wrapping Box), so its dragover-sensitive area extends into
-                                    what would otherwise be a dead gap between cards that no element listens on. */}
-                                <Stack>
+                                <Stack spacing={2}>
                                     {stageRounds.map((round) => {
                                         // Both branches below must render the exact same element SHAPE (a
                                         // Fragment wrapping one SprintRoundCard) — branching between a bare
@@ -328,12 +318,9 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                                                 <SprintRoundCard
                                                     round={round}
                                                     stageCount={stageCount}
-                                                    stage={stage}
-                                                    index={logicalIndex}
                                                     onCommit={handleRoundCommit}
                                                     onDelete={handleRoundDelete}
                                                     onDragStart={setDraggedRoundId}
-                                                    onDragOver={isDragging ? undefined : handleCardDragOver}
                                                     onDragEnd={handleDragEnd}
                                                     isDragging={isDragging}
                                                 />
