@@ -101,14 +101,19 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
     const [confirmingDelete, setConfirmingDelete] = useState(false);
     const [draggedRoundId, setDraggedRoundId] = useState<string | null>(null);
     const [dragOverTarget, setDragOverTarget] = useState<{ stage: number; index: number } | null>(null);
-    // Native `dragover` only fires while the pointer is over a listening element — there's no native "you've left
-    // every drop target" event that's reliable across browsers (dragleave fires on every inter-element boundary
-    // crossing too, including between a card and its own children, so it flickers constantly). Instead: every
-    // dragover resets a short timer; if none arrives before it fires, nothing is being hovered anymore, so the
-    // placeholder clears. Since the dragged card never actually left its own slot (see isDragging's own doc),
-    // clearing the placeholder IS "the card returns to its position" — and handleDrop below refuses to move
-    // anything unless dragOverTarget is actually set at drop time, so a drop with no settled target is a no-op.
-    const dragOverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    // Cleared on genuine exit (dragleave off the whole column — see handleColumnDragLeave) or on drop/dragend, NOT
+    // on a timer. An earlier version cleared via a "no dragover arrived recently" debounce timeout instead, since
+    // dragleave firing on every inter-element boundary crossing (including moving onto a child element) made it
+    // look unusably flickery with the old per-card-listener design. But ANY timeout duration is fundamentally the
+    // wrong tool here: a stationary pointer still sitting over a perfectly valid slot needs the state to just stay
+    // put indefinitely, with no clock involved at all — a timeout can only ever approximate that by guessing how
+    // often the browser re-fires `dragover` on its own (which turned out to be ~350ms, not "continuous," and even
+    // that's not a hard guarantee across browsers/tab-throttling). Now that there's ONE handler per column instead
+    // of one per card, `dragleave`'s `relatedTarget` reliably distinguishes "actually left the column" from "moved
+    // onto a child card within it" (see handleColumnDragLeave), so real enter/exit events can drive this directly.
+    // Since the dragged card never actually left its own slot (see isDragging's own doc), clearing the placeholder
+    // IS "the card returns to its position" — and handleDrop below refuses to move anything unless dragOverTarget
+    // is actually set at drop time, so a drop with no settled target is a no-op.
 
     // Snapshot of every card's own rect (keyed by round id), taken ONCE at dragstart — see handleRoundDragStart —
     // and read (never re-measured) by handleColumnDragOver for the rest of the drag. Measuring live instead (the
@@ -175,41 +180,29 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
         setDraggedRoundId(id);
     }, []);
 
-    const clearDragOverTimeout = useCallback(() => {
-        if (dragOverClearTimeoutRef.current !== undefined) {
-            clearTimeout(dragOverClearTimeoutRef.current);
-            dragOverClearTimeoutRef.current = undefined;
-        }
-    }, []);
-
     const handleDragEnd = useCallback(() => {
-        clearDragOverTimeout();
         setDraggedRoundId(null);
         setDragOverTarget(null);
-    }, [clearDragOverTimeout]);
+    }, []);
 
     /** Only actually updates state (and so only actually triggers a re-render) when the target slot genuinely
      *  changed — native `dragover` fires continuously for as long as the pointer is over an element, even without
      *  it moving, so without this bail-out every single one of those ticks re-rendered the *entire* board
-     *  regardless of whether anything actually moved. Also re-arms the "nothing is being hovered" timeout on every
-     *  call, whether or not the target actually changed.
-     *
-     *  That timeout must stay comfortably ABOVE the browser's own native re-fire interval for a stationary
-     *  pointer: per the HTML Drag and Drop spec, the user agent only re-dispatches `dragover` roughly every
-     *  350ms while nothing changes, NOT continuously — a shorter clear-timeout (150ms was tried first) means
-     *  every time the pointer genuinely stops moving, even while still sitting over a perfectly valid slot, our
-     *  own timer fires and clears the target before the next native tick has a chance to re-arm it, which read as
-     *  the cards "changing their mind" and un-shifting the moment the pointer held still. 500ms gives enough
-     *  margin above that ~350ms interval that a stationary-but-still-hovering pointer never gets cleared, while a
-     *  pointer that's truly left every drop target still resolves to "return to original position" well within
-     *  half a second. */
+     *  regardless of whether anything actually moved. */
     const setDragOverTargetIfChanged = useCallback((next: { stage: number; index: number }) => {
         setDragOverTarget((prev) => (prev?.stage === next.stage && prev.index === next.index ? prev : next));
-        if (dragOverClearTimeoutRef.current !== undefined) clearTimeout(dragOverClearTimeoutRef.current);
-        dragOverClearTimeoutRef.current = setTimeout(() => {
-            dragOverClearTimeoutRef.current = undefined;
-            setDragOverTarget(null);
-        }, 500);
+    }, []);
+
+    /** The genuine "exit" half of the enter/exit pair (`handleColumnDragOver` is "enter/stay") — fires whenever
+     *  the pointer leaves ANY element inside the column, which includes moving from the column's own padding onto
+     *  a child card, not just truly leaving the column's outer bounds. `relatedTarget` (the element being entered)
+     *  is what distinguishes the two: if it's still inside this column, the pointer only crossed an internal
+     *  boundary and nothing should change; only clear when it's genuinely left the whole column (or the drag left
+     *  the page entirely, when `relatedTarget` is null). This replaced a timeout-based guess entirely — see
+     *  `dragOverTarget`'s own doc for why a clock was never the right tool for "has the pointer left." */
+    const handleColumnDragLeave = useCallback((event: DragEvent<HTMLElement>, stage: number) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDragOverTarget((prev) => (prev?.stage === stage ? null : prev));
     }, []);
 
     /**
@@ -264,13 +257,12 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
 
     /** Only actually moves the round if `dragOverTarget` is still set AND points at this exact stage — i.e. only
      *  if the pointer was genuinely hovering a real position here right before the drop. If it's null (cleared by
-     *  the "nothing hovered" timeout above) or points elsewhere, the round is left exactly where it started —
-     *  dropping without ever settling on a specific position cancels the move instead of guessing "append to the
+     *  a genuine exit — see handleColumnDragLeave) or points elsewhere, the round is left exactly where it started
+     *  — dropping without ever settling on a specific position cancels the move instead of guessing "append to the
      *  end of whichever column happened to be under the cursor," which is what used to happen and read as the
      *  round "flying to the end of its stage" for no clear reason. */
     const handleDrop = (stage: number) => {
         if (!draggedRoundId) return;
-        clearDragOverTimeout();
         if (dragOverTarget?.stage === stage) {
             const target = sprint.rounds.find((r) => r.id === draggedRoundId);
             if (target) {
@@ -335,6 +327,7 @@ export default function SprintDetailPage({ id: idProp }: Props = {}) {
                             key={stage}
                             variant="outlined"
                             onDragOver={(event) => handleColumnDragOver(event, stage)}
+                            onDragLeave={(event) => handleColumnDragLeave(event, stage)}
                             onDrop={() => handleDrop(stage)}
                             sx={{ p: 2, bgcolor: "action.hover" }}
                         >
