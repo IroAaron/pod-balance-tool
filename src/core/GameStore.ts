@@ -18,6 +18,7 @@ import { computeSuggestedBuilds, computeCascadeBuilds, computeUpgradeTierIds } f
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 import { DEFAULT_DESCRIPTION_SETTINGS, getEnabledGlossaryEntries, type DescriptionSettings } from "./domain/descriptionTemplate";
 import { buildExportDescriptionText } from "./domain/exportText";
+import { buildImportDescriptionText } from "./domain/importText";
 import { postExportPayload, type ExportResult } from "./import/sheetSource";
 import { parseOptionalNumber } from "./import/normalize";
 
@@ -682,6 +683,24 @@ export class GameStore {
         });
     }
 
+    /** Reverses any real [img]/[color] BBCode or literal glossary emoji a translator typed straight into the
+     *  Sheet back into the site's own editable form ({item:ID}/{tag:Name}/glossary phrase text) — see
+     *  importText.ts's doc. Runs against whatever items/tagIcons/glossary are current at call time; applyImportResult
+     *  always calls this after `this.allItems` has already been reassigned for the same import, so a combined
+     *  config+translations import sees the freshly-imported items, not the stale previous set. */
+    private reverseImportedIcons(translations: Translation[]): Translation[] {
+        const importContext = {
+            items: this.allItems,
+            itemIcons: this.itemIcons,
+            tagIcons: this.tagIcons,
+            glossary: this.glossary,
+        };
+        return translations.map((translation) => ({
+            ...translation,
+            value: buildImportDescriptionText(translation.value, importContext),
+        }));
+    }
+
     /**
      * `scope` matters only for a non-merge (full replace) apply: "config" replaces every config-derived field
      * (items/mechanics/upgradeChains/replaceRules/enumValues) but leaves `translations` untouched, "translations"
@@ -693,7 +712,7 @@ export class GameStore {
     private applyImportResult(result: ImportResult, options?: { merge?: boolean; scope?: "config" | "translations" }): void {
         if (options?.merge) {
             this.allItems = mergeById(this.allItems, result.data.items);
-            this.translations = mergeByKey(this.translations, result.data.translations);
+            this.translations = mergeByKey(this.translations, this.reverseImportedIcons(result.data.translations));
             this.mechanics = mergeById(this.mechanics, result.data.mechanics);
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
             this.rounds = mergeById(this.rounds, result.data.rounds);
@@ -709,7 +728,7 @@ export class GameStore {
                 this.enumValues = result.data.enumValues;
             }
             if (options?.scope !== "config") {
-                this.translations = result.data.translations;
+                this.translations = this.reverseImportedIcons(result.data.translations);
             }
         }
 
