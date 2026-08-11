@@ -10,7 +10,6 @@ import BuildsPage from "../pages/Builds/BuildsPage";
 import BuildDetailPage from "../pages/Builds/BuildDetailPage";
 import GlossaryPage from "../pages/Glossary/GlossaryPage";
 import GraphPage from "../pages/Graph/GraphPage";
-import AutotestsPage from "../pages/Autotests/AutotestsPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
 import BalancePage from "../pages/Balance/BalancePage";
 import SettingsPage from "../pages/Settings/SettingsPage";
@@ -61,7 +60,6 @@ export default function AppRouter() {
             <Route path="/graph" element={<GraphPage />} />
             <Route path="/balance" element={<BalancePage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/autotests" element={<AutotestsPage />} />
             <Route path="/saves" element={<SavesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/blueprint-lab" element={<BlueprintLabPage />} />

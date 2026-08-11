@@ -15,7 +15,6 @@ export const menu: NavigationMenuItem[] = [
     { text: "Граф", path: "/graph", icon: "🕸" },
     { text: "Баланс", path: "/balance", icon: "⚖️" },
     { text: "Аналитика", path: "/analytics", icon: "📊" },
-    { text: "Автотесты", path: "/autotests", icon: "✅" },
     { text: "Сохранения", path: "/saves", icon: "💾" },
     { text: "Настройки", path: "/settings", icon: "⚙️" },
     { text: "Blueprint-лаборатория", path: "/blueprint-lab", icon: "🧪" },
