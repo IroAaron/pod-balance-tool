@@ -36,6 +36,13 @@ const STATUS_VIEW = {
     broken: { label: "Есть новые падения", color: "error" as const, Icon: ErrorOutlinedIcon },
 };
 
+/** Ссылки на репозиторий с тестами. Прогон запускается на стороне GitHub Actions:
+ *  сайт статический и сам ничего запустить не может, а pod-autotests приватный —
+ *  любой запрос к нему требовал бы токена. Токен в публичной странице недопустим,
+ *  поэтому здесь именно ссылка, а не автоматический запуск. */
+const AUTOTESTS_REPO = "https://github.com/IroAaron/pod-autotests";
+const RUN_WORKFLOW_URL = `${AUTOTESTS_REPO}/actions/workflows/tests.yml`;
+
 const SEVERITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> = {
     critical: "error",
     high: "error",
@@ -164,9 +171,9 @@ export default function AutotestsPage() {
                 Автотесты
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Разбор прогонов из{" "}
-                <code>pod-autotests</code>. Загрузите <code>triage.json</code> — его кладёт рядом с
-                отчётом <code>scripts/analyze/triage.py</code>.
+                Разбор прогонов из <code>pod-autotests</code>. Прогон запускается на GitHub,
+                результат загружается сюда файлом <code>triage.json</code> — сайт статический
+                и сам тесты выполнить не может.
             </Typography>
 
             <Stack direction="row" sx={{ gap: 1, alignItems: "center", flexWrap: "wrap", mb: 2 }}>
@@ -181,6 +188,15 @@ export default function AutotestsPage() {
                     hidden
                     onChange={(event) => void handleFiles(event.target.files)}
                 />
+                <Button
+                    variant="outlined"
+                    component="a"
+                    href={RUN_WORKFLOW_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Запустить прогон на GitHub
+                </Button>
                 {runs.length > 0 ? (
                     <Typography variant="body2" color="text.secondary">
                         Сохранено прогонов: {runs.length}
@@ -196,9 +212,21 @@ export default function AutotestsPage() {
 
             {!current ? (
                 <Alert severity="info">
-                    Прогонов пока нет. Получить отчёт: прогнать тесты в <code>pod-autotests</code>,
-                    затем <code>python3 scripts/analyze/triage.py reports/report_1/results.xml</code> —
-                    он положит <code>triage.json</code> рядом с отчётом.
+                    Прогонов пока нет. Как получить отчёт:
+                    <Box component="ol" sx={{ pl: 3, mt: 1, mb: 0 }}>
+                        <li>
+                            Нажмите «Запустить прогон на GitHub» — откроется вкладка Actions.
+                            Там <strong>Run workflow</strong> → ветка <code>main</code> → зелёная кнопка.
+                        </li>
+                        <li>Дождитесь окончания (быстрые тесты ~2 минуты, сцены дольше).</li>
+                        <li>
+                            Внизу страницы прогона, в разделе <strong>Artifacts</strong>, скачайте{" "}
+                            <code>triage-fast</code> или <code>triage-scenes</code> и распакуйте.
+                        </li>
+                        <li>Загрузите оттуда <code>triage.json</code> кнопкой слева.</li>
+                    </Box>
+                    Локально то же самое даёт{" "}
+                    <code>python3 scripts/analyze/triage.py reports/report_1/results.xml</code>.
                 </Alert>
             ) : (
                 <>
