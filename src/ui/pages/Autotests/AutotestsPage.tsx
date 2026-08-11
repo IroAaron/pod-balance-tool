@@ -50,13 +50,6 @@ const SEVERITY_COLOR: Record<string, "error" | "warning" | "info" | "default"> =
     low: "default",
 };
 
-const CATEGORY_LABEL: Record<string, string> = {
-    regression: "новое падение",
-    known_issue: "известное",
-    infrastructure: "инфраструктура",
-    performance: "производительность",
-    observation: "наблюдение",
-};
 
 function statusView(status: string) {
     return STATUS_VIEW[status as keyof typeof STATUS_VIEW] ?? STATUS_VIEW.attention;
@@ -88,44 +81,95 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
     );
 }
 
-function FindingRow({ finding }: { finding: Finding }) {
+/** Находка карточкой, а не строкой таблицы: у падения бывает 27 путей в деталях,
+ *  и в ячейке это разворачивалось в стену текста, среди которой не видно ни
+ *  заголовка, ни того, что делать. Детали убраны под раскрывающийся блок. */
+function FindingCard({ finding }: { finding: Finding }) {
+    const details = finding.what_happened?.trim() ?? "";
+    const lines = details ? details.split("\n") : [];
+    // Порог в 3 строки подобран по реальным отчётам: короткое падение (одна-две
+    // строки) читается сразу, длинное — прячется, иначе перекрывает всё остальное.
+    const isLong = lines.length > 3;
+    const preview = isLong ? lines.slice(0, 3).join("\n") : details;
+
     return (
-        <TableRow>
-            <TableCell sx={{ verticalAlign: "top" }}>
+        <Paper variant="outlined" sx={{ p: 2, mb: 1.5 }}>
+            <Stack direction="row" sx={{ gap: 1, alignItems: "center", flexWrap: "wrap", mb: 0.5 }}>
                 <Chip
                     size="small"
                     label={finding.severity}
                     color={SEVERITY_COLOR[finding.severity] ?? "default"}
                     variant={finding.severity === "low" ? "outlined" : "filled"}
                 />
-            </TableCell>
-            <TableCell sx={{ verticalAlign: "top" }}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, flex: 1, minWidth: 200 }}>
                     {finding.title}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                    {finding.test}
-                </Typography>
-                {finding.what_happened ? (
-                    <Typography
-                        variant="body2"
-                        color="text.secondary"
-                        sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}
+                <Chip size="small" variant="outlined" label={`чинит: ${finding.owner}`} />
+            </Stack>
+
+            <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ fontFamily: "monospace", display: "block", mb: 1 }}
+            >
+                {finding.test}
+            </Typography>
+
+            {details ? (
+                <Box
+                    component="pre"
+                    sx={{
+                        m: 0,
+                        mb: 1,
+                        p: 1,
+                        bgcolor: "action.hover",
+                        borderRadius: 1,
+                        fontSize: "0.78rem",
+                        // Длинные пути не должны растягивать страницу вбок: прокрутка
+                        // остаётся внутри блока.
+                        overflowX: "auto",
+                        whiteSpace: "pre",
+                    }}
+                >
+                    {preview}
+                </Box>
+            ) : null}
+
+            {isLong ? (
+                <Box component="details" sx={{ mb: 1 }}>
+                    <Box
+                        component="summary"
+                        sx={{ cursor: "pointer", fontSize: "0.85rem", color: "text.secondary" }}
                     >
-                        {finding.what_happened}
-                    </Typography>
-                ) : null}
-                {finding.recommended_action ? (
-                    <Typography variant="body2" sx={{ mt: 0.5 }}>
-                        <strong>Что сделать:</strong> {finding.recommended_action}
-                    </Typography>
-                ) : null}
-            </TableCell>
-            <TableCell sx={{ verticalAlign: "top", whiteSpace: "nowrap" }}>
-                {CATEGORY_LABEL[finding.category] ?? finding.category}
-            </TableCell>
-            <TableCell sx={{ verticalAlign: "top", whiteSpace: "nowrap" }}>{finding.owner}</TableCell>
-        </TableRow>
+                        Показать целиком ({lines.length} строк)
+                    </Box>
+                    <Box
+                        component="pre"
+                        sx={{
+                            m: 0,
+                            mt: 1,
+                            p: 1,
+                            bgcolor: "action.hover",
+                            borderRadius: 1,
+                            fontSize: "0.78rem",
+                            overflowX: "auto",
+                            maxHeight: 320,
+                            overflowY: "auto",
+                            whiteSpace: "pre",
+                        }}
+                    >
+                        {details}
+                    </Box>
+                </Box>
+            ) : null}
+
+            {finding.recommended_action ? (
+                <Typography variant="body2">
+                    <strong>Что сделать: </strong>
+                    {finding.recommended_action}
+                </Typography>
+            ) : null}
+        </Paper>
     );
 }
 
@@ -140,9 +184,16 @@ export default function AutotestsPage() {
         return runs.find((run) => run.id === selectedId) ?? runs[0];
     }, [runs, selectedId]);
 
-    const sortedFindings = useMemo(() => {
-        if (!current) return [];
-        return [...current.analysis.findings].sort(compareBySeverity);
+    /** Находки делятся по тому, что с ними делать, а не по важности: известные
+     *  проблемы уже разобраны людьми и в ежедневном чтении отчёта только мешают,
+     *  поэтому они внизу и свёрнуты. Наверху — то, что появилось впервые. */
+    const grouped = useMemo(() => {
+        if (!current) return { attention: [], known: [] };
+        const sorted = [...current.analysis.findings].sort(compareBySeverity);
+        return {
+            attention: sorted.filter((f) => f.category !== "known_issue"),
+            known: sorted.filter((f) => f.category === "known_issue"),
+        };
     }, [current]);
 
     async function handleFiles(fileList: FileList | null) {
@@ -265,29 +316,34 @@ export default function AutotestsPage() {
                         </Stack>
                     </Paper>
 
-                    {sortedFindings.length > 0 ? (
-                        <Paper variant="outlined" sx={{ mb: 2 }}>
-                            <Typography variant="h6" sx={{ p: 2, pb: 1 }}>
-                                Находки
+                    {grouped.attention.length > 0 ? (
+                        <Box sx={{ mb: 3 }}>
+                            <Typography variant="h6" sx={{ mb: 1 }}>
+                                Требует внимания ({grouped.attention.length})
                             </Typography>
-                            <Box sx={{ overflowX: "auto" }}>
-                                <Table size="small">
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell>Важность</TableCell>
-                                            <TableCell>Что</TableCell>
-                                            <TableCell>Категория</TableCell>
-                                            <TableCell>Кому</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-                                        {sortedFindings.map((finding, index) => (
-                                            <FindingRow key={`${finding.test}-${index}`} finding={finding} />
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </Box>
-                        </Paper>
+                            {grouped.attention.map((finding, index) => (
+                                <FindingCard key={`att-${finding.test}-${index}`} finding={finding} />
+                            ))}
+                        </Box>
+                    ) : null}
+
+                    {grouped.known.length > 0 ? (
+                        <Box component="details" sx={{ mb: 3 }}>
+                            <Typography
+                                component="summary"
+                                variant="h6"
+                                sx={{ cursor: "pointer", mb: 1 }}
+                            >
+                                Известные проблемы ({grouped.known.length})
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                                Разобраны ранее и записаны в <code>known_issues.json</code>. Падают
+                                намеренно — тревоги не требуют, но всё ещё воспроизводятся.
+                            </Typography>
+                            {grouped.known.map((finding, index) => (
+                                <FindingCard key={`known-${finding.test}-${index}`} finding={finding} />
+                            ))}
+                        </Box>
                     ) : null}
 
                     {current.analysis.notes.length > 0 ? (
