@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     Alert,
     Box,
@@ -26,7 +26,12 @@ import {
     type Finding,
     type StoredTestRun,
 } from "../../../core/models/TestRun";
-import { addTestRun, loadTestRuns, removeTestRun } from "../../../core/persistence/autotestsStore";
+import {
+    addTestRun,
+    fetchPublishedRun,
+    loadTestRuns,
+    removeTestRun,
+} from "../../../core/persistence/autotestsStore";
 
 /** Статус прогона всегда показывается иконкой + словом, а не одним цветом:
  *  цвет не читается при дальтонизме и теряется в ч/б печати. */
@@ -178,6 +183,25 @@ export default function AutotestsPage() {
     const [error, setError] = useState<string | null>(null);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [autoLoaded, setAutoLoaded] = useState(false);
+
+    /** Разбор, опубликованный CI после последнего прогона, подхватывается сам.
+     *  Ручная загрузка при этом остаётся: публикация может быть не настроена,
+     *  а иногда нужно посмотреть отчёт с чужой ветки или из старого артефакта.
+     *
+     *  addTestRun дедуплицирует по содержимому прогона, поэтому повторные заходы
+     *  на страницу не плодят одинаковые записи в истории. */
+    useEffect(() => {
+        let cancelled = false;
+        void fetchPublishedRun().then((report) => {
+            if (cancelled || !report) return;
+            setRuns(addTestRun(report, "latest.json (из CI)"));
+            setAutoLoaded(true);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const current = useMemo(() => {
         if (runs.length === 0) return null;
@@ -251,6 +275,7 @@ export default function AutotestsPage() {
                 {runs.length > 0 ? (
                     <Typography variant="body2" color="text.secondary">
                         Сохранено прогонов: {runs.length}
+                        {autoLoaded ? " · последний подтянут из CI" : ""}
                     </Typography>
                 ) : null}
             </Stack>

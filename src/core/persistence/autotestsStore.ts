@@ -1,4 +1,4 @@
-import type { StoredTestRun, TestRunReport } from "../models/TestRun";
+import { parseTestRunReport, type StoredTestRun, type TestRunReport } from "../models/TestRun";
 
 /** Хранилище загруженных прогонов автотестов.
  *
@@ -76,4 +76,26 @@ export function removeTestRun(id: string): StoredTestRun[] {
 
 export function clearTestRuns(): void {
     localStorage.removeItem(KEY);
+}
+
+
+/** Путь, по которому CI из pod-autotests публикует последний разбор.
+ *  Файл лежит в public/ этого репозитория и попадает на сайт вместе со сборкой,
+ *  поэтому читается с того же origin — ни токена, ни CORS. */
+export const PUBLISHED_RUN_URL = `${import.meta.env.BASE_URL}autotests/latest.json`;
+
+/** Подтянуть опубликованный CI разбор.
+ *
+ *  Возвращает null, если файла нет: это штатная ситуация, пока публикация
+ *  не настроена (см. README в pod-autotests), и страница должна работать
+ *  как раньше — с ручной загрузкой файла.
+ */
+export async function fetchPublishedRun(): Promise<TestRunReport | null> {
+    try {
+        const response = await fetch(PUBLISHED_RUN_URL, { cache: "no-store" });
+        if (!response.ok) return null;
+        return parseTestRunReport(await response.json());
+    } catch {
+        return null;
+    }
 }
