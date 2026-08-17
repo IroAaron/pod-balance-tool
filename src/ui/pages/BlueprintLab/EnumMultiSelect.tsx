@@ -49,13 +49,18 @@ export default function EnumMultiSelect({ dimension, label, value, onChange }: P
         >
             {options.map((v) => {
                 const desc = valueDescriptions[dimension]?.[v];
+                // MenuItem must stay Select's *direct* child: Select reads `child.props.value` to know which
+                // option was clicked, so wrapping it in a Tooltip made every click resolve to `undefined` and
+                // silently select nothing. The tooltip goes inside the item instead, around the whole row.
                 return (
-                    <Tooltip key={v} title={desc || ""} placement="right" disableHoverListener={!desc} slotProps={slotProps}>
-                        <MenuItem value={v}>
-                            <Checkbox size="small" checked={value.includes(v)} />
-                            <ListItemText primary={v} />
-                        </MenuItem>
-                    </Tooltip>
+                    <MenuItem key={v} value={v}>
+                        <Tooltip title={desc || ""} placement="right" disableHoverListener={!desc} slotProps={slotProps}>
+                            <Box sx={{ display: "flex", alignItems: "center", width: "100%" }}>
+                                <Checkbox size="small" checked={value.includes(v)} />
+                                <ListItemText primary={v} />
+                            </Box>
+                        </Tooltip>
+                    </MenuItem>
                 );
             })}
         </Select>
