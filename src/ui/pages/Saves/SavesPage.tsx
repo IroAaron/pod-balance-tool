@@ -12,6 +12,7 @@ import {
     Paper,
     Stack,
     TextField,
+    Tooltip,
     Typography,
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
@@ -41,6 +42,10 @@ export default function SavesPage() {
     const [restoreError, setRestoreError] = useState<string | null>(null);
 
     const [deleteTarget, setDeleteTarget] = useState<BalanceSaveMeta | null>(null);
+
+    // Deleting a shared team save is only allowed when running locally (npm run dev) — see
+    // GameStore.deleteBalanceSave's own doc. Same precedent as SourcesPage's local-only sprite-loading button.
+    const canDeleteSaves = import.meta.env.DEV;
 
     const openCreate = (thenRestore: BalanceSaveMeta | null = null) => {
         setName(thenRestore ? `Автосохранение — ${new Date().toLocaleString("ru-RU")}` : "");
@@ -151,9 +156,22 @@ export default function SavesPage() {
                                 >
                                     Восстановить
                                 </Button>
-                                <Button size="small" color="error" onClick={() => setDeleteTarget(save)}>
-                                    Удалить
-                                </Button>
+                                <Tooltip
+                                    title={
+                                        canDeleteSaves ? "" : "Удаление доступно только при локальной разработке (npm run dev)"
+                                    }
+                                >
+                                    <span>
+                                        <Button
+                                            size="small"
+                                            color="error"
+                                            onClick={() => setDeleteTarget(save)}
+                                            disabled={!canDeleteSaves}
+                                        >
+                                            Удалить
+                                        </Button>
+                                    </span>
+                                </Tooltip>
                             </Stack>
                         </Stack>
                     </Paper>

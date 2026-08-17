@@ -1762,7 +1762,15 @@ export class GameStore {
         return meta;
     }
 
+    /** Only allowed when running locally (`npm run dev`) — same restriction/precedent as SourcesPage's sprite-
+     *  loading button, here to guard against an accidental delete of shared team saves from the deployed site.
+     *  SavesPage's own delete button is disabled to match; this check is a second line of defense, not the only
+     *  one — same "shared-team deterrent, not real security" posture as the rest of this app (no user login). */
     deleteBalanceSave(id: string): void {
+        if (!import.meta.env.DEV) {
+            console.error("deleteBalanceSave: only allowed when running locally (npm run dev)");
+            return;
+        }
         void deleteBalanceSaveRemote(id).catch((error) => console.error("deleteBalanceSave → Firestore", error));
     }
 
