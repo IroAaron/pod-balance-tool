@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
     Alert,
     Button,
@@ -20,9 +21,19 @@ import BallGroupList from "./BallGroupList";
 
 type TabKey = "decks" | "decksShop" | "ballGroups";
 
+const TAB_KEYS: TabKey[] = ["decks", "decksShop", "ballGroups"];
+
 export default function DecksPage() {
     const store = useStore();
-    const [tab, setTab] = useState<TabKey>("decks");
+    // Supports arriving here via a "?tab=...&search=..." link (see PackSourceRow's jump-to-deck button) — read
+    // once on mount, same as the rest of this page's state; a fresh navigation to /decks always remounts this
+    // page, so there's no stale-URL-param risk from switching tabs afterwards.
+    const [searchParams] = useSearchParams();
+    const initialTab = searchParams.get("tab");
+    const [tab, setTab] = useState<TabKey>(
+        initialTab && TAB_KEYS.includes(initialTab as TabKey) ? (initialTab as TabKey) : "decks"
+    );
+    const initialSearch = searchParams.get("search") ?? undefined;
     const [confirmingExport, setConfirmingExport] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
@@ -74,8 +85,8 @@ export default function DecksPage() {
                 <Tab value="ballGroups" label="Колоды шаров" />
             </Tabs>
 
-            {tab === "decks" && <DeckList source="Decks" />}
-            {tab === "decksShop" && <DeckList source="DecksShop" />}
+            {tab === "decks" && <DeckList source="Decks" initialQuery={initialSearch} />}
+            {tab === "decksShop" && <DeckList source="DecksShop" initialQuery={initialSearch} />}
             {tab === "ballGroups" && <BallGroupList />}
 
             <Dialog open={confirmingExport} onClose={() => setConfirmingExport(false)}>

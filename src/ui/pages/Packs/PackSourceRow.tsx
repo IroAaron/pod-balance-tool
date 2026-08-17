@@ -1,10 +1,18 @@
 import { memo, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { Autocomplete, IconButton, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import type { PackSourceEntry } from "../../../core/models/Pack";
 import type { Deck } from "../../../core/models/Deck";
+
+/** DeckSource -> DecksPage's own TabKey (not exported from there — just two known string literals). */
+const DECK_SOURCE_TO_TAB: Record<Deck["source"], string> = {
+    Decks: "decks",
+    DecksShop: "decksShop",
+};
 
 type Props = {
     entry: PackSourceEntry;
@@ -101,6 +109,19 @@ const PackSourceRow = memo(function PackSourceRow({ entry, onCommit, onDelete }:
                     onBlur={commitNumbers}
                     sx={{ width: 110 }}
                 />
+
+                {selectedDeck && (
+                    <Tooltip title="Найти эту колоду на странице «Колоды»">
+                        <IconButton
+                            aria-label="Найти колоду-источник в колодах"
+                            size="small"
+                            component={RouterLink}
+                            to={`/decks?tab=${DECK_SOURCE_TO_TAB[selectedDeck.source]}&search=${encodeURIComponent(selectedDeck.id)}`}
+                        >
+                            <OpenInNewIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                )}
 
                 <IconButton aria-label="Удалить источник" size="small" onClick={() => onDelete(entry.id)}>
                     <CloseIcon fontSize="small" />

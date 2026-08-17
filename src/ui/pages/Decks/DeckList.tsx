@@ -6,12 +6,16 @@ import type { DeckSource } from "../../../core/models/Deck";
 
 type Props = {
     source: DeckSource;
+
+    /** Prefills the search box — used when arriving here via a "find this deck" link (e.g. PackSourceRow's jump
+     *  button) rather than the site's own default empty state. */
+    initialQuery?: string;
 };
 
-export default function DeckList({ source }: Props) {
+export default function DeckList({ source, initialQuery }: Props) {
     const store = useStore();
     const [newDeckId, setNewDeckId] = useState("");
-    const [query, setQuery] = useState("");
+    const [query, setQuery] = useState(initialQuery ?? "");
 
     const decks = store.decks.filter((deck) => deck.source === source);
     const trimmedNewId = newDeckId.trim();
