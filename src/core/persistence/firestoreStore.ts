@@ -90,16 +90,46 @@ export function subscribeBuilds(onChange: (builds: Build[]) => void): () => void
     );
 }
 
-/** Combines the three `shared/*` docs into one callback — fires once per underlying doc snapshot. */
-export function subscribeShared(onChange: (shared: SharedState) => void): () => void {
+/** Every independent `shared/*` doc subscribeShared combines — used to track which ones have delivered their
+ *  first snapshot yet, see `ready` below. */
+const SHARED_DOC_KEYS = [
+    "itemIcons",
+    "customParamValues",
+    "sources",
+    "descriptionSettings",
+    "translationOverrides",
+    "exportedOverrides",
+    "balanceConfig",
+    "deckNames",
+    "sprintStageCounts",
+] as const;
+
+/**
+ * Combines 9 independent `shared/*` doc subscriptions into one callback — fires on every underlying snapshot (so
+ * a live edit to any one field, e.g. from another collaborator, updates immediately), plus a `ready` flag that
+ * only turns true once EVERY one of the 9 has delivered at least one snapshot.
+ *
+ * `ready` matters because callers gate a one-time "seed local form state from the store" remount on it (see
+ * GameStore.sharedReady, consumed by ConstantsTab/SettingsPage's `key={store.sharedReady ? ... : ...}` pattern) —
+ * **before this fix**, GameStore set `sharedReady = true` on the very first of these 9 listeners to fire, not all
+ * of them, so a gated form could remount and seed itself from a field (e.g. `balanceConfig`) that hadn't actually
+ * loaded yet, silently showing/committing stale defaults over real data. Found while verifying that restoring a
+ * BalanceSave correctly repopulates `balanceConfig` — Firestore itself always had the right value, but a fresh
+ * page load could still show the default depending on which doc's snapshot happened to arrive first.
+ */
+export function subscribeShared(onChange: (shared: SharedState, ready: boolean) => void): () => void {
     const state: SharedState = { ...DEFAULT_SHARED };
-    const emit = () => onChange({ ...state });
+    const pendingKeys = new Set<(typeof SHARED_DOC_KEYS)[number]>(SHARED_DOC_KEYS);
+    const emit = (key: (typeof SHARED_DOC_KEYS)[number]) => {
+        pendingKeys.delete(key);
+        onChange({ ...state }, pendingKeys.size === 0);
+    };
 
     const unsubIcons = onSnapshot(
         doc(sharedCol, "itemIcons"),
         (snapshot) => {
             state.itemIcons = (snapshot.data() as Record<string, string> | undefined) ?? {};
-            emit();
+            emit("itemIcons");
         },
         (error) => console.error("subscribeShared:itemIcons", error)
     );
@@ -108,7 +138,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         doc(sharedCol, "customParamValues"),
         (snapshot) => {
             state.customParamValues = (snapshot.data() as Record<string, string[]> | undefined) ?? {};
-            emit();
+            emit("customParamValues");
         },
         (error) => console.error("subscribeShared:customParamValues", error)
     );
@@ -117,7 +147,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         doc(sharedCol, "sources"),
         (snapshot) => {
             state.sources = (snapshot.data() as SourceUrls | undefined) ?? DEFAULT_SHARED.sources;
-            emit();
+            emit("sources");
         },
         (error) => console.error("subscribeShared:sources", error)
     );
@@ -132,7 +162,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
                 ...DEFAULT_SHARED.descriptionSettings,
                 ...(snapshot.data() as Partial<DescriptionSettings> | undefined),
             };
-            emit();
+            emit("descriptionSettings");
         },
         (error) => console.error("subscribeShared:descriptionSettings", error)
     );
@@ -141,7 +171,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         doc(sharedCol, "translationOverrides"),
         (snapshot) => {
             state.translationOverrides = (snapshot.data() as Record<string, string> | undefined) ?? {};
-            emit();
+            emit("translationOverrides");
         },
         (error) => console.error("subscribeShared:translationOverrides", error)
     );
@@ -150,7 +180,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         doc(sharedCol, "exportedOverrides"),
         (snapshot) => {
             state.exportedOverrides = (snapshot.data() as Record<string, string> | undefined) ?? {};
-            emit();
+            emit("exportedOverrides");
         },
         (error) => console.error("subscribeShared:exportedOverrides", error)
     );
@@ -169,7 +199,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
                     ...data?.depthCoefficients,
                 },
             };
-            emit();
+            emit("balanceConfig");
         },
         (error) => console.error("subscribeShared:balanceConfig", error)
     );
@@ -178,7 +208,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         doc(sharedCol, "deckNames"),
         (snapshot) => {
             state.deckNames = (snapshot.data() as Record<string, string> | undefined) ?? {};
-            emit();
+            emit("deckNames");
         },
         (error) => console.error("subscribeShared:deckNames", error)
     );
@@ -187,7 +217,7 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         doc(sharedCol, "sprintStageCounts"),
         (snapshot) => {
             state.sprintStageCounts = (snapshot.data() as Record<string, number> | undefined) ?? {};
-            emit();
+            emit("sprintStageCounts");
         },
         (error) => console.error("subscribeShared:sprintStageCounts", error)
     );
@@ -491,6 +521,7 @@ export async function fetchBalanceSavePayloadRemote(saveId: string): Promise<Bal
         descriptionSettings:
             (byKey.get("descriptionSettings") as BalanceSavePayload["descriptionSettings"]) ??
             DEFAULT_DESCRIPTION_SETTINGS,
+        balanceConfig: (byKey.get("balanceConfig") as BalanceSavePayload["balanceConfig"]) ?? DEFAULT_BALANCE_CONFIG,
         translationOverrides: (byKey.get("translationOverrides") as BalanceSavePayload["translationOverrides"]) ?? {},
         exportedOverrides: (byKey.get("exportedOverrides") as BalanceSavePayload["exportedOverrides"]) ?? {},
         glossary: (byKey.get("glossary") as BalanceSavePayload["glossary"])?.map(normalizeGlossaryEntry) ?? [],

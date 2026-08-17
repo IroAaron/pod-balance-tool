@@ -13,6 +13,7 @@ import type { Build } from "./Build";
 import type { GlossaryEntry } from "./GlossaryEntry";
 import type { TagIcon } from "./TagIcon";
 import type { DescriptionSettings } from "../domain/descriptionTemplate";
+import type { BalanceConfig } from "./BalanceConfig";
 
 /**
  * Metadata for a named balance save — the only thing the saves list ever shows (see SavesPage). The actual
@@ -69,6 +70,9 @@ export interface BalanceSavePayload {
 
     descriptionSettings: DescriptionSettings;
 
+    /** Depth coefficients + balance constants — see BalancePage's "Константы" tab and domain/balance.ts. */
+    balanceConfig: BalanceConfig;
+
     translationOverrides: Record<string, string>;
 
     exportedOverrides: Record<string, string>;
@@ -105,6 +109,7 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "itemIcons",
     "customParamValues",
     "descriptionSettings",
+    "balanceConfig",
     "translationOverrides",
     "exportedOverrides",
     "glossary",

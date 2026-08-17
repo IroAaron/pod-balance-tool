@@ -319,7 +319,7 @@ export class GameStore {
             this.notify();
         });
 
-        subscribeShared((shared) => {
+        subscribeShared((shared, ready) => {
             this.itemIcons = shared.itemIcons;
             this.deckNames = shared.deckNames;
             this.sprintStageCounts = shared.sprintStageCounts;
@@ -329,7 +329,10 @@ export class GameStore {
             this.translationOverrides = shared.translationOverrides;
             this.exportedOverrides = shared.exportedOverrides;
             this.balanceConfig = shared.balanceConfig;
-            this.sharedReady = true;
+            // Only once EVERY underlying shared/* doc has delivered its first snapshot — not just whichever one
+            // happened to arrive first — so a sharedReady-gated one-time form remount (ConstantsTab, SettingsPage)
+            // never seeds itself from a field that hasn't actually loaded yet. See subscribeShared's own doc.
+            if (ready) this.sharedReady = true;
             this.notify();
         });
 
@@ -1733,6 +1736,7 @@ export class GameStore {
             itemIcons: this.itemIcons,
             customParamValues: this.customParamValues,
             descriptionSettings: this.descriptionSettings,
+            balanceConfig: this.balanceConfig,
             translationOverrides: this.translationOverrides,
             exportedOverrides: this.exportedOverrides,
             glossary: this.glossary,
@@ -1765,9 +1769,9 @@ export class GameStore {
     /**
      * Full replace with a previously-saved balance — mirrors importSnapshot's shape exactly (config/translations
      * go to this browser's local importCache only, same as a fresh Google Sheets download would; everything else
-     * is shared Firestore state and gets pushed for every collaborator to see). `sources`/`balanceConfig` are read
-     * back from the *current* live value rather than touched at all, since BalanceSavePayload never captured them
-     * (balanceConfig didn't exist yet when this feature was built).
+     * is shared Firestore state and gets pushed for every collaborator to see). `sources` is deliberately read
+     * back from the *current* live value instead — restoring a balance shouldn't repoint where config is
+     * downloaded from, see BalanceSavePayload's own doc.
      */
     async restoreBalanceSave(id: string): Promise<void> {
         const payload = await fetchBalanceSavePayloadRemote(id);
@@ -1813,7 +1817,7 @@ export class GameStore {
                 descriptionSettings: payload.descriptionSettings,
                 translationOverrides: payload.translationOverrides,
                 exportedOverrides: payload.exportedOverrides,
-                balanceConfig: this.balanceConfig,
+                balanceConfig: payload.balanceConfig,
                 deckNames: payload.deckNames,
                 sprintStageCounts: payload.sprintStageCounts,
             }),
