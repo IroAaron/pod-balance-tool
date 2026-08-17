@@ -1,5 +1,5 @@
-import { memo, useState } from "react";
-import { Autocomplete, IconButton, Stack, TextField } from "@mui/material";
+import { memo, useMemo, useState } from "react";
+import { Autocomplete, createFilterOptions, IconButton, Stack, TextField } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
@@ -24,6 +24,13 @@ const DeckEntryRow = memo(function DeckEntryRow({ entry, onCommit, onDelete }: P
 
     const selectedItem = store.getItem(entry.itemId) ?? null;
 
+    // Displayed label deliberately omits the id (per user request — names read easier in a long deck list); id
+    // still matches via filterOptions below so searching by a known id keeps working.
+    const filterOptions = useMemo(
+        () => createFilterOptions<Item>({ stringify: (item) => `${store.itemName(item)} ${item.id}` }),
+        [store]
+    );
+
     const commitWeightCost = () => {
         onCommit(entry.id, {
             itemId: entry.itemId,
@@ -43,13 +50,12 @@ const DeckEntryRow = memo(function DeckEntryRow({ entry, onCommit, onDelete }: P
                 size="small"
                 options={store.items}
                 value={selectedItem}
-                getOptionLabel={(item) => `${store.itemName(item)} (${item.id})`}
+                getOptionLabel={(item) => store.itemName(item)}
+                filterOptions={filterOptions}
                 renderOption={(props, item) => (
                     <Stack component="li" {...props} direction="row" spacing={1} sx={{ alignItems: "center" }}>
                         <ItemIcon item={item} size={24} />
-                        <span>
-                            {store.itemName(item)} ({item.id})
-                        </span>
+                        <span>{store.itemName(item)}</span>
                     </Stack>
                 )}
                 onChange={(_event, item) => handleItemChange(item)}
