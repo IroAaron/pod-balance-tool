@@ -1,8 +1,10 @@
 import { memo, useMemo, useState } from "react";
-import { Autocomplete, Box, createFilterOptions, IconButton, Stack, TextField } from "@mui/material";
+import { Autocomplete, Box, createFilterOptions, IconButton, Stack, TextField, Tooltip } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
+import DetailModal from "../../components/DetailModal";
+import ItemDetailPage from "../Items/ItemDetailPage";
 import type { DeckEntry } from "../../../core/models/Deck";
 import type { Item } from "../../../core/models/Item";
 
@@ -21,6 +23,7 @@ const DeckEntryRow = memo(function DeckEntryRow({ entry, onCommit, onDelete }: P
     const store = useStore();
     const [weightText, setWeightText] = useState(entry.weight?.toString() ?? "");
     const [costText, setCostText] = useState(entry.cost?.toString() ?? "");
+    const [detailOpen, setDetailOpen] = useState(false);
 
     const selectedItem = store.getItem(entry.itemId) ?? null;
 
@@ -46,8 +49,21 @@ const DeckEntryRow = memo(function DeckEntryRow({ entry, onCommit, onDelete }: P
     return (
         <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
             <Box sx={{ width: 28, height: 28, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {selectedItem && <ItemIcon item={selectedItem} size={28} />}
+                {selectedItem && (
+                    <Tooltip title={store.itemName(selectedItem)}>
+                        <Box
+                            onClick={() => setDetailOpen(true)}
+                            sx={{ display: "flex", lineHeight: 0, cursor: "pointer" }}
+                        >
+                            <ItemIcon item={selectedItem} size={28} />
+                        </Box>
+                    </Tooltip>
+                )}
             </Box>
+
+            <DetailModal open={detailOpen} onClose={() => setDetailOpen(false)}>
+                {selectedItem && <ItemDetailPage id={selectedItem.id} />}
+            </DetailModal>
 
             <Autocomplete
                 sx={{ flex: 1, minWidth: 260 }}
