@@ -48,6 +48,16 @@ export interface SharedState {
 
     /** Depth coefficients + balance constants — see BalancePage's "Константы" tab and domain/balance.ts. */
     balanceConfig: BalanceConfig;
+
+    /** Site-only display names for decks/ball decks (any of Decks/DecksShop/BallGroups), keyed by deck id — pure
+     *  editing convenience, NEVER exported to Google Sheets. Point-updated like itemIcons so it survives a config
+     *  re-import (a fresh Decks/BallGroups download fully replaces those arrays, but this side-map is untouched). */
+    deckNames: Record<string, string>;
+
+    /** Site-only "how many stage columns to show" override per Sprint id — NEVER exported (there's no MaxStages
+     *  column in the real sheet). GameStore.getSprintStageCount takes the max of this and every real Stage value
+     *  present, so real data is never hidden even if this override is stale. Point-updated like deckNames. */
+    sprintStageCounts: Record<string, number>;
 }
 
 const DEFAULT_SHARED: SharedState = {
@@ -58,6 +68,8 @@ const DEFAULT_SHARED: SharedState = {
     translationOverrides: {},
     exportedOverrides: {},
     balanceConfig: DEFAULT_BALANCE_CONFIG,
+    deckNames: {},
+    sprintStageCounts: {},
 };
 
 export interface LegacyLocalState {
@@ -162,6 +174,24 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         (error) => console.error("subscribeShared:balanceConfig", error)
     );
 
+    const unsubDeckNames = onSnapshot(
+        doc(sharedCol, "deckNames"),
+        (snapshot) => {
+            state.deckNames = (snapshot.data() as Record<string, string> | undefined) ?? {};
+            emit();
+        },
+        (error) => console.error("subscribeShared:deckNames", error)
+    );
+
+    const unsubSprintStageCounts = onSnapshot(
+        doc(sharedCol, "sprintStageCounts"),
+        (snapshot) => {
+            state.sprintStageCounts = (snapshot.data() as Record<string, number> | undefined) ?? {};
+            emit();
+        },
+        (error) => console.error("subscribeShared:sprintStageCounts", error)
+    );
+
     return () => {
         unsubIcons();
         unsubParamValues();
@@ -170,6 +200,8 @@ export function subscribeShared(onChange: (shared: SharedState) => void): () => 
         unsubTranslationOverrides();
         unsubExportedOverrides();
         unsubBalanceConfig();
+        unsubDeckNames();
+        unsubSprintStageCounts();
     };
 }
 
@@ -215,6 +247,20 @@ export function subscribeTagIcons(onChange: (entries: TagIcon[]) => void): () =>
 
 export function replaceTagIconsRemote(entries: TagIcon[]): Promise<void> {
     return setDoc(doc(sharedCol, "tagIcons"), { entries: stripUndefined(entries) });
+}
+
+/** Same independent-doc/full-overwrite pattern as tagIcons — the curated list of "Спец. раунд" values shown in
+ *  RoundDetailPage's rules Autocomplete, user-managed via SpecialRoundTypesPopover. Starts empty (no pre-seeding). */
+export function subscribeSpecialRoundTypes(onChange: (values: string[]) => void): () => void {
+    return onSnapshot(
+        doc(sharedCol, "specialRoundTypes"),
+        (snapshot) => onChange((snapshot.data()?.entries as string[] | undefined) ?? []),
+        (error) => console.error("subscribeSpecialRoundTypes", error)
+    );
+}
+
+export function replaceSpecialRoundTypesRemote(values: string[]): Promise<void> {
+    return setDoc(doc(sharedCol, "specialRoundTypes"), { entries: values });
 }
 
 export function writeBuild(build: Build): Promise<void> {
@@ -289,6 +335,17 @@ export function updateItemIconRemote(itemId: string, icon: string): Promise<void
     return upsertDocField(doc(sharedCol, "itemIcons"), itemId, icon);
 }
 
+/** Site-only deck display name — see SharedState.deckNames's doc. Passing "" deletes the field, same convention
+ *  as updateTranslationOverrideRemote. */
+export function updateDeckNameRemote(deckId: string, name: string): Promise<void> {
+    return upsertDocField(doc(sharedCol, "deckNames"), deckId, name || deleteField());
+}
+
+/** Site-only sprint stage-count override — see SharedState.sprintStageCounts's doc. */
+export function updateSprintStageCountRemote(sprintId: string, count: number): Promise<void> {
+    return upsertDocField(doc(sharedCol, "sprintStageCounts"), sprintId, count);
+}
+
 export function addCustomParamValueRemote(dimension: string, value: string): Promise<void> {
     return upsertDocField(doc(sharedCol, "customParamValues"), dimension, arrayUnion(value));
 }
@@ -337,6 +394,8 @@ export function replaceSharedState(shared: SharedState): Promise<void> {
     batch.set(doc(sharedCol, "translationOverrides"), shared.translationOverrides);
     batch.set(doc(sharedCol, "exportedOverrides"), shared.exportedOverrides);
     batch.set(doc(sharedCol, "balanceConfig"), shared.balanceConfig);
+    batch.set(doc(sharedCol, "deckNames"), shared.deckNames);
+    batch.set(doc(sharedCol, "sprintStageCounts"), shared.sprintStageCounts);
     return batch.commit();
 }
 
@@ -419,6 +478,11 @@ export async function fetchBalanceSavePayloadRemote(saveId: string): Promise<Bal
         mechanics: (byKey.get("mechanics") as BalanceSavePayload["mechanics"]) ?? [],
         upgradeChains: (byKey.get("upgradeChains") as BalanceSavePayload["upgradeChains"]) ?? [],
         rounds: (byKey.get("rounds") as BalanceSavePayload["rounds"]) ?? [],
+        decks: (byKey.get("decks") as BalanceSavePayload["decks"]) ?? [],
+        packs: (byKey.get("packs") as BalanceSavePayload["packs"]) ?? [],
+        balls: (byKey.get("balls") as BalanceSavePayload["balls"]) ?? [],
+        ballGroups: (byKey.get("ballGroups") as BalanceSavePayload["ballGroups"]) ?? [],
+        sprints: (byKey.get("sprints") as BalanceSavePayload["sprints"]) ?? [],
         replaceRules: (byKey.get("replaceRules") as BalanceSavePayload["replaceRules"]) ?? [],
         enumValues: (byKey.get("enumValues") as BalanceSavePayload["enumValues"]) ?? {},
         builds: (byKey.get("builds") as BalanceSavePayload["builds"]) ?? [],
@@ -431,6 +495,9 @@ export async function fetchBalanceSavePayloadRemote(saveId: string): Promise<Bal
         exportedOverrides: (byKey.get("exportedOverrides") as BalanceSavePayload["exportedOverrides"]) ?? {},
         glossary: (byKey.get("glossary") as BalanceSavePayload["glossary"])?.map(normalizeGlossaryEntry) ?? [],
         tagIcons: (byKey.get("tagIcons") as BalanceSavePayload["tagIcons"]) ?? [],
+        specialRoundTypes: (byKey.get("specialRoundTypes") as BalanceSavePayload["specialRoundTypes"]) ?? [],
+        deckNames: (byKey.get("deckNames") as BalanceSavePayload["deckNames"]) ?? {},
+        sprintStageCounts: (byKey.get("sprintStageCounts") as BalanceSavePayload["sprintStageCounts"]) ?? {},
     };
 }
 

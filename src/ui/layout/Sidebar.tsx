@@ -1,6 +1,7 @@
 import { Box, List, Typography } from "@mui/material";
 import NavigationItem from "../components/NavigationItem";
-import { menu } from "../components/NavigationMenu";
+import NavigationGroup from "../components/NavigationGroup";
+import { isNavigationMenuGroup, menu } from "../components/NavigationMenu";
 
 export default function Sidebar() {
     return (
@@ -20,9 +21,13 @@ export default function Sidebar() {
             </Typography>
 
             <List sx={{ flex: 1 }}>
-                {menu.map((item) => (
-                    <NavigationItem key={item.path} item={item} />
-                ))}
+                {menu.map((entry) =>
+                    isNavigationMenuGroup(entry) ? (
+                        <NavigationGroup key={entry.text} group={entry} />
+                    ) : (
+                        <NavigationItem key={entry.path} item={entry} />
+                    )
+                )}
             </List>
         </Box>
     );

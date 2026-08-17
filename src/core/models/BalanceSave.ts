@@ -3,6 +3,11 @@ import type { Translation } from "./Translation";
 import type { MechanicRow } from "./Mechanic";
 import type { UpgradeChain } from "./UpgradeChain";
 import type { Round } from "./Round";
+import type { Deck } from "./Deck";
+import type { Pack } from "./Pack";
+import type { Ball } from "./Ball";
+import type { BallGroup } from "./BallGroup";
+import type { Sprint } from "./Sprint";
 import type { ReplaceRule } from "./ReplaceRule";
 import type { Build } from "./Build";
 import type { GlossaryEntry } from "./GlossaryEntry";
@@ -42,6 +47,16 @@ export interface BalanceSavePayload {
 
     rounds: Round[];
 
+    decks: Deck[];
+
+    packs: Pack[];
+
+    balls: Ball[];
+
+    ballGroups: BallGroup[];
+
+    sprints: Sprint[];
+
     replaceRules: ReplaceRule[];
 
     enumValues: Record<string, string[]>;
@@ -61,6 +76,15 @@ export interface BalanceSavePayload {
     glossary: GlossaryEntry[];
 
     tagIcons: TagIcon[];
+
+    /** Curated "Спец. раунд" values, see firestoreStore's subscribeSpecialRoundTypes. */
+    specialRoundTypes: string[];
+
+    /** Site-only deck/ball-deck display names, keyed by deck id — see firestoreStore's SharedState.deckNames. */
+    deckNames: Record<string, string>;
+
+    /** Site-only sprint stage-count overrides — see firestoreStore's SharedState.sprintStageCounts. */
+    sprintStageCounts: Record<string, number>;
 }
 
 /** Keys of BalanceSavePayload — each one is written/read as its own `parts/{key}` doc, see firestoreStore.ts. */
@@ -70,6 +94,11 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "mechanics",
     "upgradeChains",
     "rounds",
+    "decks",
+    "packs",
+    "balls",
+    "ballGroups",
+    "sprints",
     "replaceRules",
     "enumValues",
     "builds",
@@ -80,4 +109,7 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "exportedOverrides",
     "glossary",
     "tagIcons",
+    "specialRoundTypes",
+    "deckNames",
+    "sprintStageCounts",
 ];

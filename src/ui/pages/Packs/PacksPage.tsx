@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import {
     Alert,
@@ -18,24 +18,32 @@ import {
     Typography,
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
-import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
-import { roundAsItemStub } from "./roundAsItemStub";
+import { packAsItemStub } from "./packAsItemStub";
 import type { ExportResult } from "../../../core/import/sheetSource";
 
-export default function RoundsPage() {
+export default function PacksPage() {
     const store = useStore();
-    const [query, setQuery] = useState("");
+    const [newPackId, setNewPackId] = useState("");
     const [confirmingExport, setConfirmingExport] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
+
+    const trimmedNewId = newPackId.trim();
+    const alreadyExists = trimmedNewId !== "" && store.getPack(trimmedNewId) !== undefined;
+
+    const handleCreate = () => {
+        if (!trimmedNewId || alreadyExists) return;
+        store.createPack(trimmedNewId);
+        setNewPackId("");
+    };
 
     const confirmExport = async () => {
         setConfirmingExport(false);
         setExporting(true);
         setExportResult(null);
         try {
-            setExportResult(await store.exportRoundChanges());
+            setExportResult(await store.exportPackChanges());
         } catch (error) {
             setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
         } finally {
@@ -43,33 +51,17 @@ export default function RoundsPage() {
         }
     };
 
-    const filtered = useMemo(() => {
-        const trimmed = query.trim().toLowerCase();
-        if (!trimmed) return store.rounds;
-        return store.rounds.filter((round) => {
-            const name = store.roundName(round).toLowerCase();
-            return (
-                round.id.toLowerCase().includes(trimmed) ||
-                name.includes(trimmed) ||
-                (round.rules ?? "").toLowerCase().includes(trimmed)
-            );
-        });
-        // roundName reads live translations at call time — store.translations/store.translationOverrides
-        // covers re-running the filter whenever an override changes.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [store.rounds, store.translations, store.translationOverrides, query]);
-
     return (
         <Stack spacing={3}>
             <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexWrap: "wrap" }}>
-                <Typography variant="h4">Раунды</Typography>
+                <Typography variant="h4">Паки</Typography>
                 <Button
                     variant="contained"
                     onClick={() => setConfirmingExport(true)}
-                    disabled={exporting || store.blueprintRoundPendingExportCount === 0}
+                    disabled={exporting || store.blueprintPackPendingExportCount === 0}
                     startIcon={exporting ? <CircularProgress size={16} /> : undefined}
                 >
-                    {exporting ? "Отправка..." : `Экспортировать раунды (${store.blueprintRoundPendingExportCount})`}
+                    {exporting ? "Отправка..." : `Экспортировать паки (${store.blueprintPackPendingExportCount})`}
                 </Button>
             </Stack>
 
@@ -87,16 +79,25 @@ export default function RoundsPage() {
                     </Alert>
                 ))}
 
-            <TextField
-                label="Поиск"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                size="small"
-                sx={{ maxWidth: 320 }}
-            />
+            <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
+                <TextField
+                    label="Id нового пака"
+                    size="small"
+                    value={newPackId}
+                    onChange={(event) => setNewPackId(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter") handleCreate();
+                    }}
+                    error={alreadyExists}
+                    helperText={alreadyExists ? "Пак с таким id уже есть" : undefined}
+                />
+                <Button variant="contained" onClick={handleCreate} disabled={!trimmedNewId || alreadyExists}>
+                    + Создать пак
+                </Button>
+            </Stack>
 
             <Typography variant="body2" color="text.secondary">
-                Найдено: {filtered.length} из {store.rounds.length}
+                Найдено: {store.packs.length}
             </Typography>
 
             <Box
@@ -106,32 +107,37 @@ export default function RoundsPage() {
                     gap: 2,
                 }}
             >
-                {filtered.map((round) => {
-                    const artefact = round.invisibleArtefactId ? store.getItem(round.invisibleArtefactId) : undefined;
-                    const description = store.roundDescription(round);
+                {store.packs.map((pack) => {
+                    const description = store.packDescription(pack);
+                    const summary = [
+                        pack.cost !== undefined ? `Цена: ${pack.cost}` : null,
+                        pack.itemsToTake !== undefined ? `Взять: ${pack.itemsToTake}` : null,
+                        `Источников: ${pack.sources.length}`,
+                    ]
+                        .filter(Boolean)
+                        .join(" · ");
 
                     return (
-                        <Card key={round.id} variant="outlined">
+                        <Card key={pack.id} variant="outlined">
                             <CardActionArea
                                 component={RouterLink}
-                                to={`/rounds/${encodeURIComponent(round.id)}`}
+                                to={`/packs/${encodeURIComponent(pack.id)}`}
                                 sx={{ height: "100%" }}
                             >
                                 <CardContent>
                                     <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
-                                        {artefact ? (
-                                            <ItemIcon item={artefact} size={32} />
-                                        ) : (
-                                            <Typography sx={{ fontSize: 26, lineHeight: 1 }}>🎯</Typography>
-                                        )}
+                                        <Typography sx={{ fontSize: 26, lineHeight: 1 }}>🎁</Typography>
                                         <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                            {store.roundName(round)}
+                                            {store.packName(pack)}
                                         </Typography>
                                     </Stack>
 
                                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                                        {round.id}
-                                        {round.rules ? ` · ${round.rules}` : ""}
+                                        {pack.id}
+                                    </Typography>
+
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                                        {summary}
                                     </Typography>
 
                                     {description && (
@@ -145,7 +151,7 @@ export default function RoundsPage() {
                                                 overflow: "hidden",
                                             }}
                                         >
-                                            <ItemDescription item={roundAsItemStub(round)} description={description} />
+                                            <ItemDescription item={packAsItemStub(pack)} description={description} />
                                         </Typography>
                                     )}
                                 </CardContent>
@@ -155,19 +161,20 @@ export default function RoundsPage() {
                 })}
             </Box>
 
-            {store.rounds.length === 0 && (
+            {store.packs.length === 0 && (
                 <Typography color="text.secondary">
                     Данных пока нет — загрузите их на странице «Источники».
                 </Typography>
             )}
 
             <Dialog open={confirmingExport} onClose={() => setConfirmingExport(false)}>
-                <DialogTitle>Экспортировать раунды в Google Sheets?</DialogTitle>
+                <DialogTitle>Экспортировать паки в Google Sheets?</DialogTitle>
                 <DialogContent>
                     <DialogContentText>
-                        Запишет изменения {store.blueprintRoundPendingExportCount} раунда(ов) обратно в реальную
-                        таблицу RoundSettings (RoundRules/AdditionalInvisibleArtefact/TempDeck/DeckBalls по колонке
-                        RoundId). Действие необратимо.
+                        Запишет изменения {store.blueprintPackPendingExportCount} пака(ов) обратно в реальную таблицу
+                        Packs (по колонке PackId — все строки этого пака заменяются текущими параметрами и
+                        источниками). Названия/описания паков экспортируются отдельно, через «Экспортировать правки»
+                        на странице «Источники». Действие необратимо.
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>

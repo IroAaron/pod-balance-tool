@@ -9,6 +9,12 @@ export type TableType =
     | "Translations"
     | "UpgradeChains"
     | "RoundSettings"
+    | "Decks"
+    | "DecksShop"
+    | "Packs"
+    | "Balls"
+    | "BallGroups"
+    | "Sprints"
     | "Enums"
     | "ReplaceItem"
     | "ReplaceOnTrigger";
@@ -62,6 +68,34 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
     // otherwise a real RoundSettings sheet falls straight through to Unknown.
     if (hasColumn(headers, "RoundId")) {
         return { type: "RoundSettings", table };
+    }
+
+    // Decks and DecksShop share identical columns (DeckId,Item,Weight,Cost) — same as Cards/Houses/Artefacts,
+    // they can only be told apart by the sheet's own tab name, not column shape. BallGroups also keys by DeckId
+    // but uses a "Ball" column instead of "Item" (and is a wide one-row-per-group table, not narrow) — checked
+    // first since it's unambiguous by column name alone, no name-based guessing needed.
+    if (hasColumn(headers, "DeckId")) {
+        if (hasColumn(headers, "Ball")) {
+            return { type: "BallGroups", table };
+        }
+        return matchesTableName(sourceName, "DecksShop") ? { type: "DecksShop", table } : { type: "Decks", table };
+    }
+
+    // PackId doesn't match findIdColumn's exact "id"/"itemid" check below either — own branch, same reasoning.
+    if (hasColumn(headers, "PackId")) {
+        return { type: "Packs", table };
+    }
+
+    // SprintId doesn't match findIdColumn's exact "id"/"itemid" check below either — own branch, same reasoning.
+    if (hasColumn(headers, "SprintId")) {
+        return { type: "Sprints", table };
+    }
+
+    // Balls' id column is "ItemId" (matches findIdColumn below) and it has a "MetaTag" column (contains "tag") —
+    // without this early signature check, it would fall into the generic idColumn branch below and get
+    // misclassified as "Items" by the tag/type fallback heuristic. Checked by its own distinctive columns, not name.
+    if (hasAllColumns(headers, ["RunMin", "RunMax", "InertiaMin", "InertiaMax"])) {
+        return { type: "Balls", table };
     }
 
     // A per-column, ragged list of valid enum values for each parameter dimension — not a row-per-record table.

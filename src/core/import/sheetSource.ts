@@ -116,6 +116,40 @@ export interface ExportPayload {
     /** Blueprint Lab brand-new mechanic rows — table -> full rows, always appended, never matched against an
      *  existing row (MechanicRow.id isn't a real spreadsheet key, see GameStore.exportBlueprintChanges's doc). */
     newMechanicRows?: Partial<Record<string, Record<string, string>[]>>;
+
+    /** Decks page edits — table -> DeckId -> full row set for that deck (replaces every existing row for that
+     *  DeckId, see GameStore.exportDeckChanges's doc). An empty array for a DeckId means "delete this deck". */
+    decks?: Partial<Record<"Decks" | "DecksShop", Record<string, Record<string, string>[]>>>;
+
+    /** Packs page edits — PackId -> full row set for that pack (same replace-by-group-id shape as `decks`, see
+     *  GameStore.exportPackChanges's doc). An empty array for a PackId means "delete this pack". */
+    packs?: Record<string, Record<string, string>[]>;
+
+    /** Balls page edits — ItemId -> full column bag, upserted by ItemId (same shape as `items`, Balls is a flat
+     *  row-per-object table like Items, no grouping — see GameStore.exportBallChanges's doc). */
+    balls?: Record<string, Record<string, string>>;
+
+    /** Ball decks ("Колоды шаров" tab) edits — DeckId -> ball id array, written across the sheet's repeated
+     *  `Ball` columns as ONE row per group (see GameStore.exportDeckChanges's doc and the new
+     *  `replaceWideGroupRow` Apps Script helper). An empty array for a DeckId means "delete this ball deck". */
+    ballGroups?: Record<string, string[]>;
+
+    /** Rounds page edits (see GameStore.exportRoundChanges's doc) — `fields` upserts the ordinary one-column
+     *  RoundRules/AdditionalInvisibleArtefact/TempDeck cells by RoundId (same shape as `balls`); `deckBalls`
+     *  writes across RoundSettings' own repeated `DeckBalls` columns, reusing the same `replaceWideGroupRow`
+     *  helper built for `ballGroups`. No delete signal — rounds are never removed from the site. */
+    rounds?: {
+        fields: Record<string, Record<string, string>>;
+        deckBalls: Record<string, string[]>;
+    };
+
+    /** Sprints page edits (see GameStore.exportSprintChanges's doc) — SprintId -> full row set for that sprint,
+     *  same replace-by-group-id shape as `decks`/`packs`, except each row ALSO carries `repeatedValues` written
+     *  across the sheet's own repeated `RoundSettings` columns (same technique as `ballGroups`/`rounds.deckBalls`,
+     *  combined onto one row via the new `replaceRowsByGroupIdWithRepeatedColumn` Apps Script helper). `columns`
+     *  includes a freshly-computed `RoundNumber` (1-indexed row position) on every row. An empty array for a
+     *  SprintId means "delete this sprint". */
+    sprints?: Record<string, { columns: Record<string, string>; repeatedValues: string[] }[]>;
 }
 
 export interface ExportResult {

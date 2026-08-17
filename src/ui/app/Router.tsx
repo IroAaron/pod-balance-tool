@@ -6,6 +6,13 @@ import ItemsPage from "../pages/Items/ItemsPage";
 import ItemDetailPage from "../pages/Items/ItemDetailPage";
 import RoundsPage from "../pages/Rounds/RoundsPage";
 import RoundDetailPage from "../pages/Rounds/RoundDetailPage";
+import DecksPage from "../pages/Decks/DecksPage";
+import PacksPage from "../pages/Packs/PacksPage";
+import PackDetailPage from "../pages/Packs/PackDetailPage";
+import BallsPage from "../pages/Balls/BallsPage";
+import BallDetailPage from "../pages/Balls/BallDetailPage";
+import SprintsPage from "../pages/Sprints/SprintsPage";
+import SprintDetailPage from "../pages/Sprints/SprintDetailPage";
 import BuildsPage from "../pages/Builds/BuildsPage";
 import BuildDetailPage from "../pages/Builds/BuildDetailPage";
 import GlossaryPage from "../pages/Glossary/GlossaryPage";
@@ -33,6 +40,21 @@ function RoundDetailRoute() {
     return <RoundDetailPage key={id} />;
 }
 
+function PackDetailRoute() {
+    const { id } = useParams();
+    return <PackDetailPage key={id} />;
+}
+
+function BallDetailRoute() {
+    const { id } = useParams();
+    return <BallDetailPage key={id} />;
+}
+
+function SprintDetailRoute() {
+    const { id } = useParams();
+    return <SprintDetailPage key={id} />;
+}
+
 function NotFoundPage() {
     return (
         <Stack spacing={2}>
@@ -54,6 +76,13 @@ export default function AppRouter() {
             <Route path="/items/:id" element={<ItemDetailRoute />} />
             <Route path="/rounds" element={<RoundsPage />} />
             <Route path="/rounds/:id" element={<RoundDetailRoute />} />
+            <Route path="/decks" element={<DecksPage />} />
+            <Route path="/packs" element={<PacksPage />} />
+            <Route path="/packs/:id" element={<PackDetailRoute />} />
+            <Route path="/balls" element={<BallsPage />} />
+            <Route path="/balls/:id" element={<BallDetailRoute />} />
+            <Route path="/sprints" element={<SprintsPage />} />
+            <Route path="/sprints/:id" element={<SprintDetailRoute />} />
             <Route path="/builds" element={<BuildsPage />} />
             <Route path="/builds/:id" element={<BuildDetailRoute />} />
             <Route path="/glossary" element={<GlossaryPage />} />
