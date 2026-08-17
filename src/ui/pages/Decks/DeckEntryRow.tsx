@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from "react";
-import { Autocomplete, createFilterOptions, IconButton, Stack, TextField } from "@mui/material";
+import { Autocomplete, Box, createFilterOptions, IconButton, Stack, TextField } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
@@ -45,6 +45,10 @@ const DeckEntryRow = memo(function DeckEntryRow({ entry, onCommit, onDelete }: P
 
     return (
         <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+            <Box sx={{ width: 28, height: 28, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {selectedItem && <ItemIcon item={selectedItem} size={28} />}
+            </Box>
+
             <Autocomplete
                 sx={{ flex: 1, minWidth: 260 }}
                 size="small"
