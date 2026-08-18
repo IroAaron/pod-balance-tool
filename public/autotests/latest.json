@@ -1,0 +1,143 @@
+{
+ "digest": {
+  "report": "report_1",
+  "totals": {
+   "tests": 34,
+   "failures": 2,
+   "errors": 0,
+   "skipped": 0,
+   "flaky": 0,
+   "duration_sec": 0.14
+  },
+  "failing": [
+   {
+    "test": "test_item_settings::test_reassigning_possible_colors_line_replaces_not_accumulates",
+    "category": "tests/mechanics",
+    "status": "failed",
+    "message": "FAILED: res://tests/mechanics/test_item_settings.gd:45",
+    "details": "possible_colors накапливает значения между присвоениями (нашли Red+Blue вместо Blue) — см. set_possible_colors_arr() в game/roulette_data/item/roulette_item_settings.gd\n\tat 'test_reassigning_possible_colors_line_replaces_not_accumulates' in res://tests/mechanics/test_item_settings.gd:45"
+   },
+   {
+    "test": "test_deck_pick_random_golden::test_duplicates_false_returns_no_duplicates",
+    "category": "tests/regression",
+    "status": "failed",
+    "message": "FAILED: res://tests/regression/test_deck_pick_random_golden.gd:193",
+    "details": "pick_random(duplicates=false) вернул повторы:\n  weights=true: [\"reg_item_c\", \"reg_item_d\", \"reg_item_d\", \"reg_item_a\", \"reg_item_d\"] — повторяются [\"reg_item_d\"]\nСм. pick_random() в game/roulette_data/deck/deck_settings.gd — в весовой ветке выбранный предмет не удаляется из settings_process.\n\tat 'test_duplicates_false_returns_no_duplicates' in res://tests/regression/test_deck_pick_random_golden.gd:193"
+   }
+  ],
+  "slowest": [
+   {
+    "test": "test_reference_integrity::test_all_id_references_resolve",
+    "time_sec": 0.01
+   },
+   {
+    "test": "test_reference_integrity::test_id_shape_filter_skips_only_editor_comments",
+    "time_sec": 0.01
+   },
+   {
+    "test": "test_deck_pick_random_golden::test_seed_controls_random_and_is_reproducible",
+    "time_sec": 0.01
+   }
+  ],
+  "passed": [
+   "test_tag_colored_compare::test_default_palette_is_available",
+   "test_tag_colored_compare::test_same_matches_only_identical_color",
+   "test_tag_colored_compare::test_not_same_matches_only_different_color",
+   "test_tag_colored_compare::test_empty_and_any_match_everything",
+   "test_tag_colored_compare::test_explicit_color_compares_against_first_argument",
+   "test_tag_colored_compare::test_null_cell_color_never_matches_explicit_color",
+   "test_value_modificate::test_addition",
+   "test_value_modificate::test_subtraction",
+   "test_value_modificate::test_multiplication",
+   "test_value_modificate::test_division",
+   "test_value_modificate::test_setter_replaces_value",
+   "test_value_modificate::test_symbol_aliases_match_full_names",
+   "test_value_modificate::test_negative_and_fractional_values",
+   "test_mechanics_helpers::test_eliminate_repetitions_keeps_first_occurrence_order",
+   "test_mechanics_helpers::test_eliminate_repetitions_does_not_mutate_input",
+   "test_mechanics_helpers::test_pick_random_never_repeats",
+   "test_mechanics_helpers::test_pick_random_caps_at_pool_size",
+   "test_mechanics_helpers::test_pick_random_does_not_mutate_pool",
+   "test_mechanics_helpers::test_pick_random_is_reproducible_under_seed",
+   "test_mechanics_helpers::test_map_coordinates_round_trip",
+   "test_mechanics_helpers::test_local_to_map_rounds_to_nearest",
+   "test_item_settings::test_type_accepts_known_value",
+   "test_item_settings::test_get_possible_colors_arr_defaults_to_no_color",
+   "test_item_settings::test_get_possible_colors_arr_returns_single_assigned_color",
+   "test_reference_integrity::test_snapshot_has_all_expected_sheets",
+   "test_reference_integrity::test_item_ids_are_unique_within_each_table",
+   "test_reference_integrity::test_item_ids_do_not_collide_across_tables",
+   "test_reference_integrity::test_all_id_references_resolve",
+   "test_reference_integrity::test_id_shape_filter_skips_only_editor_comments",
+   "test_deck_pick_random_golden::test_seed_controls_random_and_is_reproducible",
+   "test_deck_pick_random_golden::test_weight_math_matches_golden",
+   "test_deck_pick_random_golden::test_pick_random_matches_golden"
+  ],
+  "test_packages": {
+   "test_tag_colored_compare::test_default_palette_is_available": "tests/mechanics",
+   "test_tag_colored_compare::test_same_matches_only_identical_color": "tests/mechanics",
+   "test_tag_colored_compare::test_not_same_matches_only_different_color": "tests/mechanics",
+   "test_tag_colored_compare::test_empty_and_any_match_everything": "tests/mechanics",
+   "test_tag_colored_compare::test_explicit_color_compares_against_first_argument": "tests/mechanics",
+   "test_tag_colored_compare::test_null_cell_color_never_matches_explicit_color": "tests/mechanics",
+   "test_value_modificate::test_addition": "tests/mechanics",
+   "test_value_modificate::test_subtraction": "tests/mechanics",
+   "test_value_modificate::test_multiplication": "tests/mechanics",
+   "test_value_modificate::test_division": "tests/mechanics",
+   "test_value_modificate::test_setter_replaces_value": "tests/mechanics",
+   "test_value_modificate::test_symbol_aliases_match_full_names": "tests/mechanics",
+   "test_value_modificate::test_negative_and_fractional_values": "tests/mechanics",
+   "test_mechanics_helpers::test_eliminate_repetitions_keeps_first_occurrence_order": "tests/mechanics",
+   "test_mechanics_helpers::test_eliminate_repetitions_does_not_mutate_input": "tests/mechanics",
+   "test_mechanics_helpers::test_pick_random_never_repeats": "tests/mechanics",
+   "test_mechanics_helpers::test_pick_random_caps_at_pool_size": "tests/mechanics",
+   "test_mechanics_helpers::test_pick_random_does_not_mutate_pool": "tests/mechanics",
+   "test_mechanics_helpers::test_pick_random_is_reproducible_under_seed": "tests/mechanics",
+   "test_mechanics_helpers::test_map_coordinates_round_trip": "tests/mechanics",
+   "test_mechanics_helpers::test_local_to_map_rounds_to_nearest": "tests/mechanics",
+   "test_item_settings::test_type_accepts_known_value": "tests/mechanics",
+   "test_item_settings::test_get_possible_colors_arr_defaults_to_no_color": "tests/mechanics",
+   "test_item_settings::test_get_possible_colors_arr_returns_single_assigned_color": "tests/mechanics",
+   "test_item_settings::test_reassigning_possible_colors_line_replaces_not_accumulates": "tests/mechanics",
+   "test_reference_integrity::test_snapshot_has_all_expected_sheets": "tests/content_contracts",
+   "test_reference_integrity::test_item_ids_are_unique_within_each_table": "tests/content_contracts",
+   "test_reference_integrity::test_item_ids_do_not_collide_across_tables": "tests/content_contracts",
+   "test_reference_integrity::test_all_id_references_resolve": "tests/content_contracts",
+   "test_reference_integrity::test_id_shape_filter_skips_only_editor_comments": "tests/content_contracts",
+   "test_deck_pick_random_golden::test_seed_controls_random_and_is_reproducible": "tests/regression",
+   "test_deck_pick_random_golden::test_weight_math_matches_golden": "tests/regression",
+   "test_deck_pick_random_golden::test_pick_random_matches_golden": "tests/regression",
+   "test_deck_pick_random_golden::test_duplicates_false_returns_no_duplicates": "tests/regression"
+  }
+ },
+ "analysis": {
+  "overall_status": "attention",
+  "summary": "Из 34 тестов упало 2. Ещё 2 — известные и уже разобранные проблемы.",
+  "findings": [
+   {
+    "test": "test_item_settings::test_reassigning_possible_colors_line_replaces_not_accumulates",
+    "category": "known_issue",
+    "severity": "low",
+    "title": "Известное, всё ещё воспроизводится: possible_colors копит значения вместо замены",
+    "what_happened": "possible_colors накапливает значения между присвоениями (нашли Red+Blue вместо Blue) — см. set_possible_colors_arr() в game/roulette_data/item/roulette_item_settings.gd\n\tat 'test_reassigning_possible_colors_line_replaces_not_accumulates' in res://tests/mechanics/test_item_settings.gd:45",
+    "likely_cause": "set_possible_colors_arr() добавляет цвета через .append(), не очищая массив. При повторном присвоении possible_colors_line старые цвета остаются.",
+    "recommended_action": "Разобрано ранее: Подтверждено в коде игры, решение чинить или нет за GD/разработчиком preess-or-die. Место: game/roulette_data/item/roulette_item_settings.gd:41-45. Починят в игре — уберите запись из known_issues.json.",
+    "owner": "dev"
+   },
+   {
+    "test": "test_deck_pick_random_golden::test_duplicates_false_returns_no_duplicates",
+    "category": "known_issue",
+    "severity": "low",
+    "title": "Известное, всё ещё воспроизводится: pick_random(duplicates=false) возвращает повторы в весовой ветке",
+    "what_happened": "pick_random(duplicates=false) вернул повторы:\n  weights=true: [\"reg_item_c\", \"reg_item_d\", \"reg_item_d\", \"reg_item_a\", \"reg_item_d\"] — повторяются [\"reg_item_d\"]\nСм. pick_random() в game/roulette_data/deck/deck_settings.gd — в весовой ветке выбранный предмет не удаляется из settings_process.\n\tat 'test_duplicates_false_returns_no_duplicates' in res://tests/regression/test_deck_pick_random_golden.gd:193",
+    "likely_cause": "В весовой ветке убрана проверка 'if setting not in list', но выбранный предмет не удаляется из settings_process. Прогон на пяти предметах вернул [c, d, d, a, d]. В неweighted-ветке контракт соблюдается через erase().",
+    "recommended_action": "Разобрано ранее: Подтверждено запуском на gun2. Похоже на недосмотр при правке, а не на осознанное решение. Место: game/roulette_data/deck/deck_settings.gd, pick_random(). Починят в игре — уберите запись из known_issues.json.",
+    "owner": "dev"
+   }
+  ],
+  "notes": [
+   "В known_issues.json есть запись про `test_stale_resource_paths::test_ext_resource_paths_are_not_stale`, но такого теста нет в прогоне — запись протухла или тест переименовали.",
+   "В known_issues.json есть запись про `test_resource_references::test_ext_resource_references_resolve`, но такого теста нет в прогоне — запись протухла или тест переименовали."
+  ]
+ }
+}
