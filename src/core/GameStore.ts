@@ -103,6 +103,13 @@ function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] 
     return [...map.values()];
 }
 
+/**
+ * Mechanic columns that legitimately hold a different number on each upgrade tier — confirmed against the real
+ * config, where these are the only fields that ever differ between a chain's tier rows (ActivationCount 1→2→3,
+ * TargetCount 3→6→9). copyMechanicsToUpgrades keeps a tier's own value in these rather than overwriting it.
+ */
+const PER_TIER_MECHANIC_COLUMNS = ["ActivationCount", "TargetCount", "Duration", "Chance"];
+
 function mergeByKey(existing: Translation[], incoming: Translation[]): Translation[] {
     const map = new Map(existing.map((entry) => [entry.key, entry]));
     for (const entry of incoming) map.set(entry.key, entry);
@@ -1382,6 +1389,83 @@ export class GameStore {
 
     ballDescription(ball: Ball): string {
         return this.getTranslation(ball.descKey) ?? "";
+    }
+
+    /**
+     * Pushes this item's mechanic rows onto every later tier of its upgrade chain (base → + → ++), the mechanics
+     * counterpart to copyDescriptionToUpgrades. Deliberately touches *only* mechanics: an item's own columns
+     * (ValueMin/ValueMax/Cost/Weight/tags/...) are exactly what's meant to differ between tiers, so copying them
+     * would flatten the upgrade.
+     *
+     * The same caution applies inside the mechanic rows themselves. In the real config most tier rows are
+     * byte-identical to their base, but a handful scale on purpose — Активация соседнего дома goes
+     * ActivationCount 1→2→3, Случайная активация goes TargetCount 3→6→9. Blindly overwriting those would quietly
+     * undo the upgrade, so where a tier already has its own value in one of those counter columns it's kept and
+     * only the surrounding structure is copied. A tier row that doesn't exist yet is created outright, taking the
+     * source's values as-is (there's no tier-specific number to preserve in that case).
+     *
+     * Rows a tier has but the source doesn't are left alone rather than deleted — the Sheets export can update
+     * and append but not remove, so "deleting" here would only ever desync the site from the table.
+     */
+    copyMechanicsToUpgrades(itemId: string): { tiers: number; updated: number; added: number } {
+        const result = { tiers: 0, updated: 0, added: 0 };
+
+        const chain = this.chainForItem(itemId);
+        if (!chain) return result;
+        const index = chain.itemIds.indexOf(itemId);
+        if (index === -1) return result;
+
+        const sourceRows = this.mechanics.filter((row) => row.itemId === itemId);
+        if (sourceRows.length === 0) return result;
+
+        const sourceTables = [...new Set(sourceRows.map((row) => row.table))];
+
+        for (const tierId of chain.itemIds.slice(index + 1)) {
+            if (!this.getItem(tierId)) continue;
+            result.tiers++;
+
+            for (const table of sourceTables) {
+                const fromRows = sourceRows.filter((row) => row.table === table);
+                const tierRows = this.mechanics.filter((row) => row.itemId === tierId && row.table === table);
+                const columns = (
+                    MECHANIC_TABLE_COLUMNS[table as keyof typeof MECHANIC_TABLE_COLUMNS] ??
+                    [...new Set(fromRows.flatMap((row) => Object.keys(row.fields)))]
+                ).filter((column) => column !== "ItemId");
+
+                fromRows.forEach((from, ordinal) => {
+                    const tierRow = tierRows[ordinal];
+
+                    // Every column is written explicitly, blanks included — a merge would leave a filter the
+                    // source has since cleared still set on the tier.
+                    const fields: Record<string, string> = {};
+                    for (const column of columns) fields[column] = from.fields[column] ?? "";
+
+                    if (!tierRow) {
+                        // Deterministic id: clicking twice re-writes the same row instead of appending a duplicate.
+                        this.upsertMechanicRow({
+                            id: `blueprint:copy:${tierId}:${table}:${ordinal}`,
+                            table,
+                            itemId: tierId,
+                            fields,
+                        });
+                        result.added++;
+                        return;
+                    }
+
+                    for (const column of PER_TIER_MECHANIC_COLUMNS) {
+                        if (tierRow.fields[column]) fields[column] = tierRow.fields[column];
+                    }
+
+                    const changed = columns.some((column) => (tierRow.fields[column] ?? "") !== fields[column]);
+                    if (!changed) return;
+
+                    this.updateMechanicRowFields(tierRow.id, fields);
+                    result.updated++;
+                });
+            }
+        }
+
+        return result;
     }
 
     /** Tier chains almost always share the exact same description template across + and ++ (only the underlying

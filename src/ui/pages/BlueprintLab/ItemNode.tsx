@@ -1,6 +1,22 @@
 import { useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Box, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
+import {
+    Box,
+    Button,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogContentText,
+    DialogTitle,
+    MenuItem,
+    Paper,
+    Select,
+    Snackbar,
+    Stack,
+    TextField,
+    Typography,
+} from "@mui/material";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useStore } from "../../hooks/useStore";
 import { MECHANIC_KINDS } from "./mechanicSchema";
 import { ITEM_CATEGORY_COLUMNS } from "./itemSchema";
@@ -13,7 +29,28 @@ const ITEM_KINDS: ItemKind[] = ["Card", "House", "Artefact"];
 
 export default function ItemNode({ data, selected }: NodeProps<ItemFlowNode>) {
     const [addMechanicOpen, setAddMechanicOpen] = useState(false);
+    const [confirmingCopyToUpgrades, setConfirmingCopyToUpgrades] = useState(false);
+    const [copyResult, setCopyResult] = useState<string | null>(null);
     const store = useStore();
+
+    // Only a real, loaded item can have upgrade tiers to copy into — a fresh draft isn't in any chain yet.
+    const chain = data.locked ? store.chainForItem(data.itemId) : undefined;
+    const chainIndex = chain ? chain.itemIds.indexOf(data.itemId) : -1;
+    const upgradeTierItems =
+        chain && chainIndex !== -1
+            ? chain.itemIds.slice(chainIndex + 1).map((tierId) => store.getItem(tierId) ?? tierId)
+            : [];
+    const ownMechanicCount = store.mechanics.filter((row) => row.itemId === data.itemId).length;
+
+    const copyMechanicsToUpgrades = () => {
+        const { tiers, updated, added } = store.copyMechanicsToUpgrades(data.itemId);
+        setConfirmingCopyToUpgrades(false);
+        setCopyResult(
+            updated + added === 0
+                ? `Прокачек: ${tiers}. Механики уже совпадают — менять нечего.`
+                : `Прокачек: ${tiers}. Обновлено строк: ${updated}, добавлено: ${added}.`
+        );
+    };
 
     return (
         <Paper
@@ -111,7 +148,51 @@ export default function ItemNode({ data, selected }: NodeProps<ItemFlowNode>) {
                         </MenuItem>
                     ))}
                 </Select>
+
+                {upgradeTierItems.length > 0 && (
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<ContentCopyIcon fontSize="small" />}
+                        disabled={ownMechanicCount === 0}
+                        onClick={() => setConfirmingCopyToUpgrades(true)}
+                    >
+                        Механики в прокачки ({upgradeTierItems.length})
+                    </Button>
+                )}
             </Stack>
+
+            <Dialog open={confirmingCopyToUpgrades} onClose={() => setConfirmingCopyToUpgrades(false)}>
+                <DialogTitle>Скопировать механики в прокачки?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText component="div">
+                        Механики этого предмета ({ownMechanicCount} стр.) заменят механики следующих предметов:{" "}
+                        {upgradeTierItems
+                            .map((tierItem) => (typeof tierItem === "string" ? tierItem : store.itemName(tierItem)))
+                            .join(", ")}
+                        .
+                        <Box component="p" sx={{ mt: 1, mb: 0 }}>
+                            Собственные поля предметов (Value, Cost, Weight, теги и т.д.) не трогаются — именно
+                            они и должны отличаться у прокачек. Счётчики{" "}
+                            <code>ActivationCount</code>/<code>TargetCount</code>/<code>Duration</code>/
+                            <code>Chance</code> у прокачки тоже сохраняются, если они там уже заданы.
+                        </Box>
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingCopyToUpgrades(false)}>Отмена</Button>
+                    <Button color="primary" variant="contained" onClick={copyMechanicsToUpgrades}>
+                        Скопировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Snackbar
+                open={copyResult !== null}
+                autoHideDuration={6000}
+                onClose={() => setCopyResult(null)}
+                message={copyResult ?? ""}
+            />
         </Paper>
     );
 }
