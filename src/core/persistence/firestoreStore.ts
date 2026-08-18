@@ -414,6 +414,13 @@ export function replaceExportedOverridesRemote(overrides: Record<string, string>
     return setDoc(doc(sharedCol, "exportedOverrides"), overrides);
 }
 
+/** Full overwrite, for the same reason as replaceExportedOverridesRemote: a translations import can retire many
+ *  overrides at once (see GameStore.dropOverridesSupersededByImport), and point-updating each would be dozens
+ *  of round-trips for one logical change. */
+export function replaceTranslationOverridesRemote(overrides: Record<string, string>): Promise<void> {
+    return setDoc(doc(sharedCol, "translationOverrides"), overrides);
+}
+
 /** Full overwrite of all `shared/*` docs — used by importSnapshot, which is a full-replace operation. */
 export function replaceSharedState(shared: SharedState): Promise<void> {
     const batch = writeBatch(db);

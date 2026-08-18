@@ -62,6 +62,7 @@ import {
     updateBalanceConfigRemote,
     updateTranslationOverrideRemote,
     replaceExportedOverridesRemote,
+    replaceTranslationOverridesRemote,
     subscribeGlossary,
     replaceGlossaryRemote,
     subscribeTagIcons,
@@ -1450,6 +1451,45 @@ export class GameStore {
      * which is what a plain full-replace would do since a config-only fetch's `result.data.translations` is
      * simply empty (no Translations-shaped table was ever fetched), not "the translations were cleared."
      */
+    /**
+     * A translation override exists so a site-side edit can win over the sheet *until it's exported*. Once it
+     * has been exported the sheet holds that exact text, so the override is redundant — but it keeps winning
+     * forever, which means a later edit made directly in the sheet is silently ignored: the download looks like
+     * it "didn't apply", and on a page load the correct sheet text renders first and is then replaced by the
+     * stale override as soon as Firestore delivers it.
+     *
+     * So after a fresh translations import, retire every override that still matches what was last exported —
+     * the sheet is authoritative for those now. Deliberately narrow on two counts: an override that *differs*
+     * from `exportedOverrides` is a local edit that was never sent and must survive, and a key the import
+     * didn't deliver is left alone too (dropping it would lose text that exists nowhere else).
+     */
+    private dropOverridesSupersededByImport(): void {
+        const importedKeys = new Set(this.translations.map((translation) => translation.key));
+
+        const nextOverrides = { ...this.translationOverrides };
+        const nextExported = { ...this.exportedOverrides };
+        let retired = 0;
+
+        for (const [key, value] of Object.entries(this.translationOverrides)) {
+            if (!importedKeys.has(key)) continue;
+            if (this.exportedOverrides[key] !== value) continue;
+            delete nextOverrides[key];
+            delete nextExported[key];
+            retired++;
+        }
+
+        if (retired === 0) return;
+
+        this.translationOverrides = nextOverrides;
+        this.exportedOverrides = nextExported;
+        void replaceTranslationOverridesRemote(nextOverrides).catch((error) =>
+            console.error("dropOverridesSupersededByImport → Firestore", error)
+        );
+        void replaceExportedOverridesRemote(nextExported).catch((error) =>
+            console.error("dropOverridesSupersededByImport → Firestore", error)
+        );
+    }
+
     private applyImportResult(result: ImportResult, options?: { merge?: boolean; scope?: "config" | "translations" }): void {
         if (options?.merge) {
             this.allItems = mergeById(this.allItems, result.data.items);
@@ -1480,6 +1520,7 @@ export class GameStore {
             }
             if (options?.scope !== "config") {
                 this.translations = this.reverseImportedIcons(result.data.translations);
+                this.dropOverridesSupersededByImport();
             }
         }
 
