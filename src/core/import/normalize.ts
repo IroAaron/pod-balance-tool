@@ -11,7 +11,7 @@ import type { Ball } from "../models/Ball";
 import type { BallGroup } from "../models/BallGroup";
 import type { Sprint, SprintRound } from "../models/Sprint";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
-import { tableNameOf } from "./tableNames";
+import { isIntentionallyUnsupportedTable, tableNameOf } from "./tableNames";
 
 export interface NormalizedData {
     items: Item[];
@@ -614,10 +614,12 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
         } else if (type === "Enums") {
             mergeEnumValues(enumValues, normalizeEnumsTable(table));
         } else if (type === "Unknown") {
-            warnings.push({
-                sourceName: table.sourceName,
-                message: "Не удалось определить тип таблицы — данные не загружены",
-            });
+            if (!isIntentionallyUnsupportedTable(table.sourceName)) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не удалось определить тип таблицы — данные не загружены",
+                });
+            }
         } else {
             const normalized = normalizeMechanicTable(table, type);
             if (normalized.length === 0) {

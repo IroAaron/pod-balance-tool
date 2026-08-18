@@ -679,3 +679,26 @@ describe("Sprints", () => {
         ]);
     });
 });
+
+describe("Unknown tables", () => {
+    const unknownTable = (sourceName: string) => ({
+        type: "Unknown" as const,
+        table: { sourceName, headers: ["Название иконки", "Размер"], rows: [{ "Название иконки": "Бургер", "Размер": "40" }] },
+    });
+
+    it("warns about a genuinely unrecognized tab", () => {
+        const { warnings } = normalizeClassifiedTables([unknownTable("ЧтоТоНовое")]);
+
+        expect(warnings).toEqual([
+            { sourceName: "ЧтоТоНовое", message: "Не удалось определить тип таблицы — данные не загружены" },
+        ]);
+    });
+
+    it("stays quiet about tabs the site deliberately doesn't consume", () => {
+        // "Словарь значков" ships in the real translations sheet and can never classify — warning about it on
+        // every download is a false alarm on an otherwise successful import.
+        expect(normalizeClassifiedTables([unknownTable("Словарь значков")]).warnings).toEqual([]);
+        // Matched by tab name, so a manually-uploaded CSV ("<Spreadsheet> - <Tab>.csv") is recognized too.
+        expect(normalizeClassifiedTables([unknownTable("PoD_ переводы - Словарь значков")]).warnings).toEqual([]);
+    });
+});
