@@ -20,6 +20,7 @@ import { BuildService } from "./services/BuildService";
 import { ImportService, type ImportReport, type ImportResult } from "./services/ImportService";
 
 import { computeSuggestedBuilds, computeCascadeBuilds, computeUpgradeTierIds } from "./domain/relations";
+import { PLACEHOLDER_ITEM_ICON } from "./domain/sprites";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 import { DEFAULT_DESCRIPTION_SETTINGS, getEnabledGlossaryEntries, type DescriptionSettings } from "./domain/descriptionTemplate";
 import { buildExportDescriptionText } from "./domain/exportText";
@@ -109,6 +110,17 @@ function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] 
  * TargetCount 3→6→9). copyMechanicsToUpgrades keeps a tier's own value in these rather than overwriting it.
  */
 const PER_TIER_MECHANIC_COLUMNS = ["ActivationCount", "TargetCount", "Duration", "Chance"];
+
+/**
+ * Drops manual icons whose value is just the placeholder. Saving one was possible until now (the icon editor
+ * pre-filled 🧩 and wrote it straight back), and the result looked like a bug rather than a choice: a stored
+ * manual icon wins over the item's real sprite, so the item rendered 🧩 — pixel-identical to "sprite missing" —
+ * while its upgrade tiers, which had no such entry, showed the sprite fine. Cleaned on the way in so existing
+ * entries stop hiding sprites without needing a data migration; every consumer reads this map or getItemIcon().
+ */
+function normalizeItemIcons(icons: Record<string, string>): Record<string, string> {
+    return Object.fromEntries(Object.entries(icons).filter(([, icon]) => icon.trim() !== PLACEHOLDER_ITEM_ICON));
+}
 
 function mergeByKey(existing: Translation[], incoming: Translation[]): Translation[] {
     const map = new Map(existing.map((entry) => [entry.key, entry]));
@@ -338,7 +350,7 @@ export class GameStore {
         });
 
         subscribeShared((shared, ready) => {
-            this.itemIcons = shared.itemIcons;
+            this.itemIcons = normalizeItemIcons(shared.itemIcons);
             this.deckNames = shared.deckNames;
             this.sprintStageCounts = shared.sprintStageCounts;
             this.customParamValues = shared.customParamValues;
@@ -1824,10 +1836,21 @@ export class GameStore {
         return drafts.length;
     }
 
+    /** Passing "" — or the bare placeholder, which is the same thing to look at but would outrank and hide the
+     *  item's sprite — clears the manual icon rather than storing it. See normalizeItemIcons. */
     setItemIcon(itemId: string, icon: string): void {
-        this.itemIcons = { ...this.itemIcons, [itemId]: icon };
+        const next = icon.trim() === PLACEHOLDER_ITEM_ICON ? "" : icon;
+
+        if (next) {
+            this.itemIcons = { ...this.itemIcons, [itemId]: next };
+        } else {
+            const remaining = { ...this.itemIcons };
+            delete remaining[itemId];
+            this.itemIcons = remaining;
+        }
+
         this.notify();
-        void updateItemIconRemote(itemId, icon).catch((error) => console.error("setItemIcon → Firestore", error));
+        void updateItemIconRemote(itemId, next).catch((error) => console.error("setItemIcon → Firestore", error));
     }
 
     getDeckName(deckId: string): string | undefined {
