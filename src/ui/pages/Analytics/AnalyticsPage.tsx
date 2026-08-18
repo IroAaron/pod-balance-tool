@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Stack, Typography } from "@mui/material";
+import { Link as RouterLink } from "react-router-dom";
+import { Alert, Box, Divider, Link, Paper, Stack, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
+import ItemIcon from "../../components/ItemIcon";
 import { getItemSpriteFileName, SPRITE_BASE_PATH } from "../../../core/domain/sprites";
+import { findUpgradeDescriptionMismatches } from "../../../core/domain/upgradeConsistency";
 
 export default function AnalyticsPage() {
     const store = useStore();
@@ -34,9 +37,84 @@ export default function AnalyticsPage() {
 
     const unusedSprites = (manifest ?? []).filter((file) => !usedSpriteNames.has(file));
 
+    const descriptionMismatches = findUpgradeDescriptionMismatches(
+        store.upgradeChains,
+        (id) => store.getItem(id),
+        (item) => store.itemDescription(item)
+    );
+
     return (
         <Stack spacing={3}>
             <Typography variant="h4">Разное</Typography>
+
+            <Stack spacing={0.5}>
+                <Typography variant="h6">Расхождения в описаниях прокачек</Typography>
+                <Typography variant="body2" color="text.secondary">
+                    Предметы одной цепочки прокачки (+/++) должны использовать один и тот же шаблон описания —
+                    числа подставляются сами через токены вроде {"{ValueOrRange}"}. Здесь цепочки, где различается
+                    сам текст шаблона, а не подставляемые значения. Пробелы по краям не учитываются.
+                </Typography>
+            </Stack>
+
+            {store.upgradeChains.length === 0 ? (
+                <Typography color="text.secondary">
+                    Цепочки прокачки не загружены — скачайте конфиг на странице «Источники».
+                </Typography>
+            ) : descriptionMismatches.length === 0 ? (
+                <Typography color="text.secondary">
+                    Расхождений не найдено — во всех {store.upgradeChains.length} цепочках описания совпадают.
+                </Typography>
+            ) : (
+                <Stack spacing={2}>
+                    <Typography variant="body2" color="text.secondary">
+                        Найдено расхождений: {descriptionMismatches.length} из {store.upgradeChains.length} цепочек.
+                    </Typography>
+
+                    {descriptionMismatches.map((mismatch) => (
+                        <Paper key={mismatch.chainId} variant="outlined" sx={{ p: 2 }}>
+                            <Stack spacing={1.5} divider={<Divider flexItem />}>
+                                {mismatch.tiers.map((tier) => (
+                                    <Stack key={tier.item.id} direction="row" spacing={1.5} sx={{ alignItems: "flex-start" }}>
+                                        <Box sx={{ flexShrink: 0, pt: 0.25 }}>
+                                            <ItemIcon item={tier.item} size={32} />
+                                        </Box>
+
+                                        <Stack spacing={0.25} sx={{ minWidth: 0, flex: 1 }}>
+                                            <Link
+                                                component={RouterLink}
+                                                to={`/items/${encodeURIComponent(tier.item.id)}`}
+                                                variant="body2"
+                                                sx={{ fontWeight: tier.matchesFirst ? 400 : 600 }}
+                                            >
+                                                {store.itemName(tier.item)}
+                                            </Link>
+                                            <Typography variant="caption" color="text.secondary">
+                                                {tier.item.id}
+                                            </Typography>
+                                            <Typography
+                                                variant="body2"
+                                                component="pre"
+                                                sx={{
+                                                    m: 0,
+                                                    fontFamily: "monospace",
+                                                    fontSize: 13,
+                                                    whiteSpace: "pre-wrap",
+                                                    wordBreak: "break-word",
+                                                    color: tier.matchesFirst ? "text.secondary" : "warning.main",
+                                                }}
+                                            >
+                                                {tier.description || "(описание пустое)"}
+                                            </Typography>
+                                        </Stack>
+                                    </Stack>
+                                ))}
+                            </Stack>
+                        </Paper>
+                    ))}
+                </Stack>
+            )}
+
+            <Divider />
 
             <Stack spacing={0.5}>
                 <Typography variant="h6">Неиспользуемые спрайты</Typography>
