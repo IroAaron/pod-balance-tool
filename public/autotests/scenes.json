@@ -1,0 +1,99 @@
+{
+ "digest": {
+  "report": "report_1",
+  "totals": {
+   "tests": 12,
+   "failures": 2,
+   "errors": 0,
+   "skipped": 0,
+   "flaky": 0,
+   "duration_sec": 32.58
+  },
+  "failing": [
+   {
+    "test": "test_resource_references::test_ext_resource_references_resolve",
+    "category": "tests/scenes",
+    "status": "failed",
+    "message": "FAILED: res://tests/scenes/test_resource_references.gd:32",
+    "details": "Ссылки, которые Godot не сможет разрешить (27):\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/images/host uncanny.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/blood_decals_psx/source/blood decals_decal2.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/ConcreteWall2.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/lambert1_baseColor.jpeg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/bloody_hand_psx/textures/bloody hand.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/snake_rig/snake_test_idle.fbx\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/metal_sheets_wood_planks/M_MetalSheet.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/metal_sheets_wood_planks/M_WoodPlank.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/hostess_disgust.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/wires/M_Wires.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/M_ConcreteWall1.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/blood_decals_psx/textures/decal1_0.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/M_ConcreteWall2.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/bloody_hand_psx/textures/blood drag mark decal.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/Grey_Steel_Mesh_Metal_Texture_Background_high_resolution_preview_1941843.jpg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/bloody_hand_psx/source/bloody hand.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/scorpion/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/hand/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/metal_sheets_wood_planks/WoodBalks_MetalSheets.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/2026-06-09_19-10-48.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/spine.jpg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/ba2bed5b680c120e44c18b6bf27b7eae — копия (2).jpg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/gut_in_jar/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/formalin_jar/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/kidnapped/Kidnapped.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/wires/wires.fbx\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/ConcreteWall1.gltf\n\tat 'test_ext_resource_references_resolve' in res://tests/scenes/test_resource_references.gd:32"
+   },
+   {
+    "test": "test_stale_resource_paths::test_ext_resource_paths_are_not_stale",
+    "category": "tests/scenes",
+    "status": "failed",
+    "message": "FAILED: res://tests/scenes/test_stale_resource_paths.gd:20",
+    "details": "Устаревшие пути (спасает только uid, 1):\n  res://vfx/thunder_vfx/thunder.tscn -> res://Thunder/Thunder.tres\n\tat 'test_ext_resource_paths_are_not_stale' in res://tests/scenes/test_stale_resource_paths.gd:20"
+   }
+  ],
+  "slowest": [
+   {
+    "test": "test_scenes_smoke::test_key_scenes_load_and_instantiate",
+    "time_sec": 30.91
+   },
+   {
+    "test": "test_stale_resource_paths::test_ext_resource_paths_are_not_stale",
+    "time_sec": 0.47
+   },
+   {
+    "test": "test_resource_references::test_ext_resource_references_resolve",
+    "time_sec": 0.44
+   }
+  ],
+  "passed": [
+   "test_resource_references::test_scan_actually_finds_resources",
+   "test_scripts_compile::test_generated_content_is_present",
+   "test_scripts_compile::test_scan_actually_finds_scripts",
+   "test_scripts_compile::test_all_scripts_compile",
+   "test_scenes_smoke::test_key_scenes_exist",
+   "test_scenes_smoke::test_key_scenes_load_and_instantiate",
+   "test_round_run_golden::test_generated_content_is_present_for_round",
+   "test_round_run_golden::test_round_reaches_golden_state",
+   "test_round_run_golden::test_round_actually_runs",
+   "test_round_run_golden::test_round_is_reproducible_under_seed"
+  ],
+  "test_packages": {
+   "test_resource_references::test_scan_actually_finds_resources": "tests/scenes",
+   "test_resource_references::test_ext_resource_references_resolve": "tests/scenes",
+   "test_scripts_compile::test_generated_content_is_present": "tests/scenes",
+   "test_scripts_compile::test_scan_actually_finds_scripts": "tests/scenes",
+   "test_scripts_compile::test_all_scripts_compile": "tests/scenes",
+   "test_scenes_smoke::test_key_scenes_exist": "tests/scenes",
+   "test_scenes_smoke::test_key_scenes_load_and_instantiate": "tests/scenes",
+   "test_stale_resource_paths::test_ext_resource_paths_are_not_stale": "tests/scenes",
+   "test_round_run_golden::test_generated_content_is_present_for_round": "tests/regression",
+   "test_round_run_golden::test_round_reaches_golden_state": "tests/regression",
+   "test_round_run_golden::test_round_actually_runs": "tests/regression",
+   "test_round_run_golden::test_round_is_reproducible_under_seed": "tests/regression"
+  }
+ },
+ "analysis": {
+  "overall_status": "attention",
+  "summary": "Из 12 тестов упало 2. Ещё 2 — известные и уже разобранные проблемы.",
+  "findings": [
+   {
+    "test": "test_resource_references::test_ext_resource_references_resolve",
+    "category": "known_issue",
+    "severity": "low",
+    "title": "Известное, всё ещё воспроизводится: stage2.tscn смержена в gun2 без своих артов",
+    "what_happened": "Ссылки, которые Godot не сможет разрешить (27):\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/images/host uncanny.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/blood_decals_psx/source/blood decals_decal2.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/ConcreteWall2.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/lambert1_baseColor.jpeg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/bloody_hand_psx/textures/bloody hand.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/snake_rig/snake_test_idle.fbx\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/metal_sheets_wood_planks/M_MetalSheet.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/metal_sheets_wood_planks/M_WoodPlank.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/hostess_disgust.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/wires/M_Wires.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/M_ConcreteWall1.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/blood_decals_psx/textures/decal1_0.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/M_ConcreteWall2.tres\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/bloody_hand_psx/textures/blood drag mark decal.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/Grey_Steel_Mesh_Metal_Texture_Background_high_resolution_preview_1941843.jpg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/decals/bloody_hand_psx/source/bloody hand.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/scorpion/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/hand/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/metal_sheets_wood_planks/WoodBalks_MetalSheets.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/2026-06-09_19-10-48.png\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/spine.jpg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/2dtextures/ba2bed5b680c120e44c18b6bf27b7eae — копия (2).jpg\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/gut_in_jar/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/formalin_jar/scene.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/ShopLab/kidnapped/Kidnapped.gltf\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/wires/wires.fbx\n  res://roulette_interface/3d/ART/stage2.tscn -> res://roulette_interface/3d/ART/gltf/Stage2/concrete_walls/ConcreteWall1.gltf\n\tat 'test_ext_resource_references_resolve' in res://tests/scenes/test_resource_references.gd:32",
+    "likely_cause": "Сцена ссылается на 27 файлов из roulette_interface/3d/ART/gltf/Stage2/. В gun2 этой папки нет вовсе; её 267 файлов существуют только в ветке 2stage_art. Сцену смержили, ассеты — нет.",
+    "recommended_action": "Разобрано ранее: Подтверждено: папка не отслеживается в gun2, наша оснастка её не удаляла. Нужен мерж 2stage_art или откат сцены. Место: game/roulette_interface/3d/ART/stage2.tscn. Починят в игре — уберите запись из known_issues.json.",
+    "owner": "dev"
+   },
+   {
+    "test": "test_stale_resource_paths::test_ext_resource_paths_are_not_stale",
+    "category": "known_issue",
+    "severity": "low",
+    "title": "Известное, всё ещё воспроизводится: thunder.tscn ссылается на переехавший шейдер",
+    "what_happened": "Устаревшие пути (спасает только uid, 1):\n  res://vfx/thunder_vfx/thunder.tscn -> res://Thunder/Thunder.tres\n\tat 'test_ext_resource_paths_are_not_stale' in res://tests/scenes/test_stale_resource_paths.gd:20",
+    "likely_cause": "Ссылка ведёт на res://Thunder/Thunder.tres, файл лежит в res://vfx/thunder_vfx/thunder.tres. Игра не падает — спасает uid в ссылке, но путь мёртвый.",
+    "recommended_action": "Разобрано ранее: Подтверждено в чистой копии игры (файл нами не менялся). Место: game/vfx/thunder_vfx/thunder.tscn. Починят в игре — уберите запись из known_issues.json.",
+    "owner": "dev"
+   }
+  ],
+  "notes": [
+   "В known_issues.json есть запись про `test_item_settings::test_reassigning_possible_colors_line_replaces_not_accumulates`, но такого теста нет в прогоне — запись протухла или тест переименовали.",
+   "В known_issues.json есть запись про `test_deck_pick_random_golden::test_duplicates_false_returns_no_duplicates`, но такого теста нет в прогоне — запись протухла или тест переименовали."
+  ]
+ }
+}
