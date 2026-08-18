@@ -8,6 +8,14 @@ import type { Build } from "../models/Build";
  */
 export const SPRITE_BASE_PATH = `${import.meta.env.BASE_URL}roulette_interface/pod-mini-characters/`;
 
+/**
+ * What's drawn when an item has neither a manual icon nor a sprite. It's also explicitly *not* storable as a
+ * manual icon: saving it would be indistinguishable from having no icon, except that a stored manual icon
+ * outranks the item's real sprite — so it would silently hide the sprite while looking exactly like a sprite
+ * that failed to load. See GameStore.setItemIcon / normalizeItemIcons.
+ */
+export const PLACEHOLDER_ITEM_ICON = "🧩";
+
 export function findRawValue(raw: Record<string, string>, columnName: string): string | undefined {
     const key = Object.keys(raw).find((entry) => entry.trim().toLowerCase() === columnName.toLowerCase());
     const value = key ? raw[key] : undefined;

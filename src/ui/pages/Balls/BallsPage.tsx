@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import {
     Alert,
@@ -18,24 +18,32 @@ import {
     Typography,
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
-import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
-import { roundAsItemStub } from "./roundAsItemStub";
+import { ballAsItemStub } from "./ballAsItemStub";
 import type { ExportResult } from "../../../core/import/sheetSource";
 
-export default function RoundsPage() {
+export default function BallsPage() {
     const store = useStore();
-    const [query, setQuery] = useState("");
+    const [newBallId, setNewBallId] = useState("");
     const [confirmingExport, setConfirmingExport] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
+
+    const trimmedNewId = newBallId.trim();
+    const alreadyExists = trimmedNewId !== "" && store.getBall(trimmedNewId) !== undefined;
+
+    const handleCreate = () => {
+        if (!trimmedNewId || alreadyExists) return;
+        store.createBall(trimmedNewId);
+        setNewBallId("");
+    };
 
     const confirmExport = async () => {
         setConfirmingExport(false);
         setExporting(true);
         setExportResult(null);
         try {
-            setExportResult(await store.exportRoundChanges());
+            setExportResult(await store.exportBallChanges());
         } catch (error) {
             setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
         } finally {
@@ -43,33 +51,17 @@ export default function RoundsPage() {
         }
     };
 
-    const filtered = useMemo(() => {
-        const trimmed = query.trim().toLowerCase();
-        if (!trimmed) return store.rounds;
-        return store.rounds.filter((round) => {
-            const name = store.roundName(round).toLowerCase();
-            return (
-                round.id.toLowerCase().includes(trimmed) ||
-                name.includes(trimmed) ||
-                (round.rules ?? "").toLowerCase().includes(trimmed)
-            );
-        });
-        // roundName reads live translations at call time — store.translations/store.translationOverrides
-        // covers re-running the filter whenever an override changes.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [store.rounds, store.translations, store.translationOverrides, query]);
-
     return (
         <Stack spacing={3}>
             <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexWrap: "wrap" }}>
-                <Typography variant="h4">Раунды</Typography>
+                <Typography variant="h4">Шары</Typography>
                 <Button
                     variant="contained"
                     onClick={() => setConfirmingExport(true)}
-                    disabled={exporting || store.blueprintRoundPendingExportCount === 0}
+                    disabled={exporting || store.blueprintBallPendingExportCount === 0}
                     startIcon={exporting ? <CircularProgress size={16} /> : undefined}
                 >
-                    {exporting ? "Отправка..." : `Экспортировать раунды (${store.blueprintRoundPendingExportCount})`}
+                    {exporting ? "Отправка..." : `Экспортировать шары (${store.blueprintBallPendingExportCount})`}
                 </Button>
             </Stack>
 
@@ -87,16 +79,25 @@ export default function RoundsPage() {
                     </Alert>
                 ))}
 
-            <TextField
-                label="Поиск"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                size="small"
-                sx={{ maxWidth: 320 }}
-            />
+            <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
+                <TextField
+                    label="Id нового шара"
+                    size="small"
+                    value={newBallId}
+                    onChange={(event) => setNewBallId(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter") handleCreate();
+                    }}
+                    error={alreadyExists}
+                    helperText={alreadyExists ? "Шар с таким id уже есть" : undefined}
+                />
+                <Button variant="contained" onClick={handleCreate} disabled={!trimmedNewId || alreadyExists}>
+                    + Создать шар
+                </Button>
+            </Stack>
 
             <Typography variant="body2" color="text.secondary">
-                Найдено: {filtered.length} из {store.rounds.length}
+                Найдено: {store.balls.length}
             </Typography>
 
             <Box
@@ -106,32 +107,41 @@ export default function RoundsPage() {
                     gap: 2,
                 }}
             >
-                {filtered.map((round) => {
-                    const artefact = round.invisibleArtefactId ? store.getItem(round.invisibleArtefactId) : undefined;
-                    const description = store.roundDescription(round);
+                {store.balls.map((ball) => {
+                    const description = store.ballDescription(ball);
+                    const summary = [
+                        ball.runMin !== undefined && ball.runMax !== undefined
+                            ? `Run: ${ball.runMin}–${ball.runMax}`
+                            : null,
+                        ball.valueMin !== undefined && ball.valueMax !== undefined
+                            ? `Value: ${ball.valueMin}–${ball.valueMax}`
+                            : null,
+                        ball.color ? `Color: ${ball.color}` : null,
+                    ]
+                        .filter(Boolean)
+                        .join(" · ");
 
                     return (
-                        <Card key={round.id} variant="outlined">
+                        <Card key={ball.id} variant="outlined">
                             <CardActionArea
                                 component={RouterLink}
-                                to={`/rounds/${encodeURIComponent(round.id)}`}
+                                to={`/balls/${encodeURIComponent(ball.id)}`}
                                 sx={{ height: "100%" }}
                             >
                                 <CardContent>
                                     <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}>
-                                        {artefact ? (
-                                            <ItemIcon item={artefact} size={32} />
-                                        ) : (
-                                            <Typography sx={{ fontSize: 26, lineHeight: 1 }}>🎯</Typography>
-                                        )}
+                                        <Typography sx={{ fontSize: 26, lineHeight: 1 }}>🎱</Typography>
                                         <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                            {store.roundName(round)}
+                                            {store.ballName(ball)}
                                         </Typography>
                                     </Stack>
 
                                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                                        {round.id}
-                                        {round.rules ? ` · ${round.rules}` : ""}
+                                        {ball.id}
+                                    </Typography>
+
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                                        {summary}
                                     </Typography>
 
                                     {description && (
@@ -145,7 +155,7 @@ export default function RoundsPage() {
                                                 overflow: "hidden",
                                             }}
                                         >
-                                            <ItemDescription item={roundAsItemStub(round)} description={description} />
+                                            <ItemDescription item={ballAsItemStub(ball)} description={description} />
                                         </Typography>
                                     )}
                                 </CardContent>
@@ -155,19 +165,20 @@ export default function RoundsPage() {
                 })}
             </Box>
 
-            {store.rounds.length === 0 && (
+            {store.balls.length === 0 && (
                 <Typography color="text.secondary">
                     Данных пока нет — загрузите их на странице «Источники».
                 </Typography>
             )}
 
             <Dialog open={confirmingExport} onClose={() => setConfirmingExport(false)}>
-                <DialogTitle>Экспортировать раунды в Google Sheets?</DialogTitle>
+                <DialogTitle>Экспортировать шары в Google Sheets?</DialogTitle>
                 <DialogContent>
                     <DialogContentText>
-                        Запишет изменения {store.blueprintRoundPendingExportCount} раунда(ов) обратно в реальную
-                        таблицу RoundSettings (RoundRules/AdditionalInvisibleArtefact/TempDeck/DeckBalls по колонке
-                        RoundId). Действие необратимо.
+                        Запишет изменения {store.blueprintBallPendingExportCount} шара(ов) обратно в реальную таблицу
+                        Balls (по колонке ItemId — существующие строки обновятся, новых — добавятся). Названия/описания
+                        шаров экспортируются отдельно, через «Экспортировать правки» на странице «Источники».
+                        Действие необратимо.
                     </DialogContentText>
                 </DialogContent>
                 <DialogActions>

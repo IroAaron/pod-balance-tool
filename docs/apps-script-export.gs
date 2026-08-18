@@ -27,6 +27,41 @@
 //     newMechanicRows?: {                         // Blueprint Lab — ALWAYS appended, never matched/updated
 //       [table: string]: { [column: string]: string }[],   // e.g. MechActivate, MechAddValue, ...
 //     },
+//     updatedMechanicRows?: {                     // Blueprint Lab — in-place edits to EXISTING mechanic rows.
+//       [table: string]: {                        // A mechanic row has no unique key, so the target is
+//         itemId: string,                         // addressed by ItemId + ordinal (its position among that
+//         ordinal: number,                        // item's rows in this table), and `originalFields` must
+//         fields: { [column: string]: string },        // still match the sheet or the write is REFUSED and
+//         originalFields: { [column: string]: string }, // reported as a conflict — never silently clobbered.
+//       }[],
+//     },
+//     decks?: {                                    // Decks page — REPLACES every row for a given DeckId
+//       Decks?: { [deckId: string]: { [column: string]: string }[] },
+//       DecksShop?: { [deckId: string]: { [column: string]: string }[] },
+//     },
+//     packs?: {                                    // Packs page — REPLACES every row for a given PackId
+//       [packId: string]: { [column: string]: string }[],
+//     },
+//     balls?: {                                    // Balls page — upserted by the sheet's `ItemId` column
+//       [itemId: string]: { [column: string]: string },
+//     },
+//     ballGroups?: {                                // Ball decks ("Колоды шаров") — REPLACES the one row for a
+//       [deckId: string]: string[],                 // given DeckId, writing values across every repeated `Ball`
+//     },                                            // column. Empty array deletes that ball deck's row.
+//     rounds?: {                                    // Rounds page — writes into RoundSettings
+//       fields: {                                    // upserted by RoundId (RoundRules/AdditionalInvisibleArtefact/TempDeck)
+//         [roundId: string]: { [column: string]: string },
+//       },
+//       deckBalls: {                                 // REPLACES the one row for a given RoundId, writing values
+//         [roundId: string]: string[],                // across every repeated `DeckBalls` column
+//       },
+//     },
+//     sprints?: {                                    // Sprints page — REPLACES every row for a given SprintId
+//       [sprintId: string]: {
+//         columns: { [column: string]: string },       // ordinary one-column fields, incl. a fresh RoundNumber
+//         repeatedValues: string[],                     // written across every repeated `RoundSettings` column
+//       }[],                                           // one entry per row/round, in order. Empty array deletes.
+//     },
 //   }
 // `items`/`newMechanicRows` only ever write columns present in the payload — a column the site doesn't model
 // (sprite names, unrelated flags, etc.) is left exactly as it already was in the sheet.
@@ -59,6 +94,50 @@ function doPost(e) {
             for (var mechTable in body.newMechanicRows) {
                 result.updated[mechTable] = appendFullRows(ss, mechTable, body.newMechanicRows[mechTable], result);
             }
+        }
+
+        if (body.updatedMechanicRows) {
+            for (var updTable in body.updatedMechanicRows) {
+                result.updated[updTable + ":updated"] = updateMechanicRows(ss, updTable, body.updatedMechanicRows[updTable], result);
+            }
+        }
+
+        if (body.decks) {
+            for (var deckTable in body.decks) {
+                result.updated[deckTable] = replaceRowsByGroupId(ss, deckTable, "DeckId", body.decks[deckTable], result);
+            }
+        }
+
+        // Packs is grouped-by-id the same way Decks/DecksShop are (one row per source-deck entry per pack, no
+        // stable per-row key) — reuses the exact same helper, just against the Packs sheet/PackId column.
+        if (body.packs) {
+            result.updated.Packs = replaceRowsByGroupId(ss, "Packs", "PackId", body.packs, result);
+        }
+
+        // Balls is a flat row-per-object table like Items — reuses upsertFullRows as-is, no new helper needed.
+        if (body.balls) {
+            result.updated.Balls = upsertFullRows(ss, "Balls", "ItemId", body.balls, result);
+        }
+
+        // BallGroups is a WIDE one-row-per-group table (7 same-named "Ball" columns) — upsertFullRows/
+        // replaceRowsByGroupId both assume a narrow row shape and can't address repeated-name columns.
+        if (body.ballGroups) {
+            result.updated.BallGroups = replaceWideGroupRow(ss, "BallGroups", "DeckId", "Ball", body.ballGroups, result);
+        }
+
+        // Rounds page — RoundSettings mixes both row shapes: ordinary one-column fields (upsertFullRows) and its
+        // own repeated "DeckBalls" columns (replaceWideGroupRow, same helper BallGroups uses).
+        if (body.rounds) {
+            result.updated.RoundSettings = upsertFullRows(ss, "RoundSettings", "RoundId", body.rounds.fields, result);
+            replaceWideGroupRow(ss, "RoundSettings", "RoundId", "DeckBalls", body.rounds.deckBalls, result);
+        }
+
+        // Sprints mixes both group-replace shapes on the same row (ordinary columns AND a repeated column) —
+        // neither replaceRowsByGroupId nor replaceWideGroupRow alone fits, see the combined helper below.
+        if (body.sprints) {
+            result.updated.Sprints = replaceRowsByGroupIdWithRepeatedColumn(
+                ss, "Sprints", "SprintId", "RoundSettings", body.sprints, result
+            );
         }
 
         return jsonResponse(result);
@@ -170,10 +249,86 @@ function upsertFullRows(spreadsheet, sheetName, idColumnName, rows, result) {
     return touched;
 }
 
+// Blueprint Lab in-place mechanic edits: each update names its target by `itemId` + `ordinal` (the Nth row for
+// that item in this sheet, counted in sheet order) rather than an absolute row number, so rows added or removed
+// elsewhere can't shift it. Before writing, every column in `originalFields` must still match the sheet — if
+// even one differs, the row was changed or reordered by someone else since the site imported it, so the write
+// is REFUSED for that row and reported in `result.errors` instead of overwriting whatever is there now.
+function updateMechanicRows(spreadsheet, sheetName, updates, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var data = sheet.getDataRange().getValues();
+    var header = data[0];
+    var idCol = header.indexOf("ItemId");
+    if (idCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": 'ItemId' column not found in header row");
+        return 0;
+    }
+
+    // itemId -> sheet row numbers holding it, in sheet order; index into this is the payload's `ordinal`.
+    var rowsByItemId = {};
+    for (var i = 1; i < data.length; i++) {
+        var id = String(data[i][idCol]).trim();
+        if (!id) continue;
+        (rowsByItemId[id] = rowsByItemId[id] || []).push(i + 1); // +1: sheet rows are 1-indexed
+    }
+
+    var updated = 0;
+    for (var u = 0; u < updates.length; u++) {
+        var upd = updates[u];
+        var candidates = rowsByItemId[upd.itemId] || [];
+        var sheetRow = candidates[upd.ordinal];
+
+        if (!sheetRow) {
+            result.errors = result.errors || [];
+            result.errors.push(
+                sheetName + ": no row #" + (upd.ordinal + 1) + " for ItemId '" + upd.itemId + "' (found " + candidates.length + ")"
+            );
+            continue;
+        }
+
+        var conflict = null;
+        for (var origCol in upd.originalFields) {
+            var origIndex = header.indexOf(origCol);
+            if (origIndex === -1) continue; // column the sheet doesn't have — nothing to compare or write
+            var inSheet = String(data[sheetRow - 1][origIndex]).trim();
+            var expected = String(upd.originalFields[origCol]).trim();
+            if (inSheet !== expected) {
+                conflict = origCol + ": sheet has '" + inSheet + "', site imported '" + expected + "'";
+                break;
+            }
+        }
+        if (conflict) {
+            result.errors = result.errors || [];
+            result.errors.push(
+                sheetName + " row " + sheetRow + " (ItemId '" + upd.itemId + "') changed since import, not overwritten — " + conflict
+            );
+            continue;
+        }
+
+        for (var colName in upd.fields) {
+            var colIndex = header.indexOf(colName);
+            if (colIndex === -1) {
+                result.errors = result.errors || [];
+                result.errors.push(sheetName + ": unknown column '" + colName + "', skipped for " + upd.itemId);
+                continue;
+            }
+            sheet.getRange(sheetRow, colIndex + 1).setValue(upd.fields[colName]);
+        }
+        updated++;
+    }
+    return updated;
+}
+
 // Blueprint Lab new-mechanic-row export: `rows` is an array of { column: value, ... } objects, each ALWAYS
-// appended as a brand-new sheet row — no matching/lookup against existing rows at all (see the site-side
-// GameStore.exportBlueprintChanges doc for why: a mechanic row's local id isn't a stable real spreadsheet key,
-// so an in-place update here could silently overwrite the wrong row).
+// appended as a brand-new sheet row — no matching/lookup against existing rows at all, since a row authored on
+// the canvas never corresponded to an existing sheet row in the first place.
 function appendFullRows(spreadsheet, sheetName, rows, result) {
     var sheet = spreadsheet.getSheetByName(sheetName);
     if (!sheet) {
@@ -199,6 +354,232 @@ function appendFullRows(spreadsheet, sheetName, rows, result) {
         sheet.appendRow(newRow);
     }
     return rows.length;
+}
+
+// Decks page export: `rowsByGroupId` is { [groupId]: { column: value, ... }[] } — for each groupId, deletes every
+// existing sheet row whose `groupIdColumnName` cell matches it, then appends the provided rows fresh (each gets
+// the groupId written into `groupIdColumnName` automatically). Unlike upsertFullRows (one row per unique id, patch
+// columns in place) or appendFullRows (always append, no matching at all), this replaces a *variable-size group*
+// of rows sharing one id — the right fit for a deck, whose entries can be added/removed/reordered as a whole, not
+// just column-patched on a fixed row. An empty array for a groupId deletes that group's rows with nothing added
+// back — this is how the site represents "this deck was deleted" without a separate signal.
+function replaceRowsByGroupId(spreadsheet, sheetName, groupIdColumnName, rowsByGroupId, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var header = sheet.getDataRange().getValues()[0];
+    var groupIdCol = header.indexOf(groupIdColumnName);
+    if (groupIdCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + groupIdColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var touched = 0;
+
+    for (var groupId in rowsByGroupId) {
+        // Re-read fresh data/row numbers each iteration — earlier deletions in this same loop shift every row
+        // below them, so a row-number map built once at the top would go stale after the first delete.
+        var data = sheet.getDataRange().getValues();
+        var rowsToDelete = [];
+        for (var i = 1; i < data.length; i++) {
+            if (data[i][groupIdCol] === groupId) {
+                rowsToDelete.push(i + 1); // +1: sheet rows are 1-indexed, data[] is 0-indexed
+            }
+        }
+        // Bottom-to-top, so deleting a row never shifts the index of one still queued for deletion.
+        rowsToDelete.sort(function (a, b) { return b - a; });
+        for (var d = 0; d < rowsToDelete.length; d++) {
+            sheet.deleteRow(rowsToDelete[d]);
+        }
+
+        var newRows = rowsByGroupId[groupId];
+        for (var r = 0; r < newRows.length; r++) {
+            var columns = newRows[r];
+            var newRow = new Array(header.length).fill("");
+            newRow[groupIdCol] = groupId;
+            for (var colName in columns) {
+                var colIndex = header.indexOf(colName);
+                if (colIndex === -1) {
+                    result.errors = result.errors || [];
+                    result.errors.push(sheetName + ": unknown column '" + colName + "', skipped for " + groupId);
+                    continue;
+                }
+                newRow[colIndex] = columns[colName];
+            }
+            sheet.appendRow(newRow);
+        }
+        touched += newRows.length;
+    }
+
+    return touched;
+}
+
+// Ball decks / Round DeckBalls export: `rowsByGroupId` is { [groupId]: string[] } — for each groupId, writes the
+// values into the SINGLE existing row's repeated `repeatedColumnName` columns (e.g. all 7 "Ball" columns), or
+// appends a brand-new row if the groupId isn't found yet. An empty array deletes that row entirely. This exists
+// because the real sheet has multiple columns sharing the EXACT SAME literal header name (unlike the client-side
+// Papa.parse view, which renames duplicates to Ball_1, Ball_2, ...) — header.indexOf only ever finds the first
+// match, so every other helper here (which assumes one column per name) can't address the rest. This scans the
+// header once for ALL matching column indices instead, and writes/clears exactly that many slots, blanking any
+// leftover slots beyond the provided values (e.g. shrinking a deck from 5 balls to 3 must clear the old 4th/5th).
+function replaceWideGroupRow(spreadsheet, sheetName, groupIdColumnName, repeatedColumnName, rowsByGroupId, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var header = sheet.getDataRange().getValues()[0];
+    var groupIdCol = header.indexOf(groupIdColumnName);
+    if (groupIdCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + groupIdColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var repeatedCols = [];
+    for (var h = 0; h < header.length; h++) {
+        if (header[h] === repeatedColumnName) {
+            repeatedCols.push(h);
+        }
+    }
+    if (repeatedCols.length === 0) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + repeatedColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var touched = 0;
+
+    for (var groupId in rowsByGroupId) {
+        // Re-read fresh data/row numbers each iteration — earlier deletions in this same loop shift every row
+        // below them, so a row-number map built once at the top would go stale after the first delete.
+        var data = sheet.getDataRange().getValues();
+        var sheetRow = -1;
+        for (var i = 1; i < data.length; i++) {
+            if (data[i][groupIdCol] === groupId) {
+                sheetRow = i + 1; // +1: sheet rows are 1-indexed, data[] is 0-indexed
+                break;
+            }
+        }
+
+        var values = rowsByGroupId[groupId];
+
+        if (values.length === 0) {
+            if (sheetRow !== -1) {
+                sheet.deleteRow(sheetRow);
+            }
+            touched++;
+            continue;
+        }
+
+        if (sheetRow === -1) {
+            var newRow = new Array(header.length).fill("");
+            newRow[groupIdCol] = groupId;
+            for (var n = 0; n < repeatedCols.length; n++) {
+                newRow[repeatedCols[n]] = n < values.length ? values[n] : "";
+            }
+            sheet.appendRow(newRow);
+        } else {
+            for (var c = 0; c < repeatedCols.length; c++) {
+                var value = c < values.length ? values[c] : "";
+                sheet.getRange(sheetRow, repeatedCols[c] + 1).setValue(value);
+            }
+        }
+        touched++;
+    }
+
+    return touched;
+}
+
+// Sprints page export: `rowsByGroupId` is { [groupId]: { columns: {...}, repeatedValues: string[] }[] } — combines
+// replaceRowsByGroupId's technique (delete every existing row for a groupId, then append the fresh row set) with
+// replaceWideGroupRow's technique (spread values across every column sharing a repeated name), because Sprints
+// needs BOTH shapes on the SAME row: ordinary one-column fields (Quota/Stage/RewardTickerts/...) written by name
+// lookup, AND the sheet's own repeated `RoundSettings` columns (the round-id pool) written by index-scan. Each
+// new row gets groupIdColumnName set automatically, its `columns` written by header-name lookup (unknown column
+// names are skipped with a warning, same as replaceRowsByGroupId), and its `repeatedValues` spread across every
+// column index sharing repeatedColumnName's exact name (blanking any slot beyond the provided values). An empty
+// array for a groupId deletes that group's rows with nothing added back, same delete-signal convention as every
+// other group-replace helper here.
+function replaceRowsByGroupIdWithRepeatedColumn(spreadsheet, sheetName, groupIdColumnName, repeatedColumnName, rowsByGroupId, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var header = sheet.getDataRange().getValues()[0];
+    var groupIdCol = header.indexOf(groupIdColumnName);
+    if (groupIdCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + groupIdColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var repeatedCols = [];
+    for (var h = 0; h < header.length; h++) {
+        if (header[h] === repeatedColumnName) {
+            repeatedCols.push(h);
+        }
+    }
+    if (repeatedCols.length === 0) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": '" + repeatedColumnName + "' column not found in header row");
+        return 0;
+    }
+
+    var touched = 0;
+
+    for (var groupId in rowsByGroupId) {
+        // Re-read fresh data/row numbers each iteration — earlier deletions in this same loop shift every row
+        // below them, so a row-number map built once at the top would go stale after the first delete.
+        var data = sheet.getDataRange().getValues();
+        var rowsToDelete = [];
+        for (var i = 1; i < data.length; i++) {
+            if (data[i][groupIdCol] === groupId) {
+                rowsToDelete.push(i + 1); // +1: sheet rows are 1-indexed, data[] is 0-indexed
+            }
+        }
+        rowsToDelete.sort(function (a, b) { return b - a; });
+        for (var d = 0; d < rowsToDelete.length; d++) {
+            sheet.deleteRow(rowsToDelete[d]);
+        }
+
+        var newRows = rowsByGroupId[groupId];
+        for (var r = 0; r < newRows.length; r++) {
+            var newRow = new Array(header.length).fill("");
+            newRow[groupIdCol] = groupId;
+
+            var columns = newRows[r].columns;
+            for (var colName in columns) {
+                var colIndex = header.indexOf(colName);
+                if (colIndex === -1) {
+                    result.errors = result.errors || [];
+                    result.errors.push(sheetName + ": unknown column '" + colName + "', skipped for " + groupId);
+                    continue;
+                }
+                newRow[colIndex] = columns[colName];
+            }
+
+            var values = newRows[r].repeatedValues;
+            for (var c = 0; c < repeatedCols.length; c++) {
+                newRow[repeatedCols[c]] = c < values.length ? values[c] : "";
+            }
+
+            sheet.appendRow(newRow);
+        }
+        touched += newRows.length;
+    }
+
+    return touched;
 }
 
 function jsonResponse(payload) {

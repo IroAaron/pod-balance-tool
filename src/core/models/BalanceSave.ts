@@ -3,11 +3,17 @@ import type { Translation } from "./Translation";
 import type { MechanicRow } from "./Mechanic";
 import type { UpgradeChain } from "./UpgradeChain";
 import type { Round } from "./Round";
+import type { Deck } from "./Deck";
+import type { Pack } from "./Pack";
+import type { Ball } from "./Ball";
+import type { BallGroup } from "./BallGroup";
+import type { Sprint } from "./Sprint";
 import type { ReplaceRule } from "./ReplaceRule";
 import type { Build } from "./Build";
 import type { GlossaryEntry } from "./GlossaryEntry";
 import type { TagIcon } from "./TagIcon";
 import type { DescriptionSettings } from "../domain/descriptionTemplate";
+import type { BalanceConfig } from "./BalanceConfig";
 
 /**
  * Metadata for a named balance save — the only thing the saves list ever shows (see SavesPage). The actual
@@ -42,6 +48,16 @@ export interface BalanceSavePayload {
 
     rounds: Round[];
 
+    decks: Deck[];
+
+    packs: Pack[];
+
+    balls: Ball[];
+
+    ballGroups: BallGroup[];
+
+    sprints: Sprint[];
+
     replaceRules: ReplaceRule[];
 
     enumValues: Record<string, string[]>;
@@ -54,6 +70,9 @@ export interface BalanceSavePayload {
 
     descriptionSettings: DescriptionSettings;
 
+    /** Depth coefficients + balance constants — see BalancePage's "Константы" tab and domain/balance.ts. */
+    balanceConfig: BalanceConfig;
+
     translationOverrides: Record<string, string>;
 
     exportedOverrides: Record<string, string>;
@@ -61,6 +80,15 @@ export interface BalanceSavePayload {
     glossary: GlossaryEntry[];
 
     tagIcons: TagIcon[];
+
+    /** Curated "Спец. раунд" values, see firestoreStore's subscribeSpecialRoundTypes. */
+    specialRoundTypes: string[];
+
+    /** Site-only deck/ball-deck display names, keyed by deck id — see firestoreStore's SharedState.deckNames. */
+    deckNames: Record<string, string>;
+
+    /** Site-only sprint stage-count overrides — see firestoreStore's SharedState.sprintStageCounts. */
+    sprintStageCounts: Record<string, number>;
 }
 
 /** Keys of BalanceSavePayload — each one is written/read as its own `parts/{key}` doc, see firestoreStore.ts. */
@@ -70,14 +98,23 @@ export const BALANCE_SAVE_PAYLOAD_KEYS: (keyof BalanceSavePayload)[] = [
     "mechanics",
     "upgradeChains",
     "rounds",
+    "decks",
+    "packs",
+    "balls",
+    "ballGroups",
+    "sprints",
     "replaceRules",
     "enumValues",
     "builds",
     "itemIcons",
     "customParamValues",
     "descriptionSettings",
+    "balanceConfig",
     "translationOverrides",
     "exportedOverrides",
     "glossary",
     "tagIcons",
+    "specialRoundTypes",
+    "deckNames",
+    "sprintStageCounts",
 ];

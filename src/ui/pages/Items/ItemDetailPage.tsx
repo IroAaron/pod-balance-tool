@@ -132,7 +132,9 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                 <Button
                                     size="small"
                                     onClick={() => {
-                                        store.setItemIcon(item.id, iconDraft || "🧩");
+                                        // Empty means "no manual icon" — falling back to the placeholder here
+                                        // used to store it as a real icon, which then hid the item's sprite.
+                                        store.setItemIcon(item.id, iconDraft);
                                         setEditingIcon(false);
                                     }}
                                 >

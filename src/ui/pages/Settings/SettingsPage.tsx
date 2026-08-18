@@ -58,7 +58,7 @@ function SettingsForm() {
 
     return (
         <Stack spacing={3} sx={{ maxWidth: 700 }}>
-            <Typography variant="h4">Настройки</Typography>
+            <Typography variant="h4">Настройки текста</Typography>
 
             <Paper sx={{ p: 3 }}>
                 <Stack spacing={3}>

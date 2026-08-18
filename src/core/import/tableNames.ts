@@ -13,3 +13,26 @@ export function tableNameOf(sourceName: string): string {
 export function matchesTableName(sourceName: string, targetName: string): boolean {
     return tableNameOf(sourceName) === targetName.trim().toLowerCase();
 }
+
+/**
+ * Tabs the real spreadsheets carry that this site deliberately doesn't consume (game/UI config, not item or
+ * balance data — confirmed with the project owner). They classify as Unknown, which is correct, but warning
+ * about them on every single import is a permanent false alarm on an otherwise fully successful download —
+ * loud enough to read as "the import failed". They still appear in the per-table breakdown as Unknown, so
+ * nothing is hidden; only the alarm is dropped. An unknown tab that *isn't* on this list is still worth
+ * warning about — that's a genuinely unrecognized table.
+ */
+const INTENTIONALLY_UNSUPPORTED_TABS = new Set([
+    "словарь значков",
+    "colors",
+    "playerbuttons",
+    "shopsettings",
+    "itemupgrading",
+    "reactions",
+    "corridor",
+    "meta",
+]);
+
+export function isIntentionallyUnsupportedTable(sourceName: string): boolean {
+    return INTENTIONALLY_UNSUPPORTED_TABS.has(tableNameOf(sourceName));
+}
