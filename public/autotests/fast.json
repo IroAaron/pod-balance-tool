@@ -7,7 +7,7 @@
    "errors": 0,
    "skipped": 0,
    "flaky": 0,
-   "duration_sec": 0.15
+   "duration_sec": 0.11
   },
   "failing": [
    {
@@ -45,12 +45,12 @@
     "time_sec": 0.01
    },
    {
-    "test": "test_tag_colored_compare::test_default_palette_is_available",
-    "time_sec": 0.01
+    "test": "test_value_modificate::test_addition",
+    "time_sec": 0.0
    },
    {
-    "test": "test_tag_colored_compare::test_same_matches_only_identical_color",
-    "time_sec": 0.01
+    "test": "test_value_modificate::test_setter_replaces_value",
+    "time_sec": 0.0
    }
   ],
   "passed": [
