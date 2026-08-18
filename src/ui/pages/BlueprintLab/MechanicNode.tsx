@@ -77,8 +77,8 @@ export default function MechanicNode({ data, selected }: NodeProps<MechanicFlowN
                     ⚙️ Mechanic
                 </Typography>
                 {data.existing && (
-                    <Typography variant="caption" color="warning.main" sx={{ display: "block" }}>
-                        существующая строка — правки не экспортируются
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                        существующая строка таблицы
                     </Typography>
                 )}
             </Box>

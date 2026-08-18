@@ -24,7 +24,8 @@ import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistr
 import { DEFAULT_DESCRIPTION_SETTINGS, getEnabledGlossaryEntries, type DescriptionSettings } from "./domain/descriptionTemplate";
 import { buildExportDescriptionText } from "./domain/exportText";
 import { buildImportDescriptionText } from "./domain/importText";
-import { postExportPayload, type ExportResult } from "./import/sheetSource";
+import { postExportPayload, type ExportResult, type MechanicRowUpdate } from "./import/sheetSource";
+import { MECHANIC_TABLE_COLUMNS } from "./domain/mechanicTables";
 import { parseOptionalNumber } from "./import/normalize";
 
 import {
@@ -168,8 +169,17 @@ export class GameStore {
     blueprintDirtyItemIds: Set<string> = new Set();
 
     /** MechanicRow ids upserted via upsertMechanicRow (Blueprint Lab) since the last successful
-     *  exportBlueprintChanges() — only these (never real, loaded rows) are exportable, see the method's own doc. */
+     *  exportBlueprintChanges() — brand-new rows, exported by appending to the sheet. */
     blueprintNewMechanicRowIds: Set<string> = new Set();
+
+    /** Ids of *already-existing* (imported) mechanic rows edited via updateMechanicRowFields since the last
+     *  successful exportBlueprintChanges() — exported as in-place updates, see that method's doc. */
+    blueprintEditedMechanicRowIds: Set<string> = new Set();
+
+    /** rowId -> that row's field values exactly as imported, captured on its first edit. Sent alongside an
+     *  in-place mechanic update so the Apps Script side can verify it's about to overwrite the row it thinks
+     *  it is, and refuse (reporting a conflict) rather than silently clobbering a row someone else moved. */
+    blueprintOriginalMechanicFields: Map<string, Record<string, string>> = new Map();
 
     /** Deck ids created/edited via upsertDeck (Decks page) since the last successful exportDeckChanges() —
      *  in-memory only, not persisted/synced, same "nothing survives a reload" framing as the Blueprint Lab sets
@@ -441,6 +451,11 @@ export class GameStore {
             raw,
         };
 
+        // The lab re-derives and re-pushes every visible node on any canvas change (including just dragging a
+        // node around), so bail out when nothing actually changed — otherwise every item would count as a
+        // pending export forever and each export would rewrite untouched sheet rows.
+        if (existing && canonicalStringify(existing) === canonicalStringify(next)) return;
+
         this.allItems = mergeById(this.allItems, [next]);
         this.rebuildDerivedCaches();
         this.blueprintDirtyItemIds.add(trimmedId);
@@ -451,26 +466,36 @@ export class GameStore {
      * Upserts a mechanic row authored on the Blueprint Lab canvas (not loaded from real data) — finds an
      * existing row with the same (synthetic, `blueprint:`-prefixed) id and replaces it, otherwise appends. Safe
      * to call on every keystroke while the canvas is being edited (idempotent by id, never duplicates a row).
-     * Always marked exportable — unlike updateMechanicRowFields, this id was never a real spreadsheet row, so
-     * there's nothing fragile about appending it on export (see exportBlueprintChanges()'s doc).
+     * Exported by appending a fresh sheet row — this id never corresponded to one (see exportBlueprintChanges()).
      */
     upsertMechanicRow(row: MechanicRow): void {
-        const existingIndex = this.mechanics.findIndex((r) => r.id === row.id);
-        if (existingIndex >= 0) {
-            this.mechanics = this.mechanics.map((r, i) => (i === existingIndex ? row : r));
-        } else {
-            this.mechanics = [...this.mechanics, row];
-        }
+        const existing = this.mechanics.find((r) => r.id === row.id);
+        if (existing && canonicalStringify(existing) === canonicalStringify(row)) return;
+
+        this.mechanics = existing ? this.mechanics.map((r) => (r.id === row.id ? row : r)) : [...this.mechanics, row];
         this.blueprintNewMechanicRowIds.add(row.id);
         this.notify();
     }
 
-    /** Merges field edits into an existing mechanic row in place (Blueprint Lab) — local-only, deliberately never
-     *  marked for export, see exportBlueprintChanges()'s doc. */
+    /**
+     * Merges field edits into an already-existing (imported) mechanic row, and marks it for in-place export.
+     * Captures the row's as-imported values the first time it's touched, so exportBlueprintChanges() can prove
+     * to the Apps Script side which sheet row it means (see blueprintOriginalMechanicFields).
+     */
     updateMechanicRowFields(rowId: string, patch: Record<string, string>): void {
-        this.mechanics = this.mechanics.map((row) =>
-            row.id === rowId ? { ...row, fields: { ...row.fields, ...patch } } : row
-        );
+        const existing = this.mechanics.find((row) => row.id === rowId);
+        if (!existing) return;
+
+        const nextFields = { ...existing.fields, ...patch };
+        // Same reasoning as upsertItem: the lab re-pushes every node on any canvas change, so only a real value
+        // change should count as a pending export.
+        if (canonicalStringify(existing.fields) === canonicalStringify(nextFields)) return;
+
+        if (!this.blueprintOriginalMechanicFields.has(rowId)) {
+            this.blueprintOriginalMechanicFields.set(rowId, { ...existing.fields });
+        }
+        this.mechanics = this.mechanics.map((row) => (row.id === rowId ? { ...row, fields: nextFields } : row));
+        this.blueprintEditedMechanicRowIds.add(rowId);
         this.notify();
     }
 
@@ -900,16 +925,26 @@ export class GameStore {
 
     /** How many Blueprint Lab edits haven't been sent yet — see exportBlueprintChanges(). */
     get blueprintPendingExportCount(): number {
-        return this.blueprintDirtyItemIds.size + this.blueprintNewMechanicRowIds.size;
+        return (
+            this.blueprintDirtyItemIds.size +
+            this.blueprintNewMechanicRowIds.size +
+            this.blueprintEditedMechanicRowIds.size
+        );
     }
 
     /**
-     * Sends Blueprint Lab's item edits (upsert by ItemId — safe, since it's a real unique key) and brand-new
-     * mechanic rows (always appended — never an update, see upsertMechanicRow's doc for why an existing row
-     * can't be safely targeted) to the same Apps Script `doPost` endpoint the translation export uses, extended
-     * with the `items`/`newMechanicRows` branches (see docs/apps-script-export.gs). Posts to `sources.configUrl`
-     * (items/mechanics live in the config sheet), not `translationsUrl` — if those are two different
-     * spreadsheets in a given deployment, the doPost extension needs to live in the config one specifically.
+     * Sends Blueprint Lab's edits to the same Apps Script `doPost` endpoint the translation export uses (see
+     * docs/apps-script-export.gs), in three shapes:
+     *  - `items` — upserted by ItemId, a real unique key.
+     *  - `newMechanicRows` — rows authored here, appended.
+     *  - `updatedMechanicRows` — edits to already-existing rows, applied in place. A mechanic row has no unique
+     *    key of its own, so each one is addressed by `{itemId, ordinal}` (its position among *that item's* rows
+     *    in that table) rather than by absolute row number: unrelated rows being added or removed elsewhere in
+     *    the sheet can't shift it. As a second guard, `originalFields` carries the values as imported, and the
+     *    Apps Script side refuses the write (reporting a conflict) if the target row no longer matches them —
+     *    so a row that someone else reordered or edited in the meantime is never silently clobbered.
+     * Posts to `sources.configUrl` (items/mechanics live in the config sheet), not `translationsUrl` — if those
+     * are two different spreadsheets, the doPost extension needs to live in the config one specifically.
      */
     async exportBlueprintChanges(): Promise<ExportResult> {
         const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
@@ -941,11 +976,50 @@ export class GameStore {
             (newMechanicRows[row.table] ??= []).push({ ItemId: row.itemId, ...row.fields });
         }
 
-        const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, items, newMechanicRows });
+        const updatedMechanicRows: Record<string, MechanicRowUpdate[]> = {};
+        for (const rowId of this.blueprintEditedMechanicRowIds) {
+            const row = this.mechanics.find((r) => r.id === rowId);
+            if (!row) continue;
+
+            // Position among this item's rows in this table, in import order — which is sheet order. Rows
+            // appended locally sort after every imported one, so they can't shift an imported row's ordinal.
+            const ordinal = this.mechanics
+                .filter((r) => r.table === row.table && r.itemId === row.itemId)
+                .findIndex((r) => r.id === rowId);
+            if (ordinal < 0) continue;
+
+            // Send every column the table defines, not just the populated ones, so clearing a field on the
+            // canvas actually blanks it in the sheet instead of leaving the old value behind.
+            const knownColumns = MECHANIC_TABLE_COLUMNS[row.table as keyof typeof MECHANIC_TABLE_COLUMNS];
+            const columns = (knownColumns ?? Object.keys(row.fields)).filter((column) => column !== "ItemId");
+            const original = this.blueprintOriginalMechanicFields.get(rowId) ?? row.fields;
+
+            const fields: Record<string, string> = {};
+            const originalFields: Record<string, string> = {};
+            for (const column of columns) {
+                fields[column] = row.fields[column] ?? "";
+                originalFields[column] = original[column] ?? "";
+            }
+
+            (updatedMechanicRows[row.table] ??= []).push({ itemId: row.itemId, ordinal, fields, originalFields });
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, {
+            token,
+            names: {},
+            descriptions: {},
+            items,
+            newMechanicRows,
+            updatedMechanicRows,
+        });
 
         if (result.ok) {
             this.blueprintDirtyItemIds = new Set();
             this.blueprintNewMechanicRowIds = new Set();
+            this.blueprintEditedMechanicRowIds = new Set();
+            // Re-baseline: what's now in the sheet is what we just sent, so a follow-up edit of the same row
+            // verifies against the values it will actually find there.
+            this.blueprintOriginalMechanicFields = new Map();
             this.notify();
         }
 

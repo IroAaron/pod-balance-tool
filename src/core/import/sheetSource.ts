@@ -101,6 +101,23 @@ export async function fetchSourceTables(url: string, sourceLabel: string): Promi
     return fetchAppsScriptJson(url);
 }
 
+/**
+ * One in-place edit to an existing mechanic row. Mechanic rows have no unique key of their own, so the target
+ * is addressed by `itemId` plus `ordinal` (its position among that item's rows in that table) — stable against
+ * unrelated rows moving — and `originalFields` lets the receiver confirm it found the right row before writing.
+ */
+export interface MechanicRowUpdate {
+    itemId: string;
+
+    ordinal: number;
+
+    /** Every column the table defines, blanks included, so cleared fields actually clear in the sheet. */
+    fields: Record<string, string>;
+
+    /** The same columns as they were at import time — a mismatch means the sheet moved on and the write is refused. */
+    originalFields: Record<string, string>;
+}
+
 export interface ExportPayload {
     token: string;
 
@@ -116,6 +133,10 @@ export interface ExportPayload {
     /** Blueprint Lab brand-new mechanic rows — table -> full rows, always appended, never matched against an
      *  existing row (MechanicRow.id isn't a real spreadsheet key, see GameStore.exportBlueprintChanges's doc). */
     newMechanicRows?: Partial<Record<string, Record<string, string>[]>>;
+
+    /** Blueprint Lab edits to already-existing mechanic rows — table -> in-place updates, each addressed by
+     *  ItemId + ordinal and guarded by the as-imported values. See GameStore.exportBlueprintChanges's doc. */
+    updatedMechanicRows?: Partial<Record<string, MechanicRowUpdate[]>>;
 
     /** Decks page edits — table -> DeckId -> full row set for that deck (replaces every existing row for that
      *  DeckId, see GameStore.exportDeckChanges's doc). An empty array for a DeckId means "delete this deck". */

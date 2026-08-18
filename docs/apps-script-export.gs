@@ -27,6 +27,14 @@
 //     newMechanicRows?: {                         // Blueprint Lab — ALWAYS appended, never matched/updated
 //       [table: string]: { [column: string]: string }[],   // e.g. MechActivate, MechAddValue, ...
 //     },
+//     updatedMechanicRows?: {                     // Blueprint Lab — in-place edits to EXISTING mechanic rows.
+//       [table: string]: {                        // A mechanic row has no unique key, so the target is
+//         itemId: string,                         // addressed by ItemId + ordinal (its position among that
+//         ordinal: number,                        // item's rows in this table), and `originalFields` must
+//         fields: { [column: string]: string },        // still match the sheet or the write is REFUSED and
+//         originalFields: { [column: string]: string }, // reported as a conflict — never silently clobbered.
+//       }[],
+//     },
 //     decks?: {                                    // Decks page — REPLACES every row for a given DeckId
 //       Decks?: { [deckId: string]: { [column: string]: string }[] },
 //       DecksShop?: { [deckId: string]: { [column: string]: string }[] },
@@ -85,6 +93,12 @@ function doPost(e) {
         if (body.newMechanicRows) {
             for (var mechTable in body.newMechanicRows) {
                 result.updated[mechTable] = appendFullRows(ss, mechTable, body.newMechanicRows[mechTable], result);
+            }
+        }
+
+        if (body.updatedMechanicRows) {
+            for (var updTable in body.updatedMechanicRows) {
+                result.updated[updTable + ":updated"] = updateMechanicRows(ss, updTable, body.updatedMechanicRows[updTable], result);
             }
         }
 
@@ -235,10 +249,86 @@ function upsertFullRows(spreadsheet, sheetName, idColumnName, rows, result) {
     return touched;
 }
 
+// Blueprint Lab in-place mechanic edits: each update names its target by `itemId` + `ordinal` (the Nth row for
+// that item in this sheet, counted in sheet order) rather than an absolute row number, so rows added or removed
+// elsewhere can't shift it. Before writing, every column in `originalFields` must still match the sheet — if
+// even one differs, the row was changed or reordered by someone else since the site imported it, so the write
+// is REFUSED for that row and reported in `result.errors` instead of overwriting whatever is there now.
+function updateMechanicRows(spreadsheet, sheetName, updates, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var data = sheet.getDataRange().getValues();
+    var header = data[0];
+    var idCol = header.indexOf("ItemId");
+    if (idCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": 'ItemId' column not found in header row");
+        return 0;
+    }
+
+    // itemId -> sheet row numbers holding it, in sheet order; index into this is the payload's `ordinal`.
+    var rowsByItemId = {};
+    for (var i = 1; i < data.length; i++) {
+        var id = String(data[i][idCol]).trim();
+        if (!id) continue;
+        (rowsByItemId[id] = rowsByItemId[id] || []).push(i + 1); // +1: sheet rows are 1-indexed
+    }
+
+    var updated = 0;
+    for (var u = 0; u < updates.length; u++) {
+        var upd = updates[u];
+        var candidates = rowsByItemId[upd.itemId] || [];
+        var sheetRow = candidates[upd.ordinal];
+
+        if (!sheetRow) {
+            result.errors = result.errors || [];
+            result.errors.push(
+                sheetName + ": no row #" + (upd.ordinal + 1) + " for ItemId '" + upd.itemId + "' (found " + candidates.length + ")"
+            );
+            continue;
+        }
+
+        var conflict = null;
+        for (var origCol in upd.originalFields) {
+            var origIndex = header.indexOf(origCol);
+            if (origIndex === -1) continue; // column the sheet doesn't have — nothing to compare or write
+            var inSheet = String(data[sheetRow - 1][origIndex]).trim();
+            var expected = String(upd.originalFields[origCol]).trim();
+            if (inSheet !== expected) {
+                conflict = origCol + ": sheet has '" + inSheet + "', site imported '" + expected + "'";
+                break;
+            }
+        }
+        if (conflict) {
+            result.errors = result.errors || [];
+            result.errors.push(
+                sheetName + " row " + sheetRow + " (ItemId '" + upd.itemId + "') changed since import, not overwritten — " + conflict
+            );
+            continue;
+        }
+
+        for (var colName in upd.fields) {
+            var colIndex = header.indexOf(colName);
+            if (colIndex === -1) {
+                result.errors = result.errors || [];
+                result.errors.push(sheetName + ": unknown column '" + colName + "', skipped for " + upd.itemId);
+                continue;
+            }
+            sheet.getRange(sheetRow, colIndex + 1).setValue(upd.fields[colName]);
+        }
+        updated++;
+    }
+    return updated;
+}
+
 // Blueprint Lab new-mechanic-row export: `rows` is an array of { column: value, ... } objects, each ALWAYS
-// appended as a brand-new sheet row — no matching/lookup against existing rows at all (see the site-side
-// GameStore.exportBlueprintChanges doc for why: a mechanic row's local id isn't a stable real spreadsheet key,
-// so an in-place update here could silently overwrite the wrong row).
+// appended as a brand-new sheet row — no matching/lookup against existing rows at all, since a row authored on
+// the canvas never corresponded to an existing sheet row in the first place.
 function appendFullRows(spreadsheet, sheetName, rows, result) {
     var sheet = spreadsheet.getSheetByName(sheetName);
     if (!sheet) {
