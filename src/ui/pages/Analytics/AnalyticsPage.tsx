@@ -5,6 +5,7 @@ import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import { getItemSpriteFileName, SPRITE_BASE_PATH } from "../../../core/domain/sprites";
 import { findUpgradeDescriptionMismatches } from "../../../core/domain/upgradeConsistency";
+import { findItemsWithoutDescription } from "../../../core/domain/contentGaps";
 
 export default function AnalyticsPage() {
     const store = useStore();
@@ -41,6 +42,17 @@ export default function AnalyticsPage() {
         store.upgradeChains,
         (id) => store.getItem(id),
         (item) => store.itemDescription(item)
+    );
+
+    const itemsWithoutDescription = findItemsWithoutDescription(store.items, (item) => store.itemDescription(item));
+
+    // An item missing its name too isn't really a description gap — it has no translation row at all (the known
+    // id-mismatch group, see README). Worth separating: on the real config that's most of this list, and mixing
+    // the two would bury the handful of items that do have a name and just need a description written.
+    const untranslatedIds = new Set(
+        itemsWithoutDescription
+            .filter(({ item }) => store.getTranslation(item.nameKey) === undefined)
+            .map(({ item }) => item.id)
     );
 
     return (
@@ -111,6 +123,71 @@ export default function AnalyticsPage() {
                             </Stack>
                         </Paper>
                     ))}
+                </Stack>
+            )}
+
+            <Divider />
+
+            <Stack spacing={0.5}>
+                <Typography variant="h6">Предметы без описания</Typography>
+                <Typography variant="body2" color="text.secondary">
+                    Загруженные предметы, у которых описание пустое или состоит из одних пробелов. Ячейка с
+                    пробелом в таблице выглядит заполненной, но на сайте не показывает ничего — такие отмечены
+                    отдельно.
+                </Typography>
+            </Stack>
+
+            {store.items.length === 0 ? (
+                <Typography color="text.secondary">
+                    Предметы не загружены — скачайте конфиг и переводы на странице «Источники».
+                </Typography>
+            ) : itemsWithoutDescription.length === 0 ? (
+                <Typography color="text.secondary">
+                    Все {store.items.length} предметов имеют описание.
+                </Typography>
+            ) : (
+                <Stack spacing={1.5}>
+                    <Typography variant="body2" color="text.secondary">
+                        Без описания: {itemsWithoutDescription.length} из {store.items.length}
+                        {(() => {
+                            const blanks = itemsWithoutDescription.filter((entry) => entry.kind === "whitespace").length;
+                            return blanks > 0 ? `, из них ${blanks} с пробелом вместо текста` : "";
+                        })()}
+                        {untranslatedIds.size > 0 &&
+                            `, и ${untranslatedIds.size} без названия — у них вообще нет строки в переводах, это не про описание`}
+                        .
+                    </Typography>
+
+                    <Box
+                        sx={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                            gap: 1,
+                        }}
+                    >
+                        {itemsWithoutDescription.map(({ item, kind }) => (
+                            <Stack key={item.id} direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
+                                <Box sx={{ flexShrink: 0 }}>
+                                    <ItemIcon item={item} size={28} />
+                                </Box>
+                                <Stack spacing={0} sx={{ minWidth: 0 }}>
+                                    <Link
+                                        component={RouterLink}
+                                        to={`/items/${encodeURIComponent(item.id)}`}
+                                        variant="body2"
+                                        noWrap
+                                        sx={{ color: untranslatedIds.has(item.id) ? "text.secondary" : undefined }}
+                                    >
+                                        {store.itemName(item)}
+                                        {kind === "whitespace" && " ␣"}
+                                    </Link>
+                                    <Typography variant="caption" color="text.secondary" noWrap>
+                                        {untranslatedIds.has(item.id) ? "нет названия — нет строки в переводах" : item.id}
+                                    </Typography>
+                                </Stack>
+                            </Stack>
+                        ))}
+                    </Box>
                 </Stack>
             )}
 
