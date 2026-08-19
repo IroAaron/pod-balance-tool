@@ -2,6 +2,7 @@ import { Box, Typography } from "@mui/material";
 import { useStore } from "../../../hooks/useStore";
 import EnumField from "../../../components/content/EnumField";
 import EnumMultiSelect from "../../../components/content/EnumMultiSelect";
+import SpriteSelect, { isSpriteField } from "../../../components/content/SpriteSelect";
 import { ITEM_CATEGORY_COLUMNS, type ItemKind } from "../../../components/content/itemSchema";
 import SectionPaper from "./SectionPaper";
 import CopyToUpgradesButton from "./CopyToUpgradesButton";
@@ -56,14 +57,23 @@ export default function ItemParamsSection({ item }: { item: Item }) {
                     onChange={(colors) => setColumn("PossibleColors", colors.join(", "))}
                 />
 
-                {columns.map((column) => (
-                    <EnumField
-                        key={column}
-                        field={column}
-                        value={item.raw[column] ?? ""}
-                        onChange={(value) => setColumn(column, value)}
-                    />
-                ))}
+                {columns.map((column) =>
+                    isSpriteField(column) ? (
+                        <SpriteSelect
+                            key={column}
+                            field={column}
+                            value={item.raw[column] ?? ""}
+                            onChange={(value) => setColumn(column, value)}
+                        />
+                    ) : (
+                        <EnumField
+                            key={column}
+                            field={column}
+                            value={item.raw[column] ?? ""}
+                            onChange={(value) => setColumn(column, value)}
+                        />
+                    )
+                )}
             </Box>
 
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>
