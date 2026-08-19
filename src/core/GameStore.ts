@@ -111,6 +111,9 @@ function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] 
  */
 const PER_TIER_MECHANIC_COLUMNS = ["ActivationCount", "TargetCount", "Duration", "Chance"];
 
+/** CardUpgrades is `UpgradeChainId,UpgradeId1..3` in the real sheet — a shorter chain blanks the leftover cells. */
+const UPGRADE_ID_COLUMN_COUNT = 3;
+
 /**
  * Drops manual icons whose value is just the placeholder. Saving one was possible until now (the icon editor
  * pre-filled 🧩 and wrote it straight back), and the result looked like a bug rather than a choice: a stored
@@ -200,6 +203,13 @@ export class GameStore {
      *  in-place mechanic update so the Apps Script side can verify it's about to overwrite the row it thinks
      *  it is, and refuse (reporting a conflict) rather than silently clobbering a row someone else moved. */
     originalMechanicFields: Map<string, Record<string, string>> = new Map();
+
+    /** Upgrade-chain ids edited since the last successful exportContentChanges() — one CardUpgrades row each. */
+    dirtyUpgradeChainIds: Set<string> = new Set();
+
+    /** ItemIdToReplace values whose replace rules changed — the export rewrites all of that item's rows at once,
+     *  which is also how a deleted rule disappears (there's no per-row delete signal). */
+    dirtyReplaceSourceIds: Set<string> = new Set();
 
     /** Deck ids created/edited via upsertDeck (Decks page) since the last successful exportDeckChanges() —
      *  in-memory only, not persisted/synced, same "nothing survives a reload" framing as the content-editing sets
@@ -948,7 +958,9 @@ export class GameStore {
         return (
             this.dirtyItemIds.size +
             this.newMechanicRowIds.size +
-            this.editedMechanicRowIds.size
+            this.editedMechanicRowIds.size +
+            this.dirtyUpgradeChainIds.size +
+            this.dirtyReplaceSourceIds.size
         );
     }
 
@@ -1024,6 +1036,34 @@ export class GameStore {
             (updatedMechanicRows[row.table] ??= []).push({ itemId: row.itemId, ordinal, fields, originalFields });
         }
 
+        // One CardUpgrades row per chain, upserted by UpgradeChainId. Every UpgradeId column the sheet defines is
+        // sent, blanks included, so a chain that lost a tier actually clears that cell instead of keeping a stale id.
+        const upgradeChains: Record<string, Record<string, string>> = {};
+        for (const chainId of this.dirtyUpgradeChainIds) {
+            const chain = this.upgradeChains.find((entry) => entry.id === chainId);
+            if (!chain) continue;
+            const columns: Record<string, string> = {};
+            const width = Math.max(chain.itemIds.length, UPGRADE_ID_COLUMN_COUNT);
+            for (let i = 0; i < width; i++) columns[`UpgradeId${i + 1}`] = chain.itemIds[i] ?? "";
+            upgradeChains[chainId] = columns;
+        }
+
+        // Replace rules have no per-row key, so a source item's rows are replaced as a group — which is also the
+        // only way a deleted rule disappears. An item with no rules left sends an empty array, i.e. "remove them".
+        const replaceRules: Record<string, Record<string, Record<string, string>[]>> = {};
+        for (const sourceId of this.dirtyReplaceSourceIds) {
+            for (const table of ["ReplaceItem", "ReplaceOnTrigger"] as const) {
+                const rows = this.replaceRules
+                    .filter((rule) => rule.itemIdToReplace === sourceId && rule.source === table)
+                    .map((rule) => ({
+                        ItemIdToReplace: rule.itemIdToReplace,
+                        ReplacementItem: rule.replacementItem,
+                        ...rule.fields,
+                    }));
+                (replaceRules[table] ??= {})[sourceId] = rows;
+            }
+        }
+
         const result = await postExportPayload(this.sources.configUrl, {
             token,
             names: {},
@@ -1031,12 +1071,16 @@ export class GameStore {
             items,
             newMechanicRows,
             updatedMechanicRows,
+            upgradeChains,
+            replaceRules,
         });
 
         if (result.ok) {
             this.dirtyItemIds = new Set();
             this.newMechanicRowIds = new Set();
             this.editedMechanicRowIds = new Set();
+            this.dirtyUpgradeChainIds = new Set();
+            this.dirtyReplaceSourceIds = new Set();
             // Re-baseline: what's now in the sheet is what we just sent, so a follow-up edit of the same row
             // verifies against the values it will actually find there.
             this.originalMechanicFields = new Map();
@@ -1519,6 +1563,141 @@ export class GameStore {
             if (!tierItem) return;
             this.setTranslationOverride(tierItem.nameKey ?? tierItem.id, baseName + "+".repeat(offset + 1));
         });
+    }
+
+    /**
+     * Copies this item's own columns onto every later tier — **everything, balance numbers included**, which is
+     * the explicitly chosen behaviour: ValueMin/ValueMax/MoneyValue/Cost/Weight on the tiers get overwritten.
+     * That's normally exactly the data meant to differ per tier, so the caller must confirm first and say so.
+     * Tags travel with the raw bag (upsertItem keeps raw.Tags in sync), and ItemId is never copied.
+     */
+    copyParamsToUpgrades(itemId: string): { tiers: number } {
+        const tiers = this.laterTiersOf(itemId);
+        const source = this.getItem(itemId);
+        if (!source) return { tiers: 0 };
+
+        const raw = { ...source.raw };
+        delete raw.ItemId;
+
+        for (const tier of tiers) this.upsertItem(tier.id, tier.itemType ?? source.itemType ?? "Card", { raw });
+        return { tiers: tiers.length };
+    }
+
+    /** Copies this item's tags onto every later tier, leaving their other columns alone. */
+    copyTagsToUpgrades(itemId: string): { tiers: number } {
+        const tiers = this.laterTiersOf(itemId);
+        const source = this.getItem(itemId);
+        if (!source) return { tiers: 0 };
+
+        for (const tier of tiers) this.upsertItem(tier.id, tier.itemType ?? "Card", { tags: [...source.tags] });
+        return { tiers: tiers.length };
+    }
+
+    /** The items after `itemId` in its upgrade chain, skipping chain entries that aren't real items. */
+    private laterTiersOf(itemId: string): Item[] {
+        const chain = this.chainForItem(itemId);
+        if (!chain) return [];
+        const index = chain.itemIds.indexOf(itemId);
+        if (index === -1) return [];
+        return chain.itemIds
+            .slice(index + 1)
+            .map((tierId) => this.getItem(tierId))
+            .filter((tier): tier is Item => Boolean(tier));
+    }
+
+    /** Replaces a chain's tier list wholesale (add/remove/reorder all go through here) and marks it for export. */
+    setUpgradeChain(chainId: string, itemIds: string[]): void {
+        const existing = this.upgradeChains.find((chain) => chain.id === chainId);
+        if (existing && canonicalStringify(existing.itemIds) === canonicalStringify(itemIds)) return;
+
+        this.upgradeChains = existing
+            ? this.upgradeChains.map((chain) => (chain.id === chainId ? { ...chain, itemIds } : chain))
+            : [...this.upgradeChains, { id: chainId, itemIds }];
+        this.dirtyUpgradeChainIds.add(chainId);
+        this.notify();
+    }
+
+    /**
+     * Unlinks a tier from its chain. Deliberately does **not** delete the item — an item dropped from a chain is
+     * still real content that exists on its own, and deleting it here would be a much bigger, unasked-for action.
+     */
+    removeItemFromChain(chainId: string, itemId: string): void {
+        const chain = this.upgradeChains.find((entry) => entry.id === chainId);
+        if (!chain) return;
+        this.setUpgradeChain(chainId, chain.itemIds.filter((tierId) => tierId !== itemId));
+    }
+
+    /**
+     * Builds the next tier for a chain: a copy of `itemId` (columns, tags, description and mechanics), named
+     * after the chain's current last tier with one more "+" — matching the game's own Вор/Вор+/Вор++ convention
+     * that copyNameToUpgrades already follows. The new id continues the real `..._1`/`_2`/`_3` numbering where
+     * the source uses it, and falls back to appending a counter, skipping ids already taken.
+     */
+    createNextTier(itemId: string): string | undefined {
+        const source = this.getItem(itemId);
+        if (!source) return undefined;
+
+        const chain = this.chainForItem(itemId);
+        const tierIds = chain?.itemIds ?? [itemId];
+        const lastTier = this.getItem(tierIds[tierIds.length - 1]);
+        const newId = this.nextTierId(tierIds[tierIds.length - 1]);
+
+        const raw = { ...source.raw };
+        delete raw.ItemId;
+        this.upsertItem(newId, source.itemType ?? "Card", { tags: [...source.tags], raw });
+
+        const newItem = this.getItem(newId);
+        if (newItem) {
+            this.setTranslationOverride(
+                newItem.nameKey ?? newId,
+                `${lastTier ? this.itemName(lastTier) : this.itemName(source)}+`
+            );
+            const description = this.itemDescription(source);
+            if (description) this.setTranslationOverride(newItem.descKey ?? `${newId}_desc`, description);
+        }
+
+        for (const row of this.mechanics.filter((mechanic) => mechanic.itemId === itemId)) {
+            this.upsertMechanicRow({
+                id: `content:tier:${newId}:${row.table}:${row.id}`,
+                table: row.table,
+                itemId: newId,
+                fields: { ...row.fields },
+            });
+        }
+
+        // A chain of one isn't stored as a chain at all, so the first generated tier creates it.
+        this.setUpgradeChain(chain?.id ?? `up_${itemId}`, [...tierIds, newId]);
+        return newId;
+    }
+
+    /** `c_thief_1` -> `c_thief_2`; anything else gets a `_2` suffix. Keeps counting until the id is free. */
+    private nextTierId(lastTierId: string): string {
+        const match = lastTierId.match(/^(.*_)(\d+)$/);
+        const prefix = match ? match[1] : `${lastTierId}_`;
+        let next = match ? Number(match[2]) + 1 : 2;
+        while (this.getItem(`${prefix}${next}`)) next++;
+        return `${prefix}${next}`;
+    }
+
+    /** Creates or updates one replace rule and marks its source item for export. */
+    upsertReplaceRule(rule: ReplaceRule): void {
+        const existing = this.replaceRules.find((entry) => entry.id === rule.id);
+        if (existing && canonicalStringify(existing) === canonicalStringify(rule)) return;
+
+        this.replaceRules = existing
+            ? this.replaceRules.map((entry) => (entry.id === rule.id ? rule : entry))
+            : [...this.replaceRules, rule];
+        this.dirtyReplaceSourceIds.add(rule.itemIdToReplace);
+        this.notify();
+    }
+
+    /** Drops one replace rule. Its source item is marked so the export rewrites that item's rows without it. */
+    deleteReplaceRule(ruleId: string): void {
+        const rule = this.replaceRules.find((entry) => entry.id === ruleId);
+        if (!rule) return;
+        this.replaceRules = this.replaceRules.filter((entry) => entry.id !== ruleId);
+        this.dirtyReplaceSourceIds.add(rule.itemIdToReplace);
+        this.notify();
     }
 
     /** Reverses any real [img]/[color] BBCode or literal glossary emoji a translator typed straight into the

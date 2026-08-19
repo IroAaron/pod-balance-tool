@@ -35,6 +35,14 @@
 //         originalFields: { [column: string]: string }, // reported as a conflict — never silently clobbered.
 //       }[],
 //     },
+//     upgradeChains?: {                            // CardUpgrades — upserted by UpgradeChainId. Unused tier
+//       [chainId: string]: { [column: string]: string },   // columns arrive blank so a shortened chain clears.
+//     },
+//     replaceRules?: {                             // REPLACES every row for a given ItemIdToReplace; an empty
+//       [table: string]: {                         // array removes that item's rules entirely.
+//         [itemIdToReplace: string]: { [column: string]: string }[],
+//       },
+//     },
 //     decks?: {                                    // Decks page — REPLACES every row for a given DeckId
 //       Decks?: { [deckId: string]: { [column: string]: string }[] },
 //       DecksShop?: { [deckId: string]: { [column: string]: string }[] },
@@ -99,6 +107,25 @@ function doPost(e) {
         if (body.updatedMechanicRows) {
             for (var updTable in body.updatedMechanicRows) {
                 result.updated[updTable + ":updated"] = updateMechanicRows(ss, updTable, body.updatedMechanicRows[updTable], result);
+            }
+        }
+
+        // CardUpgrades is one row per chain keyed by UpgradeChainId — an ordinary upsert, no new helper needed.
+        if (body.upgradeChains) {
+            result.updated.CardUpgrades = upsertFullRows(ss, "CardUpgrades", "UpgradeChainId", body.upgradeChains, result);
+        }
+
+        // Replace rules have several rows per ItemIdToReplace and no per-row key, so they're grouped-replace —
+        // the same shape as Decks/Packs, reusing that helper as-is.
+        if (body.replaceRules) {
+            for (var replaceTable in body.replaceRules) {
+                result.updated[replaceTable] = replaceRowsByGroupId(
+                    ss,
+                    replaceTable,
+                    "ItemIdToReplace",
+                    body.replaceRules[replaceTable],
+                    result
+                );
             }
         }
 

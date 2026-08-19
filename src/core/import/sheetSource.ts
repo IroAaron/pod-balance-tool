@@ -138,6 +138,14 @@ export interface ExportPayload {
      *  ItemId + ordinal and guarded by the as-imported values. See GameStore.exportContentChanges's doc. */
     updatedMechanicRows?: Partial<Record<string, MechanicRowUpdate[]>>;
 
+    /** Upgrade chains — UpgradeChainId -> its UpgradeId1..N columns, upserted by UpgradeChainId in CardUpgrades.
+     *  Unused tier columns are sent blank so a shortened chain clears them. */
+    upgradeChains?: Record<string, Record<string, string>>;
+
+    /** Replace rules — table -> ItemIdToReplace -> that item's full row set, replacing every existing row for it
+     *  (an empty array removes them all, which is how a deleted rule propagates). */
+    replaceRules?: Partial<Record<"ReplaceItem" | "ReplaceOnTrigger", Record<string, Record<string, string>[]>>>;
+
     /** Decks page edits — table -> DeckId -> full row set for that deck (replaces every existing row for that
      *  DeckId, see GameStore.exportDeckChanges's doc). An empty array for a DeckId means "delete this deck". */
     decks?: Partial<Record<"Decks" | "DecksShop", Record<string, Record<string, string>[]>>>;
