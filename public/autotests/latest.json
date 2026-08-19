@@ -7,7 +7,7 @@
    "errors": 0,
    "skipped": 0,
    "flaky": 0,
-   "duration_sec": 0.11
+   "duration_sec": 0.15
   },
   "failing": [
    {
@@ -45,12 +45,12 @@
     "time_sec": 0.01
    },
    {
-    "test": "test_value_modificate::test_addition",
-    "time_sec": 0.0
+    "test": "test_mechanics_helpers::test_pick_random_is_reproducible_under_seed",
+    "time_sec": 0.01
    },
    {
-    "test": "test_value_modificate::test_setter_replaces_value",
-    "time_sec": 0.0
+    "test": "test_id_uniqueness::test_id_shape_filter_skips_only_editor_comments",
+    "time_sec": 0.01
    }
   ],
   "passed": [
