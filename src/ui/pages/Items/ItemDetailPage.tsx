@@ -1,28 +1,19 @@
 import { useMemo, useRef, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
-import {
-    Box,
-    Button,
-    Chip,
-    Dialog,
-    DialogActions,
-    DialogContent,
-    DialogContentText,
-    DialogTitle,
-    IconButton,
-    Paper,
-    Stack,
-    TextField,
-    Typography,
-} from "@mui/material";
+import { Box, Button, Chip, IconButton, Paper, Stack, TextField, Typography } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
 import ItemDescription from "../../components/ItemDescription";
 import IconTokenInsertButton from "../../components/IconTokenInsertButton";
+import EnumMultiSelect from "../../components/content/EnumMultiSelect";
 import { relatedItems } from "../../../core/domain/relations";
-import type { MechanicRow } from "../../../core/models/Mechanic";
+import SectionPaper from "./sections/SectionPaper";
+import CopyToUpgradesButton from "./sections/CopyToUpgradesButton";
+import ItemParamsSection from "./sections/ItemParamsSection";
+import ItemMechanicsSection from "./sections/ItemMechanicsSection";
+import ItemUpgradeChainSection from "./sections/ItemUpgradeChainSection";
+import ItemReplacesSection from "./sections/ItemReplacesSection";
 
 type Props = {
     /** Overrides the route param — set when rendered inside DetailModal (an "internal window") instead of as a full page. */
@@ -42,8 +33,6 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
     const [editingDescription, setEditingDescription] = useState(false);
     const [descriptionDraft, setDescriptionDraft] = useState("");
     const descriptionFieldRef = useRef<HTMLTextAreaElement | null>(null);
-    const [confirmingCopyDescToUpgrades, setConfirmingCopyDescToUpgrades] = useState(false);
-    const [confirmingCopyNameToUpgrades, setConfirmingCopyNameToUpgrades] = useState(false);
 
     // Splices at the current cursor position (falling back to the end if the field never had focus) rather than
     // always appending, so inserting a second token in the middle of already-typed text lands where expected.
@@ -85,29 +74,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
 
     const builds = store.buildsForItem(item.id);
     const attachedRounds = store.rounds.filter((round) => round.invisibleArtefactId === item.id);
-    const chain = store.chainForItem(item.id);
     const icon = store.getItemIcon(item.id) ?? "🧩";
-
-    const chainIndex = chain ? chain.itemIds.indexOf(item.id) : -1;
-    const upgradeTierItems =
-        chain && chainIndex !== -1
-            ? chain.itemIds.slice(chainIndex + 1).map((tierId) => store.getItem(tierId) ?? tierId)
-            : [];
-
-    const replacesInto = store.replaceRules.filter((rule) => rule.itemIdToReplace === item.id);
-    const replacedFrom = store.replaceRules.filter((rule) => rule.replacementItem === item.id);
-
-    const mechanicsByTable = new Map<string, MechanicRow[]>();
-    for (const mechanic of store.mechanics.filter((row) => row.itemId === item.id)) {
-        if (!mechanicsByTable.has(mechanic.table)) mechanicsByTable.set(mechanic.table, []);
-        mechanicsByTable.get(mechanic.table)!.push(mechanic);
-    }
-
-    // The item's own row from whichever source table it came from (Cards/Houses/Artefacts/...) — id and tags are
-    // excluded since they're already shown above in their parsed form, not as raw text.
-    const rawParams = Object.entries(item.raw).filter(
-        ([key, value]) => !["itemid", "id", "tags", "itemtag"].includes(key.trim().toLowerCase()) && value !== ""
-    );
 
     return (
         <Stack spacing={3} sx={{ maxWidth: 900 }}>
@@ -193,16 +160,12 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                 >
                                     <EditIcon fontSize="small" />
                                 </IconButton>
-                                {upgradeTierItems.length > 0 && (
-                                    <IconButton
-                                        size="small"
-                                        aria-label="Скопировать название в прокачку (+/++)"
-                                        title="Скопировать название в прокачку (+/++)"
-                                        onClick={() => setConfirmingCopyNameToUpgrades(true)}
-                                    >
-                                        <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                )}
+                                <CopyToUpgradesButton
+                                    item={item}
+                                    what="название"
+                                    description="Названия прокачек станут этим названием с добавлением +/++ по уровню."
+                                    onCopy={() => store.copyNameToUpgrades(item.id)}
+                                />
                             </Stack>
                         )}
 
@@ -277,58 +240,61 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                                 >
                                     <EditIcon fontSize="small" />
                                 </IconButton>
-                                {upgradeTierItems.length > 0 && (
-                                    <IconButton
-                                        size="small"
-                                        aria-label="Скопировать описание в прокачку (+/++)"
-                                        title="Скопировать описание в прокачку (+/++)"
-                                        onClick={() => setConfirmingCopyDescToUpgrades(true)}
-                                    >
-                                        <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                )}
+                                <CopyToUpgradesButton
+                                    item={item}
+                                    what="описание"
+                                    description="Текущее описание заменит описания прокачек."
+                                    onCopy={() => store.copyDescriptionToUpgrades(item.id)}
+                                />
                             </Stack>
                         )}
 
-                        <Stack direction="row" sx={{ mt: 2, flexWrap: "wrap", gap: 0.5 }}>
-                            {item.tags.map((tag) => (
-                                <Chip key={tag} label={tag} size="small" />
-                            ))}
+                        <Stack direction="row" spacing={1} sx={{ mt: 2, alignItems: "center" }}>
+                            <Box sx={{ flex: 1, maxWidth: 420 }}>
+                                <EnumMultiSelect
+                                    dimension="ItemTag"
+                                    label="Теги"
+                                    value={item.tags}
+                                    onChange={(tags) => store.upsertItem(item.id, item.itemType ?? "Card", { tags })}
+                                />
+                            </Box>
+                            <CopyToUpgradesButton
+                                item={item}
+                                what="теги"
+                                description="Теги этого предмета заменят теги его прокачек."
+                                onCopy={() => store.copyTagsToUpgrades(item.id)}
+                            />
                         </Stack>
                     </Box>
                 </Stack>
             </Paper>
 
-            <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                    Параметры{item.itemType ? ` (${item.itemType})` : ""}
-                </Typography>
-                {rawParams.length === 0 ? (
-                    <Typography color="text.secondary">Параметры не найдены.</Typography>
-                ) : (
-                    <Box
-                        sx={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-                            gap: 1.5,
-                        }}
-                    >
-                        {rawParams.map(([key, value]) => (
-                            <Box key={key}>
-                                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                                    {key}
-                                </Typography>
-                                <Typography variant="body2">{value}</Typography>
-                            </Box>
-                        ))}
-                    </Box>
-                )}
-            </Paper>
+            <ItemParamsSection item={item} />
 
-            <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                    Билды ({builds.length})
-                </Typography>
+            <ItemMechanicsSection item={item} />
+
+            <ItemUpgradeChainSection item={item} />
+
+            <ItemReplacesSection item={item} />
+
+            {attachedRounds.length > 0 && (
+                <SectionPaper title="Раунды">
+                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
+                        {attachedRounds.map((round) => (
+                            <Chip
+                                key={round.id}
+                                label={store.roundName(round)}
+                                component={RouterLink}
+                                to={`/rounds/${encodeURIComponent(round.id)}`}
+                                clickable
+                            />
+                        ))}
+                    </Stack>
+                </SectionPaper>
+            )}
+
+            {/* Everything below is derived, not edited here — kept at the end so the editable sections come first. */}
+            <SectionPaper title={`Билды (${builds.length})`}>
                 {builds.length === 0 ? (
                     <Typography color="text.secondary">Пока не входит ни в один билд.</Typography>
                 ) : (
@@ -344,129 +310,9 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                         ))}
                     </Stack>
                 )}
-            </Paper>
+            </SectionPaper>
 
-            {attachedRounds.length > 0 && (
-                <Paper sx={{ p: 3 }}>
-                    <Typography variant="h6" sx={{ mb: 2 }}>
-                        Раунды
-                    </Typography>
-                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>
-                        {attachedRounds.map((round) => (
-                            <Chip
-                                key={round.id}
-                                label={store.roundName(round)}
-                                component={RouterLink}
-                                to={`/rounds/${encodeURIComponent(round.id)}`}
-                                clickable
-                            />
-                        ))}
-                    </Stack>
-                </Paper>
-            )}
-
-            {chain && (
-                <Paper sx={{ p: 3 }}>
-                    <Typography variant="h6" sx={{ mb: 2 }}>
-                        Цепочка прокачки
-                    </Typography>
-                    <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                        {chain.itemIds.map((tierId, index) => {
-                            const tierItem = store.getItem(tierId);
-                            return (
-                                <Stack key={tierId} direction="row" sx={{ alignItems: "center", gap: 1 }}>
-                                    {index > 0 && <Typography color="text.secondary">→</Typography>}
-                                    <Chip
-                                        label={tierItem ? store.itemName(tierItem) : tierId}
-                                        component={RouterLink}
-                                        to={`/items/${encodeURIComponent(tierId)}`}
-                                        clickable
-                                        color={tierId === item.id ? "primary" : "default"}
-                                    />
-                                </Stack>
-                            );
-                        })}
-                    </Stack>
-                </Paper>
-            )}
-
-            {(replacesInto.length > 0 || replacedFrom.length > 0) && (
-                <Paper sx={{ p: 3 }}>
-                    <Typography variant="h6" sx={{ mb: 2 }}>
-                        Замены
-                    </Typography>
-                    <Stack spacing={1.5}>
-                        {replacesInto.map((rule) => {
-                            const target = store.getItem(rule.replacementItem);
-                            return (
-                                <Stack key={rule.id} direction="row" sx={{ alignItems: "center", gap: 1 }}>
-                                    <Typography color="text.secondary">{rule.source}: заменяется на</Typography>
-                                    <Chip
-                                        label={target ? store.itemName(target) : rule.replacementItem}
-                                        component={RouterLink}
-                                        to={`/items/${encodeURIComponent(rule.replacementItem)}`}
-                                        clickable
-                                        size="small"
-                                    />
-                                </Stack>
-                            );
-                        })}
-                        {replacedFrom.map((rule) => {
-                            const source = store.getItem(rule.itemIdToReplace);
-                            return (
-                                <Stack key={rule.id} direction="row" sx={{ alignItems: "center", gap: 1 }}>
-                                    <Typography color="text.secondary">{rule.source}: получается заменой из</Typography>
-                                    <Chip
-                                        label={source ? store.itemName(source) : rule.itemIdToReplace}
-                                        component={RouterLink}
-                                        to={`/items/${encodeURIComponent(rule.itemIdToReplace)}`}
-                                        clickable
-                                        size="small"
-                                    />
-                                </Stack>
-                            );
-                        })}
-                    </Stack>
-                </Paper>
-            )}
-
-            <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                    Механики
-                </Typography>
-                {mechanicsByTable.size === 0 ? (
-                    <Typography color="text.secondary">Механики не найдены.</Typography>
-                ) : (
-                    <Stack spacing={2}>
-                        {[...mechanicsByTable.entries()].map(([table, rows]) => (
-                            <Box key={table}>
-                                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                                    {table}
-                                </Typography>
-                                <Stack spacing={1}>
-                                    {rows.map((row) => (
-                                        <Box
-                                            key={row.id}
-                                            sx={{ pl: 1, borderLeft: "2px solid", borderColor: "divider" }}
-                                        >
-                                            {Object.entries(row.fields).map(([key, value]) => (
-                                                <Typography key={key} variant="body2" color="text.secondary">
-                                                    <strong>{key}:</strong> {value}
-                                                </Typography>
-                                            ))}
-                                        </Box>
-                                    ))}
-                                </Stack>
-                            </Box>
-                        ))}
-                    </Stack>
-                )}
-            </Paper>
-
-            <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                    Возможно связано
-                </Typography>
+            <SectionPaper title="Возможно связано">
                 {related.length === 0 ? (
                     <Typography color="text.secondary">Связанные предметы не найдены.</Typography>
                 ) : (
@@ -497,64 +343,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                         })}
                     </Stack>
                 )}
-            </Paper>
-
-            <Dialog open={confirmingCopyDescToUpgrades} onClose={() => setConfirmingCopyDescToUpgrades(false)}>
-                <DialogTitle>Скопировать описание в прокачку?</DialogTitle>
-                <DialogContent>
-                    <DialogContentText>
-                        Текущее описание заменит собой описания следующих предметов:{" "}
-                        {upgradeTierItems
-                            .map((tierItem) => (typeof tierItem === "string" ? tierItem : store.itemName(tierItem)))
-                            .join(", ")}
-                        . Их текущие описания будут потеряны.
-                    </DialogContentText>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setConfirmingCopyDescToUpgrades(false)}>Отмена</Button>
-                    <Button
-                        color="primary"
-                        variant="contained"
-                        onClick={() => {
-                            store.copyDescriptionToUpgrades(item.id);
-                            setConfirmingCopyDescToUpgrades(false);
-                        }}
-                    >
-                        Скопировать
-                    </Button>
-                </DialogActions>
-            </Dialog>
-
-            <Dialog open={confirmingCopyNameToUpgrades} onClose={() => setConfirmingCopyNameToUpgrades(false)}>
-                <DialogTitle>Скопировать название в прокачку?</DialogTitle>
-                <DialogContent>
-                    <DialogContentText>
-                        Названия следующих предметов будут заменены на «{store.itemName(item)}» с добавлением +/++
-                        по уровню:{" "}
-                        {upgradeTierItems
-                            .map((tierItem, offset) =>
-                                typeof tierItem === "string"
-                                    ? tierItem
-                                    : `${store.itemName(item)}${"+".repeat(offset + 1)}`
-                            )
-                            .join(", ")}
-                        . Их текущие названия будут потеряны.
-                    </DialogContentText>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setConfirmingCopyNameToUpgrades(false)}>Отмена</Button>
-                    <Button
-                        color="primary"
-                        variant="contained"
-                        onClick={() => {
-                            store.copyNameToUpgrades(item.id);
-                            setConfirmingCopyNameToUpgrades(false);
-                        }}
-                    >
-                        Скопировать
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            </SectionPaper>
         </Stack>
     );
 }

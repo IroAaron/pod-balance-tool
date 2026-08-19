@@ -1,7 +1,7 @@
 import type { Item } from "./models/Item";
 import type { Build } from "./models/Build";
 import type { Translation } from "./models/Translation";
-import type { MechanicRow } from "./models/Mechanic";
+import type { MechanicRow, MechanicTableName } from "./models/Mechanic";
 import type { UpgradeChain } from "./models/UpgradeChain";
 import type { Round } from "./models/Round";
 import type { Deck, DeckSource } from "./models/Deck";
@@ -203,6 +203,13 @@ export class GameStore {
      *  in-place mechanic update so the Apps Script side can verify it's about to overwrite the row it thinks
      *  it is, and refuse (reporting a conflict) rather than silently clobbering a row someone else moved. */
     originalMechanicFields: Map<string, Record<string, string>> = new Map();
+
+    /** Sheet-backed mechanic rows removed on the site, kept so the export can delete them there too. Identified
+     *  the same way an in-place update is (ItemId + ordinal, guarded by the as-imported values). */
+    deletedMechanicRows: { table: string; itemId: string; ordinal: number; originalFields: Record<string, string> }[] = [];
+
+    /** Counter behind site-generated mechanic row ids — only needs to be unique within this session. */
+    private nextRowSeq = 1;
 
     /** Upgrade-chain ids edited since the last successful exportContentChanges() — one CardUpgrades row each. */
     dirtyUpgradeChainIds: Set<string> = new Set();
@@ -959,6 +966,7 @@ export class GameStore {
             this.dirtyItemIds.size +
             this.newMechanicRowIds.size +
             this.editedMechanicRowIds.size +
+            this.deletedMechanicRows.length +
             this.dirtyUpgradeChainIds.size +
             this.dirtyReplaceSourceIds.size
         );
@@ -1036,6 +1044,16 @@ export class GameStore {
             (updatedMechanicRows[row.table] ??= []).push({ itemId: row.itemId, ordinal, fields, originalFields });
         }
 
+        // Grouped per table so the receiver can delete highest-ordinal-first and not shift the ones behind it.
+        const deletedMechanicRows: Record<string, { itemId: string; ordinal: number; originalFields: Record<string, string> }[]> = {};
+        for (const deleted of this.deletedMechanicRows) {
+            (deletedMechanicRows[deleted.table] ??= []).push({
+                itemId: deleted.itemId,
+                ordinal: deleted.ordinal,
+                originalFields: deleted.originalFields,
+            });
+        }
+
         // One CardUpgrades row per chain, upserted by UpgradeChainId. Every UpgradeId column the sheet defines is
         // sent, blanks included, so a chain that lost a tier actually clears that cell instead of keeping a stale id.
         const upgradeChains: Record<string, Record<string, string>> = {};
@@ -1071,6 +1089,7 @@ export class GameStore {
             items,
             newMechanicRows,
             updatedMechanicRows,
+            deletedMechanicRows,
             upgradeChains,
             replaceRules,
         });
@@ -1079,6 +1098,7 @@ export class GameStore {
             this.dirtyItemIds = new Set();
             this.newMechanicRowIds = new Set();
             this.editedMechanicRowIds = new Set();
+            this.deletedMechanicRows = [];
             this.dirtyUpgradeChainIds = new Set();
             this.dirtyReplaceSourceIds = new Set();
             // Re-baseline: what's now in the sheet is what we just sent, so a follow-up edit of the same row
@@ -1677,6 +1697,46 @@ export class GameStore {
         let next = match ? Number(match[2]) + 1 : 2;
         while (this.getItem(`${prefix}${next}`)) next++;
         return `${prefix}${next}`;
+    }
+
+    /** Adds an empty mechanic row of `table` to an item. Its id is site-generated, so the export appends it. */
+    addMechanicRow(itemId: string, table: MechanicTableName): MechanicRow {
+        const row: MechanicRow = { id: `content:new:${table}:${itemId}:${this.nextRowSeq++}`, table, itemId, fields: {} };
+        this.upsertMechanicRow(row);
+        return row;
+    }
+
+    /**
+     * Removes a mechanic row. A row created here just disappears; a row that came from the sheet is additionally
+     * recorded so the export can delete that sheet row too — otherwise it would reappear on the next import,
+     * which is the same silent desync that made mechanic edits look like they weren't applying.
+     */
+    deleteMechanicRow(rowId: string): void {
+        const row = this.mechanics.find((entry) => entry.id === rowId);
+        if (!row) return;
+
+        if (this.newMechanicRowIds.has(rowId)) {
+            this.newMechanicRowIds.delete(rowId);
+        } else {
+            // Ordinal has to be read before the row leaves the list, and identifies it the same way an in-place
+            // update does (position among that item's rows in that table).
+            const ordinal = this.mechanics
+                .filter((entry) => entry.table === row.table && entry.itemId === row.itemId)
+                .findIndex((entry) => entry.id === rowId);
+            if (ordinal >= 0) {
+                this.deletedMechanicRows.push({
+                    table: row.table,
+                    itemId: row.itemId,
+                    ordinal,
+                    originalFields: this.originalMechanicFields.get(rowId) ?? { ...row.fields },
+                });
+            }
+        }
+
+        this.editedMechanicRowIds.delete(rowId);
+        this.originalMechanicFields.delete(rowId);
+        this.mechanics = this.mechanics.filter((entry) => entry.id !== rowId);
+        this.notify();
     }
 
     /** Creates or updates one replace rule and marks its source item for export. */

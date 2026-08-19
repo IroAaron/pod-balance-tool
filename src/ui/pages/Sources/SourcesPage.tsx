@@ -40,6 +40,7 @@ export default function SourcesPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [confirmingExport, setConfirmingExport] = useState(false);
     const [confirmingExportAll, setConfirmingExportAll] = useState(false);
+    const [confirmingExportContent, setConfirmingExportContent] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [exportResult, setExportResult] = useState<ExportResult | { ok: false; error: string } | null>(null);
     const [confirmingClearImport, setConfirmingClearImport] = useState(false);
@@ -112,6 +113,19 @@ export default function SourcesPage() {
         setExportResult(null);
         try {
             setExportResult(await store.exportAllTranslations());
+        } catch (error) {
+            setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    const confirmExportContent = async () => {
+        setConfirmingExportContent(false);
+        setExporting(true);
+        setExportResult(null);
+        try {
+            setExportResult(await store.exportContentChanges());
         } catch (error) {
             setExportResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
         } finally {
@@ -259,6 +273,40 @@ export default function SourcesPage() {
                                 {exportResult.error}
                             </Alert>
                         ))}
+                </Stack>
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Stack spacing={2}>
+                    <Typography variant="h6">Экспорт контента в конфиг</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Отправляет то, что отредактировано на сайте в карточках предметов: сами предметы
+                        (Cards/Houses/Artefacts по колонке ItemId), их механики, цепочки прокачки (CardUpgrades) и
+                        замены (ReplaceItem/ReplaceOnTrigger) — в «Источник конфигурации» выше. Требует того же
+                        доработанного Apps Script (см. <code>docs/apps-script-export.gs</code>) и{" "}
+                        <code>VITE_SHEETS_EXPORT_TOKEN</code> в <code>.env.local</code>.
+                    </Typography>
+
+                    <Box>
+                        <Button
+                            variant="contained"
+                            color="warning"
+                            onClick={() => setConfirmingExportContent(true)}
+                            disabled={exporting || store.contentPendingExportCount === 0}
+                            startIcon={exporting ? <CircularProgress size={16} /> : undefined}
+                        >
+                            {exporting
+                                ? "Отправка..."
+                                : `Экспортировать в конфиг (${store.contentPendingExportCount})`}
+                        </Button>
+                    </Box>
+
+                    <Typography variant="caption" color="text.secondary">
+                        Предметы и цепочки обновляются по ключу, новые строки механик добавляются, а удалённые —
+                        удаляются. Правка существующей строки механики применяется только если строка в таблице не
+                        менялась с момента загрузки: иначе она будет пропущена с сообщением о конфликте, а не
+                        перезапишет чужие изменения.
+                    </Typography>
                 </Stack>
             </Paper>
 
@@ -480,6 +528,22 @@ export default function SourcesPage() {
                 <DialogActions>
                     <Button onClick={() => setConfirmingExport(false)}>Отмена</Button>
                     <Button color="error" onClick={() => void confirmExport()}>
+                        Экспортировать
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={confirmingExportContent} onClose={() => setConfirmingExportContent(false)}>
+                <DialogTitle>Экспортировать контент в конфиг?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Запишет {store.contentPendingExportCount} правок в реальные таблицы конфигурации. Действие
+                        необратимо — таблица будет изменена сразу.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmingExportContent(false)}>Отмена</Button>
+                    <Button color="warning" variant="contained" onClick={confirmExportContent}>
                         Экспортировать
                     </Button>
                 </DialogActions>

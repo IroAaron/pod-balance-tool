@@ -1,6 +1,6 @@
 // Add this alongside your EXISTING doGet in the same Apps Script project — don't replace doGet, just add doPost
 // next to it. Two separate concerns share this one doPost: translation (name/description) export from the main
-// site, and item/mechanic export from the Blueprint Lab. If items/mechanics live in a DIFFERENT spreadsheet than
+// site, and item/mechanic export from the item cards. If items/mechanics live in a DIFFERENT spreadsheet than
 // item_name/item_desc in your setup, put this in THAT spreadsheet's Apps Script project instead (whichever one
 // the relevant Web App URL — "Источник конфигурации" vs "Источник переводов" on the Источники page — points at).
 //
@@ -19,20 +19,25 @@
 //     token: string,
 //     names: { [key: string]: string },          // -> item_name's `ru` column, matched by `key`
 //     descriptions: { [key: string]: string },   // -> item_desc's `ru` column, matched by `key`
-//     items?: {                                   // Blueprint Lab — upserted by the sheet's `ItemId` column
+//     items?: {                                   // Content editor — upserted by the sheet's `ItemId` column
 //       Cards: { [itemId: string]: { [column: string]: string } },
 //       Houses: { [itemId: string]: { [column: string]: string } },
 //       Artefacts: { [itemId: string]: { [column: string]: string } },
 //     },
-//     newMechanicRows?: {                         // Blueprint Lab — ALWAYS appended, never matched/updated
+//     newMechanicRows?: {                         // Content editor — ALWAYS appended, never matched/updated
 //       [table: string]: { [column: string]: string }[],   // e.g. MechActivate, MechAddValue, ...
 //     },
-//     updatedMechanicRows?: {                     // Blueprint Lab — in-place edits to EXISTING mechanic rows.
+//     updatedMechanicRows?: {                     // Content editor — in-place edits to EXISTING mechanic rows.
 //       [table: string]: {                        // A mechanic row has no unique key, so the target is
 //         itemId: string,                         // addressed by ItemId + ordinal (its position among that
 //         ordinal: number,                        // item's rows in this table), and `originalFields` must
 //         fields: { [column: string]: string },        // still match the sheet or the write is REFUSED and
 //         originalFields: { [column: string]: string }, // reported as a conflict — never silently clobbered.
+//       }[],
+//     },
+//     deletedMechanicRows?: {                     // Rows removed on the site — same ItemId+ordinal addressing
+//       [table: string]: {                        // and same originalFields guard as updatedMechanicRows.
+//         itemId: string, ordinal: number, originalFields: { [column: string]: string },
 //       }[],
 //     },
 //     upgradeChains?: {                            // CardUpgrades — upserted by UpgradeChainId. Unused tier
@@ -107,6 +112,14 @@ function doPost(e) {
         if (body.updatedMechanicRows) {
             for (var updTable in body.updatedMechanicRows) {
                 result.updated[updTable + ":updated"] = updateMechanicRows(ss, updTable, body.updatedMechanicRows[updTable], result);
+            }
+        }
+
+        // Deletes run after the updates above: both address rows by ordinal, and removing a row renumbers the
+        // ones behind it, so doing it last (and highest-ordinal-first inside the helper) keeps every target valid.
+        if (body.deletedMechanicRows) {
+            for (var delTable in body.deletedMechanicRows) {
+                result.updated[delTable + ":deleted"] = deleteMechanicRows(ss, delTable, body.deletedMechanicRows[delTable], result);
             }
         }
 
@@ -215,7 +228,7 @@ function upsertRows(spreadsheet, sheetName, rows, result) {
     return touched;
 }
 
-// Blueprint Lab item export: `rows` is { [idValue]: { column: value, ... } } — writes every provided column for
+// Item export: `rows` is { [idValue]: { column: value, ... } } — writes every provided column for
 // a matching row (matched by `idColumnName`, e.g. "ItemId"), or appends a brand-new row if the id isn't found
 // yet. Unlike upsertRows, a full set of columns can be written per row, and unknown column names in the payload
 // are skipped with a warning rather than crashing the whole export (a stale/renamed column shouldn't block
@@ -276,7 +289,7 @@ function upsertFullRows(spreadsheet, sheetName, idColumnName, rows, result) {
     return touched;
 }
 
-// Blueprint Lab in-place mechanic edits: each update names its target by `itemId` + `ordinal` (the Nth row for
+// In-place mechanic edits: each update names its target by `itemId` + `ordinal` (the Nth row for
 // that item in this sheet, counted in sheet order) rather than an absolute row number, so rows added or removed
 // elsewhere can't shift it. Before writing, every column in `originalFields` must still match the sheet — if
 // even one differs, the row was changed or reordered by someone else since the site imported it, so the write
@@ -353,7 +366,76 @@ function updateMechanicRows(spreadsheet, sheetName, updates, result) {
     return updated;
 }
 
-// Blueprint Lab new-mechanic-row export: `rows` is an array of { column: value, ... } objects, each ALWAYS
+// Removes mechanic rows deleted on the site. Same addressing and same safety rule as updateMechanicRows: the
+// target is ItemId + ordinal, and every column in `originalFields` must still match or the row is left alone and
+// reported. Deletions are applied highest-ordinal-first so removing one doesn't renumber the targets behind it.
+function deleteMechanicRows(spreadsheet, sheetName, deletions, result) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": sheet not found");
+        return 0;
+    }
+
+    var data = sheet.getDataRange().getValues();
+    var header = data[0];
+    var idCol = header.indexOf("ItemId");
+    if (idCol === -1) {
+        result.errors = result.errors || [];
+        result.errors.push(sheetName + ": 'ItemId' column not found in header row");
+        return 0;
+    }
+
+    var rowsByItemId = {};
+    for (var i = 1; i < data.length; i++) {
+        var id = String(data[i][idCol]).trim();
+        if (!id) continue;
+        (rowsByItemId[id] = rowsByItemId[id] || []).push(i + 1);
+    }
+
+    // Resolve every target to a real sheet row first, then delete from the bottom up.
+    var targets = [];
+    for (var d = 0; d < deletions.length; d++) {
+        var del = deletions[d];
+        var candidates = rowsByItemId[del.itemId] || [];
+        var sheetRow = candidates[del.ordinal];
+
+        if (!sheetRow) {
+            result.errors = result.errors || [];
+            result.errors.push(sheetName + ": no row #" + (del.ordinal + 1) + " for ItemId '" + del.itemId + "' to delete");
+            continue;
+        }
+
+        var conflict = null;
+        for (var origCol in del.originalFields) {
+            var origIndex = header.indexOf(origCol);
+            if (origIndex === -1) continue;
+            var inSheet = String(data[sheetRow - 1][origIndex]).trim();
+            var expected = String(del.originalFields[origCol]).trim();
+            if (inSheet !== expected) {
+                conflict = origCol + ": sheet has '" + inSheet + "', site imported '" + expected + "'";
+                break;
+            }
+        }
+        if (conflict) {
+            result.errors = result.errors || [];
+            result.errors.push(
+                sheetName + " row " + sheetRow + " (ItemId '" + del.itemId + "') changed since import, not deleted — " + conflict
+            );
+            continue;
+        }
+
+        targets.push(sheetRow);
+    }
+
+    targets.sort(function (a, b) {
+        return b - a;
+    });
+    for (var t = 0; t < targets.length; t++) sheet.deleteRow(targets[t]);
+    return targets.length;
+}
+
+// New-mechanic-row export: `rows` is an array of { column: value, ... } objects, each ALWAYS
 // appended as a brand-new sheet row — no matching/lookup against existing rows at all, since a row authored on
 // the canvas never corresponded to an existing sheet row in the first place.
 function appendFullRows(spreadsheet, sheetName, rows, result) {

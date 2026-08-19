@@ -138,6 +138,12 @@ export interface ExportPayload {
      *  ItemId + ordinal and guarded by the as-imported values. See GameStore.exportContentChanges's doc. */
     updatedMechanicRows?: Partial<Record<string, MechanicRowUpdate[]>>;
 
+    /** Mechanic rows removed on the site — table -> targets, addressed and guarded exactly like an in-place
+     *  update. Without this a deleted row would simply come back on the next import. */
+    deletedMechanicRows?: Partial<
+        Record<string, { itemId: string; ordinal: number; originalFields: Record<string, string> }[]>
+    >;
+
     /** Upgrade chains — UpgradeChainId -> its UpgradeId1..N columns, upserted by UpgradeChainId in CardUpgrades.
      *  Unused tier columns are sent blank so a shortened chain clears them. */
     upgradeChains?: Record<string, Record<string, string>>;

@@ -7,6 +7,7 @@ import {
     CardActionArea,
     CardContent,
     Checkbox,
+    Button,
     Chip,
     FormControlLabel,
     IconButton,
@@ -16,10 +17,12 @@ import {
     Tooltip,
     Typography,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
+import NewItemDialog from "./NewItemDialog";
 import ItemDescription from "../../components/ItemDescription";
 import { computeUpgradeTierIds } from "../../../core/domain/relations";
 import type { ItemSortKey, SortDirection } from "../../../core/services/ItemService";
@@ -33,6 +36,7 @@ export default function ItemsPage() {
     const [sortKey, setSortKey] = useState<ItemSortKey>("name");
     const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
     const [includeUpgradeTiers, setIncludeUpgradeTiers] = useState(false);
+    const [creating, setCreating] = useState(false);
 
     // itemName reads live translations at call time, so this stable wrapper stays correct.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,7 +76,14 @@ export default function ItemsPage() {
 
     return (
         <Stack spacing={3}>
-            <Typography variant="h4">Предметы</Typography>
+            <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                <Typography variant="h4">Предметы</Typography>
+                <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreating(true)}>
+                    Новый предмет
+                </Button>
+            </Stack>
+
+            <NewItemDialog open={creating} onClose={() => setCreating(false)} />
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
                 <TextField
