@@ -34,6 +34,7 @@ export const DEFAULT_ENUM_VALUES: Record<string, string[]> = {
     BonusCountingType: ["CellCount", "CellValue", "FullCellCount", "ItemCount", "ItemMoneyValue", "ItemValue", "NullCellCount"],
     DurationType: ["Activations", "LoopCompleted", "Round", "Spin"],
     ValueTypes: ["MainValue", "MoneyValue"],
+    RarityVFX: ["Silver", "Gold"],
     ItemMech: ["поставить", "удалить"],
     TagMech: ["дать", "удалить"],
     TargetGetter: ["забрать value", "прочитать value"],
@@ -72,6 +73,9 @@ export const FIELD_TO_DIMENSION: Record<string, string> = {
     NewTags: "ItemTag",
     MyPositionReq: "Place",
     PossibleColors: "TargetColor",
+    // The items' own columns, not a mechanic's — same dimensions, just reached from the item card.
+    ValueUsageType: "ValueUsageType",
+    RarityVFX: "RarityVFX",
 };
 
 export const ENUM_DIMENSIONS = Object.keys(DEFAULT_ENUM_VALUES);
@@ -90,6 +94,7 @@ export const DEFAULT_DIMENSION_DESCRIPTIONS: Record<string, string> = {
     BonusCountingType: "что именно считать для бонуса",
     DurationType: "на что действует длительность",
     ValueTypes: "какое значение игрока меняется",
+    RarityVFX: "эффект редкости карты",
     ItemMech: "поставить или удалить предмет",
     TagMech: "дать или забрать тег",
     TargetGetter: "как прочитать значение цели",

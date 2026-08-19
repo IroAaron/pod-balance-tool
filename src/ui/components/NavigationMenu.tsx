@@ -48,6 +48,7 @@ export const menu: NavigationMenuEntry[] = [
         icon: "🔧",
         children: [
             { text: "Глоссарий", path: "/glossary", icon: "📖" },
+            { text: "Enums", path: "/enums", icon: "🔤" },
             { text: "Разное", path: "/analytics", icon: "📊" },
             { text: "Настройки текста", path: "/settings", icon: "⚙️" },
         ],
