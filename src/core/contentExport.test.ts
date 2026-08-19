@@ -74,12 +74,12 @@ describe("Blueprint Lab export of edits to an existing mechanic row", () => {
         const store = makeStore();
         const rowId = `MechAddItem:${LAB_ID}:0`;
 
-        expect(store.blueprintPendingExportCount).toBe(0);
+        expect(store.contentPendingExportCount).toBe(0);
 
         store.updateMechanicRowFields(rowId, { ActivatorType: "BallStop" });
-        expect(store.blueprintPendingExportCount).toBe(1);
+        expect(store.contentPendingExportCount).toBe(1);
 
-        await store.exportBlueprintChanges();
+        await store.exportContentChanges();
 
         const [update] = sentUpdates("MechAddItem");
 
@@ -96,7 +96,7 @@ describe("Blueprint Lab export of edits to an existing mechanic row", () => {
         const store = makeStore();
         store.updateMechanicRowFields(`MechAddItem:${LAB_ID}:0`, { ActivatorPlace: "" });
 
-        await store.exportBlueprintChanges();
+        await store.exportContentChanges();
         const [update] = sentUpdates("MechAddItem");
 
         expect(update.fields.ActivatorPlace).toBe("");
@@ -112,7 +112,7 @@ describe("Blueprint Lab export of edits to an existing mechanic row", () => {
         store.mechanics = [labMechanicRow(), other, second];
 
         store.updateMechanicRowFields(`MechAddItem:${LAB_ID}:1`, { ActivatorType: "LoopCompleted" });
-        await store.exportBlueprintChanges();
+        await store.exportContentChanges();
 
         const [update] = sentUpdates("MechAddItem");
 
@@ -124,7 +124,7 @@ describe("Blueprint Lab export of edits to an existing mechanic row", () => {
     it("ignores a no-op write, so untouched rows are never re-sent", async () => {
         const store = makeStore();
         store.updateMechanicRowFields(`MechAddItem:${LAB_ID}:0`, { ActivatorType: "BallPass" });
-        expect(store.blueprintPendingExportCount).toBe(0);
+        expect(store.contentPendingExportCount).toBe(0);
     });
 
     it("clears pending state only after a successful export", async () => {
@@ -132,10 +132,10 @@ describe("Blueprint Lab export of edits to an existing mechanic row", () => {
         store.updateMechanicRowFields(`MechAddItem:${LAB_ID}:0`, { ActivatorType: "BallStop" });
 
         postExportPayload.mockResolvedValueOnce({ ok: false as const } as never);
-        await store.exportBlueprintChanges();
-        expect(store.blueprintPendingExportCount).toBe(1);
+        await store.exportContentChanges();
+        expect(store.contentPendingExportCount).toBe(1);
 
-        await store.exportBlueprintChanges();
-        expect(store.blueprintPendingExportCount).toBe(0);
+        await store.exportContentChanges();
+        expect(store.contentPendingExportCount).toBe(0);
     });
 });

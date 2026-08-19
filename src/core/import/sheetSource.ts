@@ -127,15 +127,15 @@ export interface ExportPayload {
     /** translation key -> new value, written into item_desc's `ru` column. */
     descriptions: Record<string, string>;
 
-    /** Blueprint Lab item edits — table -> ItemId -> full column bag, upserted by ItemId (safe: unique per item). */
+    /** Content editor item edits — table -> ItemId -> full column bag, upserted by ItemId (safe: unique per item). */
     items?: Record<"Cards" | "Houses" | "Artefacts", Record<string, Record<string, string>>>;
 
-    /** Blueprint Lab brand-new mechanic rows — table -> full rows, always appended, never matched against an
-     *  existing row (MechanicRow.id isn't a real spreadsheet key, see GameStore.exportBlueprintChanges's doc). */
+    /** Content editor brand-new mechanic rows — table -> full rows, always appended, never matched against an
+     *  existing row (MechanicRow.id isn't a real spreadsheet key, see GameStore.exportContentChanges's doc). */
     newMechanicRows?: Partial<Record<string, Record<string, string>[]>>;
 
-    /** Blueprint Lab edits to already-existing mechanic rows — table -> in-place updates, each addressed by
-     *  ItemId + ordinal and guarded by the as-imported values. See GameStore.exportBlueprintChanges's doc. */
+    /** Content editor edits to already-existing mechanic rows — table -> in-place updates, each addressed by
+     *  ItemId + ordinal and guarded by the as-imported values. See GameStore.exportContentChanges's doc. */
     updatedMechanicRows?: Partial<Record<string, MechanicRowUpdate[]>>;
 
     /** Decks page edits — table -> DeckId -> full row set for that deck (replaces every existing row for that

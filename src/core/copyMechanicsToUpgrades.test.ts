@@ -32,7 +32,7 @@ function activateRow(itemId: string, ordinal: number, fields: Record<string, str
 function makeStore(mechanics: MechanicRow[], raws: Record<string, Record<string, string>> = {}) {
     const store = new GameStore();
     for (const id of TIERS) store.upsertItem(id, "Card", { raw: raws[id] });
-    store.blueprintDirtyItemIds.clear();
+    store.dirtyItemIds.clear();
     store.upgradeChains = [{ id: "up_near_house", itemIds: TIERS }];
     store.mechanics = mechanics;
     return store;
@@ -104,7 +104,7 @@ describe("copyMechanicsToUpgrades", () => {
         expect(store.getItem(TIERS[1])?.raw).toMatchObject({ ValueMin: "5", Cost: "9" });
         expect(store.getItem(TIERS[1])?.valueMin).toBe(5);
         // Nothing about the items themselves changed, so none of them is queued for export.
-        expect(store.blueprintDirtyItemIds.size).toBe(0);
+        expect(store.dirtyItemIds.size).toBe(0);
     });
 
     it("does nothing for an item that isn't in a chain, or has no mechanics of its own", () => {
@@ -124,7 +124,7 @@ describe("copyMechanicsToUpgrades", () => {
 
         store.copyMechanicsToUpgrades(TIERS[0]);
 
-        expect([...store.blueprintEditedMechanicRowIds]).toEqual([`MechActivate:${TIERS[1]}:0`]);
-        expect([...store.blueprintNewMechanicRowIds]).toEqual([`blueprint:copy:${TIERS[2]}:MechActivate:0`]);
+        expect([...store.editedMechanicRowIds]).toEqual([`MechActivate:${TIERS[1]}:0`]);
+        expect([...store.newMechanicRowIds]).toEqual([`content:copy:${TIERS[2]}:MechActivate:0`]);
     });
 });
