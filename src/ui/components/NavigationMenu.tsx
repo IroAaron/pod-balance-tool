@@ -54,5 +54,4 @@ export const menu: NavigationMenuEntry[] = [
     },
     { text: "Автотесты", path: "/autotests", icon: "✅" },
     { text: "Сохранения", path: "/saves", icon: "💾" },
-    { text: "Blueprint-лаборатория", path: "/blueprint-lab", icon: "🧪" },
 ];

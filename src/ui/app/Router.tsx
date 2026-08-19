@@ -21,7 +21,6 @@ import AutotestsPage from "../pages/Autotests/AutotestsPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
 import BalancePage from "../pages/Balance/BalancePage";
 import SettingsPage from "../pages/Settings/SettingsPage";
-import BlueprintLabPage from "../pages/BlueprintLab/BlueprintLabPage";
 import SavesPage from "../pages/Saves/SavesPage";
 
 // Keyed by :id so navigating between two detail pages of the same route
@@ -93,7 +92,6 @@ export default function AppRouter() {
             <Route path="/autotests" element={<AutotestsPage />} />
             <Route path="/saves" element={<SavesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/blueprint-lab" element={<BlueprintLabPage />} />
             <Route path="*" element={<NotFoundPage />} />
         </Routes>
     );
