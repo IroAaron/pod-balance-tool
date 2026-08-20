@@ -186,6 +186,35 @@ function doPost(e) {
     }
 }
 
+// Every append in this file goes through this instead of sheet.appendRow(). appendRow() writes after
+// getLastRow(), which is the last row holding content in ANY column — and a cell that was cleared with
+// setValue("") still counts as content, as does a stray value pasted into an unused column far below the data.
+// Either one makes appendRow skip the visually-blank rows in between and leave a gap. This finds the last row
+// with a genuinely non-blank cell and writes directly after it, so new rows land on the first free line.
+// `data` is the sheet's data range values (read AFTER any deletions this call makes, or the cursor goes stale).
+function rowAppender(sheet, data, width) {
+    var lastFilled = 1; // The header row: a sheet with nothing but a header appends at row 2.
+    for (var i = 1; i < data.length; i++) {
+        for (var c = 0; c < data[i].length; c++) {
+            if (String(data[i][c]).trim() !== "") {
+                lastFilled = i + 1; // +1: sheet rows are 1-indexed, data[] is 0-indexed
+                break;
+            }
+        }
+    }
+
+    var cursor = lastFilled + 1;
+    return function (values) {
+        var maxRows = sheet.getMaxRows();
+        if (cursor > maxRows) {
+            sheet.insertRowsAfter(maxRows, cursor - maxRows);
+        }
+        sheet.getRange(cursor, 1, 1, width).setValues([values]);
+        cursor++;
+        return cursor - 1;
+    };
+}
+
 // Writes `rows` (key -> new `ru` value) into `sheetName`, updating existing rows by `key` and appending any
 // key not already present. Returns how many rows were touched (updated + appended).
 function upsertRows(spreadsheet, sheetName, rows, result) {
@@ -211,6 +240,8 @@ function upsertRows(spreadsheet, sheetName, rows, result) {
         sheetRowByKey[data[i][keyCol]] = i + 1; // +1: sheet rows are 1-indexed, data[] is 0-indexed
     }
 
+    var append = rowAppender(sheet, data, header.length);
+
     var touched = 0;
     for (var key in rows) {
         var value = rows[key];
@@ -221,7 +252,7 @@ function upsertRows(spreadsheet, sheetName, rows, result) {
             var newRow = new Array(header.length).fill("");
             newRow[keyCol] = key;
             newRow[ruCol] = value;
-            sheet.appendRow(newRow);
+            append(newRow);
         }
         touched++;
     }
@@ -255,6 +286,8 @@ function upsertFullRows(spreadsheet, sheetName, idColumnName, rows, result) {
         sheetRowById[data[i][idCol]] = i + 1; // +1: sheet rows are 1-indexed, data[] is 0-indexed
     }
 
+    var append = rowAppender(sheet, data, header.length);
+
     var touched = 0;
     for (var id in rows) {
         var columns = rows[id];
@@ -282,7 +315,7 @@ function upsertFullRows(spreadsheet, sheetName, idColumnName, rows, result) {
                 }
                 newRow[newColIndex] = columns[newColName];
             }
-            sheet.appendRow(newRow);
+            append(newRow);
         }
         touched++;
     }
@@ -446,7 +479,9 @@ function appendFullRows(spreadsheet, sheetName, rows, result) {
         return 0;
     }
 
-    var header = sheet.getDataRange().getValues()[0];
+    var appendData = sheet.getDataRange().getValues();
+    var header = appendData[0];
+    var append = rowAppender(sheet, appendData, header.length);
 
     for (var i = 0; i < rows.length; i++) {
         var columns = rows[i];
@@ -460,7 +495,7 @@ function appendFullRows(spreadsheet, sheetName, rows, result) {
             }
             newRow[colIndex] = columns[colName];
         }
-        sheet.appendRow(newRow);
+        append(newRow);
     }
     return rows.length;
 }
@@ -506,6 +541,9 @@ function replaceRowsByGroupId(spreadsheet, sheetName, groupIdColumnName, rowsByG
             sheet.deleteRow(rowsToDelete[d]);
         }
 
+        // Read back after the deletions above: they shift every row below them.
+        var append = rowAppender(sheet, sheet.getDataRange().getValues(), header.length);
+
         var newRows = rowsByGroupId[groupId];
         for (var r = 0; r < newRows.length; r++) {
             var columns = newRows[r];
@@ -520,7 +558,7 @@ function replaceRowsByGroupId(spreadsheet, sheetName, groupIdColumnName, rowsByG
                 }
                 newRow[colIndex] = columns[colName];
             }
-            sheet.appendRow(newRow);
+            append(newRow);
         }
         touched += newRows.length;
     }
@@ -594,7 +632,7 @@ function replaceWideGroupRow(spreadsheet, sheetName, groupIdColumnName, repeated
             for (var n = 0; n < repeatedCols.length; n++) {
                 newRow[repeatedCols[n]] = n < values.length ? values[n] : "";
             }
-            sheet.appendRow(newRow);
+            rowAppender(sheet, data, header.length)(newRow);
         } else {
             for (var c = 0; c < repeatedCols.length; c++) {
                 var value = c < values.length ? values[c] : "";
@@ -662,6 +700,9 @@ function replaceRowsByGroupIdWithRepeatedColumn(spreadsheet, sheetName, groupIdC
             sheet.deleteRow(rowsToDelete[d]);
         }
 
+        // Read back after the deletions above: they shift every row below them.
+        var append = rowAppender(sheet, sheet.getDataRange().getValues(), header.length);
+
         var newRows = rowsByGroupId[groupId];
         for (var r = 0; r < newRows.length; r++) {
             var newRow = new Array(header.length).fill("");
@@ -683,7 +724,7 @@ function replaceRowsByGroupIdWithRepeatedColumn(spreadsheet, sheetName, groupIdC
                 newRow[repeatedCols[c]] = c < values.length ? values[c] : "";
             }
 
-            sheet.appendRow(newRow);
+            append(newRow);
         }
         touched += newRows.length;
     }
