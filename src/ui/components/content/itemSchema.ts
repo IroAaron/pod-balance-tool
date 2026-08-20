@@ -11,14 +11,14 @@ export const ITEM_KINDS: ItemKind[] = ["Card", "House", "Artefact"];
 export const ITEM_CATEGORY_COLUMNS: Record<ItemKind, string[]> = {
     Card: [
         "Weight", "Cost", "ValueMin", "ValueMax", "MoneyValue", "ValueUsageType",
-        "Overheat", "Indestructible", "MetaTag", "CardSpriteName", "CardSpriteNameMini", "RarityVFX",
+        "Overheat", "Indestructible", "MetaTag", "Rarity", "CardSpriteName", "CardSpriteNameMini", "RarityVFX",
     ],
     House: [
         "Weight", "Cost", "ValueMin", "ValueMax", "MoneyValue", "ValueUsageType",
-        "Overheat", "Indestructible", "MetaTag", "CardSpriteName", "CardSpriteNameMini", "SoundId", "Колода", "Act",
+        "Overheat", "Indestructible", "MetaTag", "Rarity", "CardSpriteName", "CardSpriteNameMini", "SoundId", "Колода", "Act",
     ],
     Artefact: [
         "Weight", "Cost", "ValueMin", "ValueMax", "MoneyValue", "ValueUsageType",
-        "MetaTag", "ArtefactAssetName", "комментарий",
+        "MetaTag", "Rarity", "ArtefactAssetName", "комментарий",
     ],
 };

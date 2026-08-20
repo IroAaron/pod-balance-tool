@@ -35,6 +35,7 @@ export const DEFAULT_ENUM_VALUES: Record<string, string[]> = {
     DurationType: ["Activations", "LoopCompleted", "Round", "Spin"],
     ValueTypes: ["MainValue", "MoneyValue"],
     RarityVFX: ["Silver", "Gold"],
+    Rarity: ["Base", "Common", "Uncommon", "Rare", "Uniq"],
     ItemMech: ["поставить", "удалить"],
     TagMech: ["дать", "удалить"],
     TargetGetter: ["забрать value", "прочитать value"],
@@ -76,6 +77,7 @@ export const FIELD_TO_DIMENSION: Record<string, string> = {
     // The items' own columns, not a mechanic's — same dimensions, just reached from the item card.
     ValueUsageType: "ValueUsageType",
     RarityVFX: "RarityVFX",
+    Rarity: "Rarity",
 };
 
 export const ENUM_DIMENSIONS = Object.keys(DEFAULT_ENUM_VALUES);
@@ -95,6 +97,7 @@ export const DEFAULT_DIMENSION_DESCRIPTIONS: Record<string, string> = {
     DurationType: "на что действует длительность",
     ValueTypes: "какое значение игрока меняется",
     RarityVFX: "эффект редкости карты",
+    Rarity: "редкость предмета",
     ItemMech: "поставить или удалить предмет",
     TagMech: "дать или забрать тег",
     TargetGetter: "как прочитать значение цели",
@@ -108,6 +111,13 @@ export const DEFAULT_DIMENSION_DESCRIPTIONS: Record<string, string> = {
  * Enum panel once known, rather than trust an invented description.
  */
 export const DEFAULT_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
+    Rarity: {
+        Base: "базовый",
+        Common: "обычный",
+        Uncommon: "необычный",
+        Rare: "редкий",
+        Uniq: "уникальный",
+    },
     Place: {
         Near: "рядом с активатором",
         NearBall: "рядом с мячом",
