@@ -16,10 +16,14 @@ import { useStore } from "../../../hooks/useStore";
 import DetailModal from "../../../components/DetailModal";
 import EnumField from "../../../components/content/EnumField";
 import ItemRefSelect from "../../../components/content/ItemRefSelect";
+import EnumMultiSelect from "../../../components/content/EnumMultiSelect";
+import { FIELD_TO_DIMENSION } from "../../../components/content/enumData";
 import {
     MECHANIC_BLOCKS,
     MECHANIC_MISC_FIELDS,
+    MULTI_VALUE_MECHANIC_FIELDS,
     PLAIN_ITEM_REF_FIELDS,
+    splitFieldList,
     blockLabel,
     type MechanicKind,
 } from "../../../components/content/mechanicSchema";
@@ -30,9 +34,20 @@ interface Props {
     onClose: () => void;
 }
 
-/** An id-reference column gets the searchable item picker; everything else goes through the enum/plain field. */
+/** An id-reference column gets the searchable item picker, a list column a multi-select; everything else goes
+ *  through the enum/plain field. */
 function MechanicField({ field, value, onChange }: { field: string; value: string; onChange: (v: string) => void }) {
     if (PLAIN_ITEM_REF_FIELDS.has(field)) return <ItemRefSelect field={field} value={value} onChange={onChange} />;
+    if (MULTI_VALUE_MECHANIC_FIELDS.has(field)) {
+        return (
+            <EnumMultiSelect
+                dimension={FIELD_TO_DIMENSION[field] ?? field}
+                label={field}
+                value={splitFieldList(value)}
+                onChange={(values) => onChange(values.join(", "))}
+            />
+        );
+    }
     return <EnumField field={field} value={value} onChange={onChange} />;
 }
 

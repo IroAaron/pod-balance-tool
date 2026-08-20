@@ -104,6 +104,21 @@ export function blockLabel(kind: BlockKind): string {
     return BLOCK_LABELS[kind];
 }
 
+/**
+ * Columns whose cell holds a *list*, not one value — the sheet's own header comment for NewTags is literally
+ * "Список из Тегов", and relations.ts already reads it as a list. They get a multi-select instead of the
+ * single-value dropdown, joined back with ", " the way item Tags/PossibleColors are written.
+ */
+export const MULTI_VALUE_MECHANIC_FIELDS = new Set<string>(["NewTags"]);
+
+/** Same separators normalize.ts accepts when reading these cells, so anything already in the sheet round-trips. */
+export function splitFieldList(value: string | undefined): string[] {
+    return (value ?? "")
+        .split(/[|,;]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
 /** Item-id-reference columns that render as a plain in-node field (searchable by name/id) rather than their own point. */
 export const PLAIN_ITEM_REF_FIELDS = new Set<string>(["UseActivatorIds", "UseTargetIds", "TargetItemId", "NewItemId"]);
 
