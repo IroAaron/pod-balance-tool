@@ -203,6 +203,15 @@ export class GameStore {
      *  in-memory only, not persisted/synced, matching the lab's own "nothing survives a reload" framing. */
     dirtyItemIds: Set<string> = new Set();
 
+    /**
+     * itemId -> that item's raw columns exactly as imported, captured the first time it's edited. The export
+     * diffs against this and sends only the columns that actually changed: rewriting a whole row re-triggers the
+     * sheet's data validation on cells nobody touched, and a value that no longer satisfies its rule (a sprite
+     * name dropped from the sprite list, say) aborts the whole export mid-way. Absent for items created on the
+     * site — those have no sheet row yet, so every column has to be written.
+     */
+    originalItemRaw: Map<string, Record<string, string>> = new Map();
+
     /** MechanicRow ids upserted via upsertMechanicRow (content editing) since the last successful
      *  exportContentChanges() — brand-new rows, exported by appending to the sheet. */
     newMechanicRowIds: Set<string> = new Set();
@@ -508,6 +517,10 @@ export class GameStore {
 
         // Created here, so the sheet has never seen it — that's what makes its id still renameable.
         if (!existing) this.locallyCreatedItemIds.add(trimmedId);
+        // First edit of a sheet-backed item: remember how the row arrived, so the export can send just the diff.
+        else if (!this.originalItemRaw.has(trimmedId) && !this.locallyCreatedItemIds.has(trimmedId)) {
+            this.originalItemRaw.set(trimmedId, existing.raw);
+        }
 
         this.allItems = mergeById(this.allItems, [next]);
         this.rebuildDerivedCaches();
@@ -1022,7 +1035,18 @@ export class GameStore {
             const item = this.getItem(itemId);
             if (!item) continue;
             const table = itemTableByType[item.itemType ?? "Card"] ?? "Cards";
-            items[table][itemId] = item.raw;
+            const original = this.originalItemRaw.get(itemId);
+            if (!original) {
+                // No sheet row yet (created here) — the whole row has to be written.
+                items[table][itemId] = item.raw;
+                continue;
+            }
+            // Only what changed. A column dropped from raw entirely counts as cleared, so it's sent as "".
+            const changed: Record<string, string> = { ItemId: itemId };
+            for (const column of new Set([...Object.keys(original), ...Object.keys(item.raw)])) {
+                if ((original[column] ?? "") !== (item.raw[column] ?? "")) changed[column] = item.raw[column] ?? "";
+            }
+            items[table][itemId] = changed;
         }
 
         const newMechanicRows: Record<string, Record<string, string>[]> = {};
@@ -1122,6 +1146,7 @@ export class GameStore {
             // Re-baseline: what's now in the sheet is what we just sent, so a follow-up edit of the same row
             // verifies against the values it will actually find there.
             this.originalMechanicFields = new Map();
+            this.originalItemRaw = new Map();
             this.notify();
         }
 
@@ -1788,6 +1813,11 @@ export class GameStore {
         this.locallyCreatedItemIds.add(trimmed);
         this.dirtyItemIds.delete(oldId);
         this.dirtyItemIds.add(trimmed);
+        const originalRaw = this.originalItemRaw.get(oldId);
+        if (originalRaw) {
+            this.originalItemRaw.delete(oldId);
+            this.originalItemRaw.set(trimmed, originalRaw);
+        }
 
         this.rebuildDerivedCaches();
         this.notify();

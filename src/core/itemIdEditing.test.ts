@@ -73,6 +73,44 @@ describe("id rules on creation", () => {
     });
 });
 
+describe("exporting an edited sheet-backed item", () => {
+    it("sends only the columns that changed, not the whole row", async () => {
+        const store = makeStore();
+        importItems(store, [{ id: "c_real", itemType: "Card" }]);
+        // As it arrived from the sheet.
+        store.allItems = [
+            {
+                id: "c_real",
+                itemType: "Card",
+                tags: [],
+                raw: { ItemId: "c_real", Weight: "2", CardSpriteName: "card_track_richman", Rarity: "" },
+            },
+        ];
+        store.upsertItem("c_real", "Card", { raw: { Rarity: "Rare" } });
+
+        await store.exportContentChanges();
+
+        const payload = postExportPayload.mock.calls.at(-1)?.[1] as {
+            items: Record<string, Record<string, Record<string, string>>>;
+        };
+        // CardSpriteName is untouched, so it must not be rewritten — the sheet validates that column, and
+        // re-writing a value it no longer accepts aborts the export.
+        expect(payload.items.Cards.c_real).toEqual({ ItemId: "c_real", Rarity: "Rare" });
+    });
+
+    it("still sends every column for an item created on the site", async () => {
+        const store = makeStore();
+        store.upsertItem("c_new_1", "Card", { raw: { Weight: "2" } });
+
+        await store.exportContentChanges();
+
+        const payload = postExportPayload.mock.calls.at(-1)?.[1] as {
+            items: Record<string, Record<string, Record<string, string>>>;
+        };
+        expect(payload.items.Cards.c_new_1).toEqual({ ItemId: "c_new_1", Weight: "2" });
+    });
+});
+
 describe("renaming an item that was never exported", () => {
     it("is allowed for a site-created item and refused once it's been exported", async () => {
         const store = makeStore();
