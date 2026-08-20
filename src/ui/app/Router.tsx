@@ -21,6 +21,7 @@ import AutotestsPage from "../pages/Autotests/AutotestsPage";
 import AnalyticsPage from "../pages/Analytics/AnalyticsPage";
 import EnumsPage from "../pages/Enums/EnumsPage";
 import BalancePage from "../pages/Balance/BalancePage";
+import ValuesPage from "../pages/Balance/values/ValuesPage";
 import SettingsPage from "../pages/Settings/SettingsPage";
 import SavesPage from "../pages/Saves/SavesPage";
 
@@ -89,6 +90,7 @@ export default function AppRouter() {
             <Route path="/glossary" element={<GlossaryPage />} />
             <Route path="/graph" element={<GraphPage />} />
             <Route path="/balance" element={<BalancePage />} />
+            <Route path="/values" element={<ValuesPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/enums" element={<EnumsPage />} />
             <Route path="/autotests" element={<AutotestsPage />} />

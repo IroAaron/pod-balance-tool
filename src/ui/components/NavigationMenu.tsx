@@ -41,6 +41,7 @@ export const menu: NavigationMenuEntry[] = [
             { text: "Билды", path: "/builds", icon: "🧠" },
             { text: "Граф", path: "/graph", icon: "🕸" },
             { text: "Сила предметов", path: "/balance", icon: "💪" },
+            { text: "Значения", path: "/values", icon: "📈" },
         ],
     },
     {
