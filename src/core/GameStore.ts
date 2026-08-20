@@ -23,6 +23,7 @@ import { computeSuggestedBuilds, computeCascadeBuilds, computeUpgradeTierIds } f
 import { PLACEHOLDER_ITEM_ICON } from "./domain/sprites";
 import { deriveParamValues, mergeParamValueSources } from "./domain/paramRegistry";
 import { DEFAULT_DESCRIPTION_SETTINGS, getEnabledGlossaryEntries, type DescriptionSettings } from "./domain/descriptionTemplate";
+import { DEFAULT_CONTENT_SETTINGS, type ContentSettings } from "./domain/idRules";
 import { buildExportDescriptionText } from "./domain/exportText";
 import { buildImportDescriptionText } from "./domain/importText";
 import { postExportPayload, type ExportResult, type MechanicRowUpdate } from "./import/sheetSource";
@@ -64,6 +65,7 @@ import {
     updateTranslationOverrideRemote,
     replaceExportedOverridesRemote,
     replaceTranslationOverridesRemote,
+    updateContentSettingsRemote,
     subscribeGlossary,
     replaceGlossaryRemote,
     subscribeTagIcons,
@@ -179,6 +181,16 @@ export class GameStore {
 
     /** Depth coefficients + balance constants — see BalancePage's "Константы" tab and domain/balance.ts. */
     balanceConfig: BalanceConfig = DEFAULT_BALANCE_CONFIG;
+
+    /** Editor-only authoring preferences (id rules) — see domain/idRules.ts. */
+    contentSettings: ContentSettings = DEFAULT_CONTENT_SETTINGS;
+
+    /**
+     * Items created on the site that the sheet has never seen. Only these can be renamed: the id is the key every
+     * table joins on, so once a row exists in the sheet under that id, changing it here would orphan the sheet row
+     * rather than rename it. Cleared per id on a successful export and on any import that brings the id back.
+     */
+    locallyCreatedItemIds: Set<string> = new Set();
 
     /** User-edited name/description text, keyed by translation key — wins over the imported translations table
      *  for the same key. See getTranslation()/setTranslationOverride(). */
@@ -376,6 +388,7 @@ export class GameStore {
             this.translationOverrides = shared.translationOverrides;
             this.exportedOverrides = shared.exportedOverrides;
             this.balanceConfig = shared.balanceConfig;
+            this.contentSettings = shared.contentSettings;
             // Only once EVERY underlying shared/* doc has delivered its first snapshot — not just whichever one
             // happened to arrive first — so a sharedReady-gated one-time form remount (ConstantsTab, SettingsPage)
             // never seeds itself from a field that hasn't actually loaded yet. See subscribeShared's own doc.
@@ -492,6 +505,9 @@ export class GameStore {
         // node around), so bail out when nothing actually changed — otherwise every item would count as a
         // pending export forever and each export would rewrite untouched sheet rows.
         if (existing && canonicalStringify(existing) === canonicalStringify(next)) return;
+
+        // Created here, so the sheet has never seen it — that's what makes its id still renameable.
+        if (!existing) this.locallyCreatedItemIds.add(trimmedId);
 
         this.allItems = mergeById(this.allItems, [next]);
         this.rebuildDerivedCaches();
@@ -1095,6 +1111,8 @@ export class GameStore {
         });
 
         if (result.ok) {
+            // The sheet now has rows under these ids, so renaming them here would orphan those rows.
+            for (const itemId of this.dirtyItemIds) this.locallyCreatedItemIds.delete(itemId);
             this.dirtyItemIds = new Set();
             this.newMechanicRowIds = new Set();
             this.editedMechanicRowIds = new Set();
@@ -1699,6 +1717,94 @@ export class GameStore {
         return `${prefix}${next}`;
     }
 
+    /** Whether this item's id can still be changed — see locallyCreatedItemIds. */
+    canRenameItem(itemId: string): boolean {
+        return this.locallyCreatedItemIds.has(itemId);
+    }
+
+    /**
+     * Renames an item that only exists on the site. The id is the key every table joins on, so this has to move
+     * every reference with it: the item's own row and translation keys, its mechanic rows, its place in an
+     * upgrade chain, replace rules on either side, its manual icon, and any mechanic field pointing at it by id
+     * (UseTargetIds and friends). Refuses when the sheet already knows the id, or the new one is taken.
+     */
+    renameItem(oldId: string, newId: string): { ok: boolean; error?: string } {
+        const trimmed = newId.trim();
+        const item = this.getItem(oldId);
+
+        if (!item) return { ok: false, error: "Предмет не найден" };
+        if (!trimmed) return { ok: false, error: "Id не может быть пустым" };
+        if (trimmed === oldId) return { ok: true };
+        if (this.getItem(trimmed)) return { ok: false, error: "Такой id уже есть" };
+        if (!this.canRenameItem(oldId)) {
+            return { ok: false, error: "Предмет уже выгружен в таблицу — id менять нельзя" };
+        }
+
+        // Translation keys follow the id by convention (`<id>` / `<id>_desc`), so carry the texts across rather
+        // than leaving them stranded under the old keys.
+        const oldNameKey = item.nameKey ?? oldId;
+        const oldDescKey = item.descKey ?? `${oldId}_desc`;
+        const name = this.translationOverrides[oldNameKey] ?? this.getTranslation(oldNameKey);
+        const description = this.translationOverrides[oldDescKey] ?? this.getTranslation(oldDescKey);
+
+        this.allItems = this.allItems.map((entry) =>
+            entry.id === oldId
+                ? {
+                      ...entry,
+                      id: trimmed,
+                      nameKey: trimmed,
+                      descKey: `${trimmed}_desc`,
+                      raw: { ...entry.raw, ItemId: trimmed },
+                  }
+                : entry
+        );
+
+        this.mechanics = this.mechanics.map((row) => {
+            const fields = Object.fromEntries(
+                Object.entries(row.fields).map(([column, value]) => [column, value === oldId ? trimmed : value])
+            );
+            return row.itemId === oldId ? { ...row, itemId: trimmed, fields } : { ...row, fields };
+        });
+
+        this.upgradeChains = this.upgradeChains.map((chain) =>
+            chain.itemIds.includes(oldId)
+                ? { ...chain, itemIds: chain.itemIds.map((tierId) => (tierId === oldId ? trimmed : tierId)) }
+                : chain
+        );
+        for (const chain of this.upgradeChains) {
+            if (chain.itemIds.includes(trimmed)) this.dirtyUpgradeChainIds.add(chain.id);
+        }
+
+        this.replaceRules = this.replaceRules.map((rule) => ({
+            ...rule,
+            itemIdToReplace: rule.itemIdToReplace === oldId ? trimmed : rule.itemIdToReplace,
+            replacementItem: rule.replacementItem === oldId ? trimmed : rule.replacementItem,
+        }));
+        if (this.dirtyReplaceSourceIds.delete(oldId)) this.dirtyReplaceSourceIds.add(trimmed);
+
+        const icon = this.itemIcons[oldId];
+
+        this.locallyCreatedItemIds.delete(oldId);
+        this.locallyCreatedItemIds.add(trimmed);
+        this.dirtyItemIds.delete(oldId);
+        this.dirtyItemIds.add(trimmed);
+
+        this.rebuildDerivedCaches();
+        this.notify();
+
+        // Firestore-backed side data moves after the local state, each through its own point-update.
+        if (name) this.setTranslationOverride(trimmed, name);
+        if (description) this.setTranslationOverride(`${trimmed}_desc`, description);
+        this.setTranslationOverride(oldNameKey, "");
+        this.setTranslationOverride(oldDescKey, "");
+        if (icon) {
+            this.setItemIcon(trimmed, icon);
+            this.setItemIcon(oldId, "");
+        }
+
+        return { ok: true };
+    }
+
     /** Adds an empty mechanic row of `table` to an item. Its id is site-generated, so the export appends it. */
     addMechanicRow(itemId: string, table: MechanicTableName): MechanicRow {
         const row: MechanicRow = { id: `content:new:${table}:${itemId}:${this.nextRowSeq++}`, table, itemId, fields: {} };
@@ -1825,9 +1931,16 @@ export class GameStore {
         );
     }
 
+    /** An id the sheet now supplies isn't a local draft any more, however it got into the set — so its row
+     *  exists upstream and renaming it here would orphan that row. Keeps canRenameItem() honest across imports. */
+    private forgetLocallyCreated(importedItems: Item[]): void {
+        for (const item of importedItems) this.locallyCreatedItemIds.delete(item.id);
+    }
+
     private applyImportResult(result: ImportResult, options?: { merge?: boolean; scope?: "config" | "translations" }): void {
         if (options?.merge) {
             this.allItems = mergeById(this.allItems, result.data.items);
+            this.forgetLocallyCreated(result.data.items);
             this.translations = mergeByKey(this.translations, this.reverseImportedIcons(result.data.translations));
             this.mechanics = mergeById(this.mechanics, result.data.mechanics);
             this.upgradeChains = mergeById(this.upgradeChains, result.data.upgradeChains);
@@ -1842,6 +1955,7 @@ export class GameStore {
         } else {
             if (options?.scope !== "translations") {
                 this.allItems = result.data.items;
+                this.forgetLocallyCreated(result.data.items);
                 this.mechanics = result.data.mechanics;
                 this.upgradeChains = result.data.upgradeChains;
                 this.rounds = result.data.rounds;
@@ -2147,6 +2261,14 @@ export class GameStore {
         );
     }
 
+    setContentSettings(settings: ContentSettings): void {
+        this.contentSettings = settings;
+        this.notify();
+        void updateContentSettingsRemote(settings).catch((error) =>
+            console.error("setContentSettings → Firestore", error)
+        );
+    }
+
     setBalanceConfig(config: BalanceConfig): void {
         this.balanceConfig = config;
         this.notify();
@@ -2287,6 +2409,7 @@ export class GameStore {
                 translationOverrides: payload.translationOverrides,
                 exportedOverrides: payload.exportedOverrides,
                 balanceConfig: payload.balanceConfig,
+                contentSettings: this.contentSettings,
                 deckNames: payload.deckNames,
                 sprintStageCounts: payload.sprintStageCounts,
             }),
@@ -2340,6 +2463,7 @@ export class GameStore {
                 translationOverrides: state.translationOverrides,
                 exportedOverrides: state.exportedOverrides,
                 balanceConfig: state.balanceConfig,
+                contentSettings: this.contentSettings,
                 deckNames: state.deckNames,
                 sprintStageCounts: state.sprintStageCounts,
             }),

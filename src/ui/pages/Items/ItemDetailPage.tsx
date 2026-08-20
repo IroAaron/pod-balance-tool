@@ -14,6 +14,7 @@ import ItemParamsSection from "./sections/ItemParamsSection";
 import ItemMechanicsSection from "./sections/ItemMechanicsSection";
 import ItemUpgradeChainSection from "./sections/ItemUpgradeChainSection";
 import ItemReplacesSection from "./sections/ItemReplacesSection";
+import ItemIdField from "./sections/ItemIdField";
 
 type Props = {
     /** Overrides the route param — set when rendered inside DetailModal (an "internal window") instead of as a full page. */
@@ -169,10 +170,7 @@ export default function ItemDetailPage({ id: idProp }: Props = {}) {
                             </Stack>
                         )}
 
-                        <Typography variant="body2" color="text.secondary">
-                            {item.id}
-                            {item.itemType ? ` · ${item.itemType}` : ""}
-                        </Typography>
+                        <ItemIdField item={item} inModal={inModal} />
 
                         {editingDescription ? (
                             <Stack spacing={1} sx={{ mt: 2, maxWidth: 600 }}>

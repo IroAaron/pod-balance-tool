@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import { ITEM_KINDS, type ItemKind } from "../../components/content/itemSchema";
+import { applyIdRules } from "../../../core/domain/idRules";
 
 interface Props {
     open: boolean;
@@ -30,17 +31,18 @@ export default function NewItemDialog({ open, onClose }: Props) {
     const [id, setId] = useState("");
     const [itemType, setItemType] = useState<ItemKind>("Card");
 
-    const trimmed = id.trim();
-    const taken = Boolean(trimmed) && Boolean(store.getItem(trimmed));
+    // The rules can rewrite the id, so uniqueness is checked against what will actually be created.
+    const { id: finalId, applied } = applyIdRules(id, itemType, store.contentSettings.validateIdsOnCreate);
+    const taken = Boolean(finalId) && Boolean(store.getItem(finalId));
 
     const create = () => {
-        if (!trimmed || taken) return;
-        store.upsertItem(trimmed, itemType, { tags: [] });
+        if (!finalId || taken) return;
+        store.upsertItem(finalId, itemType, { tags: [] });
         // The name is what lists show; without it the item would appear as its bare id.
-        store.setTranslationOverride(trimmed, trimmed);
+        store.setTranslationOverride(finalId, finalId);
         onClose();
         setId("");
-        navigate(`/items/${encodeURIComponent(trimmed)}`);
+        navigate(`/items/${encodeURIComponent(finalId)}`);
     };
 
     return (
@@ -57,7 +59,7 @@ export default function NewItemDialog({ open, onClose }: Props) {
                         error={taken}
                         helperText={
                             taken
-                                ? "Такой id уже есть — он должен быть уникальным."
+                                ? `«${finalId}» уже существует — id должен быть уникальным.`
                                 : "Как в таблице: латиницей, без пробелов. Например c_chel_money_1."
                         }
                         onKeyDown={(event) => {
@@ -83,6 +85,14 @@ export default function NewItemDialog({ open, onClose }: Props) {
                         ))}
                     </TextField>
 
+                    {applied.length > 0 && (
+                        <Alert severity="info">
+                            Будет создан как <code>{finalId}</code> — сработала проверка id: {applied[0].description}
+                            {applied.length > 1 ? ` (+ ещё правил: ${applied.length - 1})` : ""} Отключается в
+                            «Настройках текста».
+                        </Alert>
+                    )}
+
                     <Alert severity="info">
                         Предмет появится сразу на сайте. В таблицу конфигурации он уйдёт при экспорте на странице
                         «Источники».
@@ -91,7 +101,7 @@ export default function NewItemDialog({ open, onClose }: Props) {
             </DialogContent>
             <DialogActions>
                 <Button onClick={onClose}>Отмена</Button>
-                <Button variant="contained" disabled={!trimmed || taken} onClick={create}>
+                <Button variant="contained" disabled={!finalId || taken} onClick={create}>
                     Создать и открыть
                 </Button>
             </DialogActions>

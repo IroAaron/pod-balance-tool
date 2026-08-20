@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Box, Button, MenuItem, Paper, Slider, Stack, TextField, Typography } from "@mui/material";
+import { Box, Button, Checkbox, FormControlLabel, MenuItem, Paper, Slider, Stack, TextField, Typography } from "@mui/material";
 import { useStore } from "../../hooks/useStore";
 import ItemDescription from "../../components/ItemDescription";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionMode } from "../../../core/domain/descriptionTemplate";
+import { ID_RULES } from "../../../core/domain/idRules";
 import type { Item } from "../../../core/models/Item";
 
 const PREVIEW_ITEM: Item = {
@@ -154,6 +155,40 @@ function SettingsForm() {
                             Сбросить к значениям по умолчанию
                         </Button>
                     </Box>
+                </Stack>
+            </Paper>
+
+            <Paper sx={{ p: 3 }}>
+                <Stack spacing={2}>
+                    <Typography variant="h6">Создание контента</Typography>
+
+                    <FormControlLabel
+                        control={
+                            <Checkbox
+                                checked={store.contentSettings.validateIdsOnCreate}
+                                onChange={(event) =>
+                                    store.setContentSettings({
+                                        ...store.contentSettings,
+                                        validateIdsOnCreate: event.target.checked,
+                                    })
+                                }
+                            />
+                        }
+                        label="Проверка корректности id при создании сущности"
+                    />
+
+                    <Typography variant="body2" color="text.secondary">
+                        Правила приводят id к соглашениям, принятым в таблице. При создании показывается, каким
+                        станет id, — молча ничего не меняется.
+                    </Typography>
+
+                    <Stack component="ol" spacing={1} sx={{ pl: 3, m: 0 }}>
+                        {ID_RULES.map((rule) => (
+                            <Typography key={rule.description} component="li" variant="body2" color="text.secondary">
+                                {rule.description}
+                            </Typography>
+                        ))}
+                    </Stack>
                 </Stack>
             </Paper>
 

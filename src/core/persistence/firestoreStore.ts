@@ -20,6 +20,7 @@ import type { TagIcon } from "../models/TagIcon";
 import { DEFAULT_BALANCE_CONFIG, type BalanceConfig } from "../models/BalanceConfig";
 import type { SourceUrls } from "./localStore";
 import { DEFAULT_DESCRIPTION_SETTINGS, type DescriptionSettings } from "../domain/descriptionTemplate";
+import { DEFAULT_CONTENT_SETTINGS, type ContentSettings } from "../domain/idRules";
 import { db } from "./firebaseClient";
 import {
     BALANCE_SAVE_PAYLOAD_KEYS,
@@ -54,6 +55,9 @@ export interface SharedState {
      *  re-import (a fresh Decks/BallGroups download fully replaces those arrays, but this side-map is untouched). */
     deckNames: Record<string, string>;
 
+    /** Editor-only authoring preferences (id rules) — NEVER exported to Google Sheets. */
+    contentSettings: ContentSettings;
+
     /** Site-only "how many stage columns to show" override per Sprint id — NEVER exported (there's no MaxStages
      *  column in the real sheet). GameStore.getSprintStageCount takes the max of this and every real Stage value
      *  present, so real data is never hidden even if this override is stale. Point-updated like deckNames. */
@@ -68,6 +72,7 @@ const DEFAULT_SHARED: SharedState = {
     translationOverrides: {},
     exportedOverrides: {},
     balanceConfig: DEFAULT_BALANCE_CONFIG,
+    contentSettings: DEFAULT_CONTENT_SETTINGS,
     deckNames: {},
     sprintStageCounts: {},
 };
@@ -100,18 +105,19 @@ const SHARED_DOC_KEYS = [
     "translationOverrides",
     "exportedOverrides",
     "balanceConfig",
+    "contentSettings",
     "deckNames",
     "sprintStageCounts",
 ] as const;
 
 /**
- * Combines 9 independent `shared/*` doc subscriptions into one callback — fires on every underlying snapshot (so
+ * Combines 10 independent `shared/*` doc subscriptions into one callback — fires on every underlying snapshot (so
  * a live edit to any one field, e.g. from another collaborator, updates immediately), plus a `ready` flag that
- * only turns true once EVERY one of the 9 has delivered at least one snapshot.
+ * only turns true once EVERY one of the 10 has delivered at least one snapshot.
  *
  * `ready` matters because callers gate a one-time "seed local form state from the store" remount on it (see
  * GameStore.sharedReady, consumed by ConstantsTab/SettingsPage's `key={store.sharedReady ? ... : ...}` pattern) —
- * **before this fix**, GameStore set `sharedReady = true` on the very first of these 9 listeners to fire, not all
+ * **before this fix**, GameStore set `sharedReady = true` on the very first of these 10 listeners to fire, not all
  * of them, so a gated form could remount and seed itself from a field (e.g. `balanceConfig`) that hadn't actually
  * loaded yet, silently showing/committing stale defaults over real data. Found while verifying that restoring a
  * BalanceSave correctly repopulates `balanceConfig` — Firestore itself always had the right value, but a fresh
@@ -204,6 +210,19 @@ export function subscribeShared(onChange: (shared: SharedState, ready: boolean) 
         (error) => console.error("subscribeShared:balanceConfig", error)
     );
 
+    const unsubContentSettings = onSnapshot(
+        doc(sharedCol, "contentSettings"),
+        (snapshot) => {
+            // Merged over the default so a doc written before a new preference existed doesn't leave it undefined.
+            state.contentSettings = {
+                ...DEFAULT_SHARED.contentSettings,
+                ...(snapshot.data() as Partial<ContentSettings> | undefined),
+            };
+            emit("contentSettings");
+        },
+        (error) => console.error("subscribeShared:contentSettings", error)
+    );
+
     const unsubDeckNames = onSnapshot(
         doc(sharedCol, "deckNames"),
         (snapshot) => {
@@ -230,6 +249,7 @@ export function subscribeShared(onChange: (shared: SharedState, ready: boolean) 
         unsubTranslationOverrides();
         unsubExportedOverrides();
         unsubBalanceConfig();
+        unsubContentSettings();
         unsubDeckNames();
         unsubSprintStageCounts();
     };
@@ -398,6 +418,10 @@ export function updateDescriptionSettingsRemote(settings: DescriptionSettings): 
     return setDoc(doc(sharedCol, "descriptionSettings"), settings);
 }
 
+export function updateContentSettingsRemote(settings: ContentSettings): Promise<void> {
+    return setDoc(doc(sharedCol, "contentSettings"), settings);
+}
+
 export function updateBalanceConfigRemote(config: BalanceConfig): Promise<void> {
     return setDoc(doc(sharedCol, "balanceConfig"), config);
 }
@@ -431,6 +455,7 @@ export function replaceSharedState(shared: SharedState): Promise<void> {
     batch.set(doc(sharedCol, "translationOverrides"), shared.translationOverrides);
     batch.set(doc(sharedCol, "exportedOverrides"), shared.exportedOverrides);
     batch.set(doc(sharedCol, "balanceConfig"), shared.balanceConfig);
+    batch.set(doc(sharedCol, "contentSettings"), shared.contentSettings);
     batch.set(doc(sharedCol, "deckNames"), shared.deckNames);
     batch.set(doc(sharedCol, "sprintStageCounts"), shared.sprintStageCounts);
     return batch.commit();
