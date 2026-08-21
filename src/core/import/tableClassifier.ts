@@ -15,6 +15,7 @@ export type TableType =
     | "Balls"
     | "BallGroups"
     | "Sprints"
+    | "ShopSettings"
     | "Enums"
     | "ReplaceItem"
     | "ReplaceOnTrigger";
@@ -89,6 +90,11 @@ export function classifyTable(table: ParsedTable): ClassifiedTable {
     // SprintId doesn't match findIdColumn's exact "id"/"itemid" check below either — own branch, same reasoning.
     if (hasColumn(headers, "SprintId")) {
         return { type: "Sprints", table };
+    }
+
+    // ShopId, same story — its own branch rather than the generic id-column path below.
+    if (hasColumn(headers, "ShopId")) {
+        return { type: "ShopSettings", table };
     }
 
     // Balls' id column is "ItemId" (matches findIdColumn below) and it has a "MetaTag" column (contains "tag") —

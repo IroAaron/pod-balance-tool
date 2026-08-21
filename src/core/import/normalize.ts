@@ -10,6 +10,7 @@ import type { Pack, PackSourceEntry } from "../models/Pack";
 import type { Ball } from "../models/Ball";
 import type { BallGroup } from "../models/BallGroup";
 import type { Sprint, SprintRound } from "../models/Sprint";
+import type { Shop, ShopPackEntry } from "../models/Shop";
 import type { ReplaceRule, ReplaceRuleSource } from "../models/ReplaceRule";
 import { isIntentionallyUnsupportedTable, tableNameOf } from "./tableNames";
 
@@ -33,6 +34,8 @@ export interface NormalizedData {
     ballGroups: BallGroup[];
 
     sprints: Sprint[];
+
+    shops: Shop[];
 
     replaceRules: ReplaceRule[];
 
@@ -355,13 +358,61 @@ function normalizeBallGroupsTable(table: ParsedTable): BallGroup[] {
 }
 
 /**
+ * ShopSettings is grouped by ShopId like Decks/Packs, but its two id columns are independent lists that happen
+ * to share rows: `HousesInShop` (house packs) and `PacksInShop`+`PacksWeights` (card packs). A row may fill
+ * either or both, so the two are harvested separately rather than as one entry per row — a shop with three
+ * house packs and nine card packs is nine rows, the first three of which fill both columns.
+ */
+function normalizeShopSettingsTable(table: ParsedTable): Shop[] {
+    const shopIdColumn = findColumn(table.headers, ["ShopId"]);
+    if (!shopIdColumn) return [];
+
+    const housesColumn = findColumn(table.headers, ["HousesInShop"]);
+    const packsColumn = findColumn(table.headers, ["PacksInShop"]);
+    const weightsColumn = findColumn(table.headers, ["PacksWeights"]);
+
+    const order: string[] = [];
+    const shopsById = new Map<string, Shop>();
+    let entrySeq = 0;
+
+    for (const row of table.rows) {
+        const shopId = (row[shopIdColumn] ?? "").trim();
+        if (!shopId) continue;
+
+        if (!shopsById.has(shopId)) {
+            shopsById.set(shopId, { id: shopId, housePacks: [], cardPacks: [] });
+            order.push(shopId);
+        }
+        const shop = shopsById.get(shopId)!;
+
+        const housePackId = housesColumn ? (row[housesColumn] ?? "").trim() : "";
+        if (housePackId) {
+            shop.housePacks.push({ id: `ShopSettings:${shopId}:h${entrySeq++}`, packId: housePackId });
+        }
+
+        const cardPackId = packsColumn ? (row[packsColumn] ?? "").trim() : "";
+        if (cardPackId) {
+            const entry: ShopPackEntry = {
+                id: `ShopSettings:${shopId}:p${entrySeq++}`,
+                packId: cardPackId,
+                weight: weightsColumn ? parseOptionalNumber(row[weightsColumn]) : undefined,
+            };
+            shop.cardPacks.push(entry);
+        }
+    }
+
+    return order.map((id) => shopsById.get(id)!);
+}
+
+/**
  * Sprints combines both shapes above: narrow row-per-(SprintId, RoundNumber) entry, like Decks/Packs (grouped by
  * SprintId, one array entry per row), AND each row has its own wide repeated `RoundSettings` columns (up to 9,
  * literally same-named in the real sheet), like BallGroups' `Ball` columns — just harvested per-row instead of
  * once-per-group. `RoundNumber` itself is read only to SORT each group's rows into the right order, then
  * discarded — confirmed with the user it's purely derived from row position ("автоматически подставляется"), so
- * from here on array order alone is the source of truth (see Sprint.rounds' doc). `PacksDeck`/`Shops` columns are
- * real but confirmed out of scope with the user — deliberately never looked up here.
+ * from here on array order alone is the source of truth (see Sprint.rounds' doc). `PacksDeck` is real but out of
+ * scope; `Shops` is the round's link to ShopSettings, which is where the shop's contents now live (the old
+ * per-round `HousesInShop` column is gone — it could hold only one house pack).
  */
 function normalizeSprintsTable(table: ParsedTable): Sprint[] {
     const sprintIdColumn = findColumn(table.headers, ["SprintId"]);
@@ -373,7 +424,7 @@ function normalizeSprintsTable(table: ParsedTable): Sprint[] {
     const rewardTicketsColumn = findColumn(table.headers, ["RewardTickerts"]);
     const rewardTicketsPerBallColumn = findColumn(table.headers, ["RewardTicketsPerBall"]);
     const rewardPackColumn = findColumn(table.headers, ["RewardPack"]);
-    const housesInShopColumn = findColumn(table.headers, ["HousesInShop"]);
+    const shopsColumn = findColumn(table.headers, ["Shops"]);
     const packDeckStartColumn = findColumn(table.headers, ["PackDeckStart"]);
 
     const roundSettingsColumns = table.headers
@@ -402,7 +453,7 @@ function normalizeSprintsTable(table: ParsedTable): Sprint[] {
                 ? parseOptionalNumber(row[rewardTicketsPerBallColumn])
                 : undefined,
             rewardPackId: rewardPackColumn ? row[rewardPackColumn]?.trim() || undefined : undefined,
-            housesInShopPackId: housesInShopColumn ? row[housesInShopColumn]?.trim() || undefined : undefined,
+            shopId: shopsColumn ? row[shopsColumn]?.trim() || undefined : undefined,
             packDeckStartId: packDeckStartColumn ? row[packDeckStartColumn]?.trim() || undefined : undefined,
             roundIds: roundSettingsColumns
                 .map((column) => row[column]?.trim())
@@ -516,6 +567,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const balls: Ball[] = [];
     const ballGroups: BallGroup[] = [];
     const sprints: Sprint[] = [];
+    const shops: Shop[] = [];
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -602,6 +654,15 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
                 });
             }
             sprints.push(...normalized);
+        } else if (type === "ShopSettings") {
+            const normalized = normalizeShopSettingsTable(table);
+            if (normalized.length === 0) {
+                warnings.push({
+                    sourceName: table.sourceName,
+                    message: "Не найдена колонка ShopId — таблица магазинов пропущена",
+                });
+            }
+            shops.push(...normalized);
         } else if (type === "ReplaceItem" || type === "ReplaceOnTrigger") {
             const normalized = normalizeReplaceRuleTable(table, type);
             if (normalized.length === 0) {
@@ -658,6 +719,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             balls,
             ballGroups,
             sprints,
+            shops,
             replaceRules,
             enumValues,
         },

@@ -14,8 +14,10 @@ export interface SprintRound {
     /** Pack id — may be blank. */
     rewardPackId?: string;
 
-    /** Pack id. */
-    housesInShopPackId?: string;
+    /** ShopId — the round's shop, from the `Shops` column. What the shop offers (house packs, card packs and
+     *  their weights) lives in ShopSettings; the round only names it. Replaced the old per-round HousesInShop
+     *  column, which could only ever hold one house pack. */
+    shopId?: string;
 
     /** Pack id. */
     packDeckStartId?: string;

@@ -49,6 +49,35 @@ function NumberField({
  *  instance (`useAutocomplete`) even for a small fixed list with no need for free-text search; each SprintRoundCard
  *  used 3 of these, so across a whole stage board that mount/re-render cost added up to a real, reported lag both
  *  when first opening a sprint and while dragging (every dragover-triggered re-render recomputed all of them). */
+/** The round's shop — what it sells lives in ShopSettings, edited on the «Магазины» page. */
+function ShopSelect({
+    value,
+    onCommit,
+}: {
+    value: string | undefined;
+    onCommit: (value: string | undefined) => void;
+}) {
+    const store = useStore();
+    return (
+        <TextField
+            select
+            size="small"
+            label="Shops (магазин раунда)"
+            value={value ?? ""}
+            onChange={(event) => onCommit(event.target.value || undefined)}
+        >
+            <MenuItem value="">
+                <em>Нет</em>
+            </MenuItem>
+            {store.shops.map((shop) => (
+                <MenuItem key={shop.id} value={shop.id}>
+                    {shop.id}
+                </MenuItem>
+            ))}
+        </TextField>
+    );
+}
+
 function PackSelect({
     label,
     value,
@@ -101,7 +130,7 @@ type Props = {
     isDragging?: boolean;
 };
 
-/** One sprint-round entry — Quota/RewardTickerts/RewardTicketsPerBall (NumberField), RewardPack/HousesInShop/
+/** One sprint-round entry — Quota/RewardTickerts/RewardTicketsPerBall (NumberField), RewardPack/Shops/
  *  PackDeckStart (PackSelect, clearable, over store.packs), the roundIds pool (Chip list + add-Autocomplete over
  *  store.rounds, capped at 9 — same pattern as RoundDetailPage's deckBalls editor), and a "→ Этап" quick-move
  *  Select — the accessible/testable fallback for the stage board's native drag-and-drop (see SprintDetailPage).
@@ -187,11 +216,7 @@ const SprintRoundCard = memo(function SprintRoundCard({
                     onCommit={(v) => onCommit(round.id, { rewardPackId: v })}
                 />
 
-                <PackSelect
-                    label="HousesInShop (домики в магазине)"
-                    value={round.housesInShopPackId}
-                    onCommit={(v) => onCommit(round.id, { housesInShopPackId: v })}
-                />
+                <ShopSelect value={round.shopId} onCommit={(v) => onCommit(round.id, { shopId: v })} />
 
                 <PackSelect
                     label="PackDeckStart (колода стартового поля)"

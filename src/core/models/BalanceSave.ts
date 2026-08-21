@@ -8,6 +8,7 @@ import type { Pack } from "./Pack";
 import type { Ball } from "./Ball";
 import type { BallGroup } from "./BallGroup";
 import type { Sprint } from "./Sprint";
+import type { Shop } from "./Shop";
 import type { ReplaceRule } from "./ReplaceRule";
 import type { Build } from "./Build";
 import type { GlossaryEntry } from "./GlossaryEntry";
@@ -57,6 +58,8 @@ export interface BalanceSavePayload {
     ballGroups: BallGroup[];
 
     sprints: Sprint[];
+
+    shops: Shop[];
 
     replaceRules: ReplaceRule[];
 

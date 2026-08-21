@@ -185,6 +185,10 @@ export interface ExportPayload {
      *  includes a freshly-computed `RoundNumber` (1-indexed row position) on every row. An empty array for a
      *  SprintId means "delete this sprint". */
     sprints?: Record<string, { columns: Record<string, string>; repeatedValues: string[] }[]>;
+
+    /** Shops page edits — ShopId -> full row set for that shop (same replace-by-group-id shape as `decks`, see
+     *  GameStore.exportShopChanges's doc). An empty array for a ShopId means "delete this shop". */
+    shops?: Record<string, Record<string, string>[]>;
 }
 
 export interface ExportResult {

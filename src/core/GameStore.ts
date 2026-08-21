@@ -9,6 +9,7 @@ import type { Pack, PackSourceEntry } from "./models/Pack";
 import type { Ball } from "./models/Ball";
 import type { BallGroup } from "./models/BallGroup";
 import type { Sprint } from "./models/Sprint";
+import type { Shop } from "./models/Shop";
 import type { ReplaceRule } from "./models/ReplaceRule";
 import type { GlossaryEntry } from "./models/GlossaryEntry";
 import type { TagIcon } from "./models/TagIcon";
@@ -156,6 +157,9 @@ export class GameStore {
 
     sprints: Sprint[] = [];
 
+    /** ShopSettings rows, grouped by ShopId. A round points at one of these via its Sprint's `Shops` column. */
+    shops: Shop[] = [];
+
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
@@ -265,6 +269,13 @@ export class GameStore {
      *  blueprintDeletedDecks (no source-table lookup needed, Packs has only one target sheet). */
     blueprintDeletedPackIds: Set<string> = new Set();
 
+    /** Shop ids created/edited via upsertShop («Магазины») since the last successful exportShopChanges() — same
+     *  in-memory-only framing as the Pack/Deck sets above. Independent export flow/button. */
+    dirtyShopIds: Set<string> = new Set();
+
+    /** Shop ids removed via deleteShop — exported as "clear every row for this ShopId". */
+    deletedShopIds: Set<string> = new Set();
+
     /** Ball ids created/edited via upsertBall (Balls page) since the last successful exportBallChanges() — same
      *  in-memory-only framing as Pack/Deck above. Independent export flow/button. */
     blueprintDirtyBallIds: Set<string> = new Set();
@@ -365,6 +376,7 @@ export class GameStore {
             this.balls = cache.importCache.balls ?? [];
             this.ballGroups = cache.importCache.ballGroups ?? [];
             this.sprints = cache.importCache.sprints ?? [];
+            this.shops = cache.importCache.shops ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
         }
@@ -628,6 +640,36 @@ export class GameStore {
         const trimmedId = id.trim();
         if (!trimmedId || this.getPack(trimmedId)) return;
         this.upsertPack({ id: trimmedId, nameKey: trimmedId, descKey: `${trimmedId}_desc`, sources: [] });
+    }
+
+    getShop(id: string): Shop | undefined {
+        return this.shops.find((shop) => shop.id === id);
+    }
+
+    /** Full-replace upsert for a whole shop — same convention as upsertDeck/upsertPack. */
+    upsertShop(shop: Shop): void {
+        this.shops = mergeById(this.shops, [shop]);
+        this.dirtyShopIds.add(shop.id);
+        this.deletedShopIds.delete(shop.id);
+        this.notify();
+    }
+
+    createShop(id: string): void {
+        const trimmedId = id.trim();
+        if (!trimmedId || this.getShop(trimmedId)) return;
+        this.upsertShop({ id: trimmedId, housePacks: [], cardPacks: [] });
+    }
+
+    deleteShop(id: string): void {
+        if (!this.getShop(id)) return;
+        this.deletedShopIds.add(id);
+        this.dirtyShopIds.delete(id);
+        this.shops = this.shops.filter((shop) => shop.id !== id);
+        this.notify();
+    }
+
+    get shopPendingExportCount(): number {
+        return this.dirtyShopIds.size + this.deletedShopIds.size;
     }
 
     deletePack(id: string): void {
@@ -1166,6 +1208,59 @@ export class GameStore {
     }
 
     /**
+     * Writes the «Магазины» edits back to ShopSettings.
+     *
+     * A shop is a *variable-size group of rows* sharing one ShopId, so it exports the same way decks and packs
+     * do — every row for that ShopId is deleted and the current set written fresh (replaceRowsByGroupId), which
+     * is also how a removed pack disappears; there's no per-row key to patch in place.
+     *
+     * The subtlety is that the sheet's two id columns are independent lists that merely share rows: a shop with
+     * three house packs and nine card packs is nine rows, and only the first three carry a HousesInShop value.
+     * So the row count is the longer of the two lists, and each column is filled from its own list by index.
+     */
+    async exportShopChanges(): Promise<ExportResult> {
+        const token = import.meta.env.VITE_SHEETS_EXPORT_TOKEN;
+        if (!token) {
+            throw new Error("VITE_SHEETS_EXPORT_TOKEN не задан в .env.local — см. .env.example");
+        }
+        if (!this.sources.configUrl) {
+            throw new Error("Не задан источник конфигурации на странице «Источники»");
+        }
+
+        const shops: NonNullable<Parameters<typeof postExportPayload>[1]["shops"]> = {};
+
+        for (const shopId of this.dirtyShopIds) {
+            const shop = this.getShop(shopId);
+            if (!shop) continue;
+
+            // A slot added but not yet filled in has no packId — drop it rather than writing a blank cell.
+            const housePacks = shop.housePacks.filter((entry) => entry.packId);
+            const cardPacks = shop.cardPacks.filter((entry) => entry.packId);
+
+            const rowCount = Math.max(housePacks.length, cardPacks.length);
+            shops[shop.id] = Array.from({ length: rowCount }, (_unused, index) => ({
+                HousesInShop: housePacks[index]?.packId ?? "",
+                PacksInShop: cardPacks[index]?.packId ?? "",
+                PacksWeights: cardPacks[index]?.weight?.toString() ?? "",
+            }));
+        }
+
+        for (const shopId of this.deletedShopIds) {
+            shops[shopId] = [];
+        }
+
+        const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, shops });
+
+        if (result.ok) {
+            this.dirtyShopIds = new Set();
+            this.deletedShopIds = new Set();
+            this.notify();
+        }
+
+        return result;
+    }
+
+    /**
      * Sends Decks-page edits (Decks/DecksShop/Ball decks) to the same Apps Script `doPost` endpoint. Posts to
      * `sources.configUrl`, same reasoning as exportContentChanges — decks live in the config sheet, not
      * translations.
@@ -1426,7 +1521,7 @@ export class GameStore {
      * Sends Sprints-page edits to the same Apps Script `doPost` endpoint, reusing the `decks`/`packs` replace-by-
      * group-id shape — but Sprints uniquely needs BOTH that shape AND the repeated-column-spreading shape
      * `ballGroups`/`rounds.deckBalls` use, on the SAME row: each row has ordinary one-column fields (Quota/Stage/
-     * RewardTickerts/RewardTicketsPerBall/RewardPack/HousesInShop/PackDeckStart) plus the sheet's own repeated
+     * RewardTickerts/RewardTicketsPerBall/RewardPack/Shops/PackDeckStart) plus the sheet's own repeated
      * `RoundSettings` columns (the round-id pool). Neither `replaceRowsByGroupId` nor `replaceWideGroupRow` alone
      * fits, so this uses the new `replaceRowsByGroupIdWithRepeatedColumn` helper (docs/apps-script-export.gs),
      * which combines both.
@@ -1456,7 +1551,7 @@ export class GameStore {
                     RewardTickerts: round.rewardTickets?.toString() ?? "",
                     RewardTicketsPerBall: round.rewardTicketsPerBall?.toString() ?? "",
                     RewardPack: round.rewardPackId ?? "",
-                    HousesInShop: round.housesInShopPackId ?? "",
+                    Shops: round.shopId ?? "",
                     PackDeckStart: round.packDeckStartId ?? "",
                 },
                 repeatedValues: round.roundIds,
@@ -1980,6 +2075,7 @@ export class GameStore {
             this.balls = mergeById(this.balls, result.data.balls);
             this.ballGroups = mergeById(this.ballGroups, result.data.ballGroups);
             this.sprints = mergeById(this.sprints, result.data.sprints);
+            this.shops = mergeById(this.shops, result.data.shops);
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
@@ -1994,6 +2090,7 @@ export class GameStore {
                 this.balls = result.data.balls;
                 this.ballGroups = result.data.ballGroups;
                 this.sprints = result.data.sprints;
+                this.shops = result.data.shops;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
             }
@@ -2017,6 +2114,7 @@ export class GameStore {
             balls: this.balls,
             ballGroups: this.ballGroups,
             sprints: this.sprints,
+            shops: this.shops,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
         });
@@ -2085,6 +2183,7 @@ export class GameStore {
         this.balls = [];
         this.ballGroups = [];
         this.sprints = [];
+        this.shops = [];
         this.replaceRules = [];
         this.enumValues = {};
         this.rebuildDerivedCaches();
@@ -2343,6 +2442,7 @@ export class GameStore {
             balls: this.balls,
             ballGroups: this.ballGroups,
             sprints: this.sprints,
+            shops: this.shops,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
             builds: this.builds,
@@ -2407,6 +2507,7 @@ export class GameStore {
         this.balls = payload.balls;
         this.ballGroups = payload.ballGroups;
         this.sprints = payload.sprints;
+        this.shops = payload.shops ?? [];
         this.replaceRules = payload.replaceRules;
         this.enumValues = payload.enumValues;
         this.rebuildDerivedCaches();
@@ -2422,6 +2523,7 @@ export class GameStore {
             balls: payload.balls,
             ballGroups: payload.ballGroups,
             sprints: payload.sprints,
+            shops: payload.shops,
             replaceRules: payload.replaceRules,
             enumValues: payload.enumValues,
         });
@@ -2472,6 +2574,7 @@ export class GameStore {
                 balls: this.balls,
                 ballGroups: this.ballGroups,
                 sprints: this.sprints,
+                shops: this.shops,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
             },
@@ -2511,6 +2614,7 @@ export class GameStore {
             this.balls = state.importCache.balls ?? [];
             this.ballGroups = state.importCache.ballGroups ?? [];
             this.sprints = state.importCache.sprints ?? [];
+            this.shops = state.importCache.shops ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);

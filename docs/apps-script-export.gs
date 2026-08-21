@@ -55,6 +55,9 @@
 //     packs?: {                                    // Packs page — REPLACES every row for a given PackId
 //       [packId: string]: { [column: string]: string }[],
 //     },
+//     shops?: {                                    // Магазины page — REPLACES every row for a given ShopId
+//       [shopId: string]: { [column: string]: string }[],
+//     },
 //     balls?: {                                    // Balls page — upserted by the sheet's `ItemId` column
 //       [itemId: string]: { [column: string]: string },
 //     },
@@ -152,6 +155,13 @@ function doPost(e) {
         // stable per-row key) — reuses the exact same helper, just against the Packs sheet/PackId column.
         if (body.packs) {
             result.updated.Packs = replaceRowsByGroupId(ss, "Packs", "PackId", body.packs, result);
+        }
+
+        // ShopSettings is grouped-by-id like Decks/Packs: several rows per ShopId, no per-row key. Its two id
+        // columns (HousesInShop / PacksInShop) are independent lists that share rows, but the site already
+        // flattens them into whole rows before sending, so the plain group-replace helper fits unchanged.
+        if (body.shops) {
+            result.updated.ShopSettings = replaceRowsByGroupId(ss, "ShopSettings", "ShopId", body.shops, result);
         }
 
         // Balls is a flat row-per-object table like Items — reuses upsertFullRows as-is, no new helper needed.
