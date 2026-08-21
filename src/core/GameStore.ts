@@ -1251,6 +1251,19 @@ export class GameStore {
 
         const result = await postExportPayload(this.sources.configUrl, { token, names: {}, descriptions: {}, shops });
 
+        // An Apps Script deployment that predates the `shops` branch ignores the key and still answers ok — the
+        // rows silently never arrive, and clearing the dirty set here would lose them. A run that really wrote
+        // always reports the sheet it touched, so a missing key means the deployment is stale, not that the
+        // export succeeded.
+        if (result.ok && Object.keys(shops).length > 0 && result.updated?.ShopSettings === undefined) {
+            return {
+                ok: false,
+                error:
+                    "Скрипт таблицы не знает про магазины — в ответе нет ShopSettings. " +
+                    "Обновите Apps Script из docs/apps-script-export.gs и переразверните его (Deploy → Manage deployments → New version).",
+            };
+        }
+
         if (result.ok) {
             this.dirtyShopIds = new Set();
             this.deletedShopIds = new Set();

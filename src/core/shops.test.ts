@@ -3,8 +3,17 @@ import { classifyTable } from "./import/tableClassifier";
 import { normalizeClassifiedTables } from "./import/normalize";
 import type { ParsedTable } from "./import/types";
 
+// The default answer mimics a current Apps Script: ok, and reporting the sheet it touched. Tests that care
+// about a stale deployment override it per-call.
 const postExportPayload = vi.hoisted(() =>
-    vi.fn(async (_url: string, _payload: unknown) => ({ ok: true }) as { ok: boolean; error?: string })
+    vi.fn(
+        async (_url: string, _payload: unknown) =>
+            ({ ok: true, updated: { ShopSettings: 1 } }) as {
+                ok: boolean;
+                error?: string;
+                updated?: Record<string, number>;
+            }
+    )
 );
 
 vi.mock("./import/sheetSource", async (importOriginal) => ({
@@ -146,6 +155,31 @@ describe("exporting shops", () => {
         expect(store.shopPendingExportCount).toBe(1);
 
         await store.exportShopChanges();
+        expect(store.shopPendingExportCount).toBe(0);
+    });
+
+    it("treats a stale Apps Script — ok, but no ShopSettings in `updated` — as a failure", async () => {
+        const store = makeStore();
+        store.upsertShop({ id: "shop_1", housePacks: [{ id: "h", packId: "houses_common" }], cardPacks: [] });
+
+        // What a deployment predating the `shops` branch answers: it ignores the key and reports success.
+        postExportPayload.mockResolvedValueOnce({ ok: true, updated: { item_name: 0 } } as never);
+        const result = await store.exportShopChanges();
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain("ShopSettings");
+        // Crucially the edits are still pending, not silently dropped.
+        expect(store.shopPendingExportCount).toBe(1);
+    });
+
+    it("accepts a run that reports ShopSettings, even when it wrote zero rows", async () => {
+        const store = makeStore();
+        store.upsertShop({ id: "shop_1", housePacks: [], cardPacks: [] });
+
+        postExportPayload.mockResolvedValueOnce({ ok: true, updated: { ShopSettings: 0 } } as never);
+        const result = await store.exportShopChanges();
+
+        expect(result.ok).toBe(true);
         expect(store.shopPendingExportCount).toBe(0);
     });
 
