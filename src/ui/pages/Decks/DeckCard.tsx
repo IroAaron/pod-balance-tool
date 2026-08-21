@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
+    Box,
     Button,
+    Collapse,
     Dialog,
     DialogActions,
     DialogContent,
@@ -12,45 +14,53 @@ import {
     Typography,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { useStore } from "../../hooks/useStore";
-import DeckEntryRow from "./DeckEntryRow";
+import DeckEntriesEditor from "./DeckEntriesEditor";
 import DeckNameField from "./DeckNameField";
-import type { Deck, DeckEntry } from "../../../core/models/Deck";
+import type { Deck } from "../../../core/models/Deck";
 
 type Props = {
     deck: Deck;
+
+    defaultExpanded?: boolean;
 };
 
-export default function DeckCard({ deck }: Props) {
+/**
+ * A deck, collapsed by default.
+ *
+ * DecksShop holds 355 rows across 21 decks, and each row carries an Autocomplete over all ~320 items; rendering
+ * every deck's rows at once is what made that tab crawl. Collapsed cards cost nothing, and 21 of them is a far
+ * more usable list than one 355-row wall anyway.
+ */
+export default function DeckCard({ deck, defaultExpanded = false }: Props) {
     const store = useStore();
     const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-    const updateEntries = (nextEntries: DeckEntry[]) => {
-        store.upsertDeck({ ...deck, entries: nextEntries });
-    };
-
-    const handleRowCommit = (id: string, patch: { itemId: string; weight?: number; cost?: number }) => {
-        updateEntries(deck.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
-    };
-
-    const handleRowDelete = (id: string) => {
-        updateEntries(deck.entries.filter((entry) => entry.id !== id));
-    };
-
-    const handleAddEntry = () => {
-        updateEntries([
-            ...deck.entries,
-            { id: `deck-entry-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, itemId: "" },
-        ]);
-    };
+    const [expanded, setExpanded] = useState(defaultExpanded);
 
     return (
         <Paper variant="outlined" sx={{ p: 2 }}>
             <Stack spacing={2}>
                 <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                        {deck.id}
-                    </Typography>
+                    <IconButton
+                        size="small"
+                        aria-label={expanded ? "Свернуть колоду" : "Развернуть колоду"}
+                        onClick={() => setExpanded((open) => !open)}
+                    >
+                        {expanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
+                    </IconButton>
+                    <Box
+                        onClick={() => setExpanded((open) => !open)}
+                        sx={{ cursor: "pointer", display: "flex", alignItems: "baseline", gap: 1 }}
+                    >
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                            {deck.id}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            предметов: {deck.entries.length}
+                        </Typography>
+                    </Box>
                     <DeckNameField deckId={deck.id} />
                     <IconButton
                         aria-label="Удалить колоду"
@@ -62,26 +72,10 @@ export default function DeckCard({ deck }: Props) {
                     </IconButton>
                 </Stack>
 
-                <Stack spacing={1}>
-                    {deck.entries.map((entry) => (
-                        <DeckEntryRow
-                            key={entry.id}
-                            entry={entry}
-                            onCommit={handleRowCommit}
-                            onDelete={handleRowDelete}
-                        />
-                    ))}
-                </Stack>
-
-                {deck.entries.length === 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                        Пока нет предметов.
-                    </Typography>
-                )}
-
-                <Button size="small" onClick={handleAddEntry} sx={{ alignSelf: "flex-start" }}>
-                    + Добавить предмет
-                </Button>
+                {/* unmountOnExit, not just hidden: the whole point is to keep collapsed rows out of the tree. */}
+                <Collapse in={expanded} unmountOnExit>
+                    <DeckEntriesEditor deckId={deck.id} />
+                </Collapse>
             </Stack>
 
             <Dialog open={confirmingDelete} onClose={() => setConfirmingDelete(false)}>

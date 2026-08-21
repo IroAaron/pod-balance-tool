@@ -1,10 +1,27 @@
 import { memo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { Autocomplete, IconButton, Stack, TextField, Tooltip, Typography } from "@mui/material";
+import {
+    Autocomplete,
+    Box,
+    Chip,
+    Collapse,
+    IconButton,
+    Paper,
+    Stack,
+    TextField,
+    Tooltip,
+    Typography,
+} from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import AddIcon from "@mui/icons-material/Add";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { useStore } from "../../hooks/useStore";
 import ItemIcon from "../../components/ItemIcon";
+import DeckEntriesEditor from "../Decks/DeckEntriesEditor";
+import DeckNameField from "../Decks/DeckNameField";
+import NewDeckDialog from "../Decks/NewDeckDialog";
 import type { PackSourceEntry } from "../../../core/models/Pack";
 import type { Deck } from "../../../core/models/Deck";
 
@@ -22,15 +39,23 @@ type Props = {
     onDelete: (id: string) => void;
 };
 
-/** One pack source-deck entry — same row shape as DeckEntryRow: a deck Autocomplete (searches BOTH Decks and
- *  DecksShop, per the user's "сюда идут id из любой колоды") commits immediately on selection, ItemNumber/
- *  ItemCount/ItemWeight/ItemCost commit on blur (blank -> undefined, matching parseOptionalNumber's convention). */
+/**
+ * One pack source-deck entry — a deck Autocomplete (searches BOTH Decks and DecksShop, per the user's "сюда идут
+ * id из любой колоды") commits immediately on selection, ItemNumber/ItemCount/ItemWeight/ItemCost commit on blur
+ * (blank -> undefined, matching parseOptionalNumber's convention).
+ *
+ * The deck can also be created and filled in without leaving the pack: «+» makes a new empty deck in whichever
+ * section is chosen and attaches it here, and the chevron opens that deck's own item editor inline. Going to
+ * «Колоды» and back for every source was the whole complaint.
+ */
 const PackSourceRow = memo(function PackSourceRow({ entry, onCommit, onDelete }: Props) {
     const store = useStore();
     const [itemNumberText, setItemNumberText] = useState(entry.itemNumber?.toString() ?? "");
     const [itemCountText, setItemCountText] = useState(entry.itemCount?.toString() ?? "");
     const [itemWeightText, setItemWeightText] = useState(entry.itemWeight?.toString() ?? "");
     const [itemCostText, setItemCostText] = useState(entry.itemCost?.toString() ?? "");
+    const [expanded, setExpanded] = useState(false);
+    const [creatingDeck, setCreatingDeck] = useState(false);
 
     const selectedDeck = store.getDeck(entry.sourceDeckId) ?? null;
 
@@ -56,8 +81,17 @@ const PackSourceRow = memo(function PackSourceRow({ entry, onCommit, onDelete }:
     };
 
     return (
-        <Stack spacing={0.5}>
+        <Paper variant="outlined" sx={{ p: 1.5 }}>
             <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                <IconButton
+                    size="small"
+                    aria-label={expanded ? "Свернуть колоду" : "Развернуть колоду"}
+                    disabled={!selectedDeck}
+                    onClick={() => setExpanded((open) => !open)}
+                >
+                    {expanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
+                </IconButton>
+
                 <Autocomplete
                     sx={{ flex: 1, minWidth: 260 }}
                     size="small"
@@ -110,6 +144,16 @@ const PackSourceRow = memo(function PackSourceRow({ entry, onCommit, onDelete }:
                     sx={{ width: 110 }}
                 />
 
+                <Tooltip title="Создать новую колоду и подставить сюда">
+                    <IconButton
+                        aria-label="Создать новую колоду"
+                        size="small"
+                        onClick={() => setCreatingDeck(true)}
+                    >
+                        <AddIcon fontSize="small" />
+                    </IconButton>
+                </Tooltip>
+
                 {selectedDeck && (
                     <Tooltip title="Найти эту колоду на странице «Колоды»">
                         <IconButton
@@ -128,23 +172,53 @@ const PackSourceRow = memo(function PackSourceRow({ entry, onCommit, onDelete }:
                 </IconButton>
             </Stack>
 
-            {selectedDeck &&
-                (deckItems.length > 0 ? (
-                    <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", pl: 1 }}>
-                        {deckItems.map((item) => (
-                            <Tooltip key={item.id} title={store.itemName(item)}>
-                                <span>
-                                    <ItemIcon item={item} size={22} />
-                                </span>
-                            </Tooltip>
-                        ))}
+            {selectedDeck && !expanded && (
+                <Box sx={{ pl: 5, pt: 0.5 }}>
+                    {deckItems.length > 0 ? (
+                        <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap" }}>
+                            {deckItems.map((item) => (
+                                <Tooltip key={item.id} title={store.itemName(item)}>
+                                    <span>
+                                        <ItemIcon item={item} size={22} />
+                                    </span>
+                                </Tooltip>
+                            ))}
+                        </Stack>
+                    ) : (
+                        <Typography variant="caption" color="text.secondary">
+                            В колоде пока нет предметов.
+                        </Typography>
+                    )}
+                </Box>
+            )}
+
+            {/* unmountOnExit so a collapsed source costs nothing — a shop deck can be 51 Autocomplete rows. */}
+            <Collapse in={expanded && Boolean(selectedDeck)} unmountOnExit>
+                {selectedDeck && (
+                    <Stack spacing={1} sx={{ pl: 5, pt: 1.5 }}>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                            <Chip
+                                label={selectedDeck.source === "Decks" ? "Колоды" : "Колоды магазина"}
+                                size="small"
+                                variant="outlined"
+                            />
+                            <DeckNameField deckId={selectedDeck.id} />
+                        </Stack>
+                        <DeckEntriesEditor deckId={selectedDeck.id} />
                     </Stack>
-                ) : (
-                    <Typography variant="caption" color="text.secondary" sx={{ pl: 1 }}>
-                        В колоде пока нет предметов.
-                    </Typography>
-                ))}
-        </Stack>
+                )}
+            </Collapse>
+
+            <NewDeckDialog
+                open={creatingDeck}
+                onClose={() => setCreatingDeck(false)}
+                onCreated={(deckId) => {
+                    onCommit(entry.id, { sourceDeckId: deckId });
+                    // A deck made from here is empty by definition, so open it ready to be filled.
+                    setExpanded(true);
+                }}
+            />
+        </Paper>
     );
 });
 

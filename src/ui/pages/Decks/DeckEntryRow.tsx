@@ -61,9 +61,12 @@ const DeckEntryRow = memo(function DeckEntryRow({ entry, onCommit, onDelete }: P
                 )}
             </Box>
 
-            <DetailModal open={detailOpen} onClose={() => setDetailOpen(false)}>
-                {selectedItem && <ItemDetailPage id={selectedItem.id} />}
-            </DetailModal>
+            {/* Mounted only while open — one Dialog per row adds up fast in a 51-row deck. */}
+            {detailOpen && selectedItem && (
+                <DetailModal open onClose={() => setDetailOpen(false)}>
+                    <ItemDetailPage id={selectedItem.id} />
+                </DetailModal>
+            )}
 
             <Autocomplete
                 sx={{ flex: 1, minWidth: 260 }}

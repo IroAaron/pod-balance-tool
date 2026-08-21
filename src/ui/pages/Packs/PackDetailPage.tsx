@@ -20,12 +20,19 @@ import { useStore } from "../../hooks/useStore";
 import ItemDescription from "../../components/ItemDescription";
 import IconTokenInsertButton from "../../components/IconTokenInsertButton";
 import PackSourceRow from "./PackSourceRow";
+import NewDeckDialog from "../Decks/NewDeckDialog";
 import { packAsItemStub } from "./packAsItemStub";
 import type { Pack, PackSourceEntry } from "../../../core/models/Pack";
 
 type Props = {
     id?: string;
 };
+
+/** Module scope on purpose: Date.now()/Math.random() inside the component body read as impure-during-render to
+ *  the React Compiler, which refuses to compile the component at all. */
+function newSourceRow(sourceDeckId: string): PackSourceEntry {
+    return { id: `pack-source-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, sourceDeckId };
+}
 
 export default function PackDetailPage({ id: idProp }: Props = {}) {
     const params = useParams<{ id: string }>();
@@ -39,6 +46,7 @@ export default function PackDetailPage({ id: idProp }: Props = {}) {
     const [descriptionDraft, setDescriptionDraft] = useState("");
     const descriptionFieldRef = useRef<HTMLTextAreaElement | null>(null);
     const [confirmingDelete, setConfirmingDelete] = useState(false);
+    const [creatingDeck, setCreatingDeck] = useState(false);
     const [costText, setCostText] = useState(pack?.cost?.toString() ?? "");
     const [itemsToTakeText, setItemsToTakeText] = useState(pack?.itemsToTake?.toString() ?? "");
 
@@ -83,10 +91,12 @@ export default function PackDetailPage({ id: idProp }: Props = {}) {
     };
 
     const handleAddSource = () => {
-        updateSources([
-            ...pack.sources,
-            { id: `pack-source-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, sourceDeckId: "" },
-        ]);
+        updateSources([...pack.sources, newSourceRow("")]);
+    };
+
+    /** A deck made from here is immediately wired up as a source — that's the point of creating it here. */
+    const handleDeckCreated = (deckId: string) => {
+        updateSources([...pack.sources, newSourceRow(deckId)]);
     };
 
     return (
@@ -290,9 +300,20 @@ export default function PackDetailPage({ id: idProp }: Props = {}) {
                     </Typography>
                 )}
 
-                <Button size="small" onClick={handleAddSource} sx={{ mt: 1.5, alignSelf: "flex-start" }}>
-                    + Добавить источник
-                </Button>
+                <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                    <Button size="small" onClick={handleAddSource}>
+                        + Добавить источник
+                    </Button>
+                    <Button size="small" onClick={() => setCreatingDeck(true)}>
+                        + Новая колода
+                    </Button>
+                </Stack>
+
+                <NewDeckDialog
+                    open={creatingDeck}
+                    onClose={() => setCreatingDeck(false)}
+                    onCreated={handleDeckCreated}
+                />
             </Paper>
 
             <Button

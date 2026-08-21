@@ -70,7 +70,9 @@ export default function DeckList({ source, initialQuery }: Props) {
 
             <Stack spacing={2}>
                 {filtered.map((deck) => (
-                    <DeckCard key={deck.id} deck={deck} />
+                    // A search narrowed to one deck means the user already said which one they want — most of
+                    // all when arriving from a pack's "найти эту колоду" link, which prefills the id.
+                    <DeckCard key={deck.id} deck={deck} defaultExpanded={filtered.length === 1} />
                 ))}
             </Stack>
         </Stack>
