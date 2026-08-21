@@ -82,6 +82,39 @@
 // `items`/`newMechanicRows` only ever write columns present in the payload — a column the site doesn't model
 // (sprite names, unrelated flags, etc.) is left exactly as it already was in the sheet.
 
+// ---------------------------------------------------------------------------------------------------------
+// IMPORTANT — doGet must not collapse repeated column headers.
+//
+// Three sheets rely on the SAME header appearing several times: Sprints has nine `RoundSettings` columns,
+// BallGroups has seven `Ball` columns, and RoundSettings has repeated `DeckBalls` columns. If doGet builds each
+// row as a plain object keyed by header name, every repeat overwrites the previous one and only the LAST column
+// survives — the site then reads an empty pool and, on export, writes that emptiness back over all nine slots.
+// That is not theoretical: it wiped the whole Sprints round-pool grid once.
+//
+// Disambiguate duplicates the way a CSV parser does — Name, Name_1, Name_2, ... — which is exactly what the
+// site already expects:
+//
+//   function rowsWithUniqueHeaders(sheet) {
+//     var data = sheet.getDataRange().getValues();
+//     var header = data[0];
+//     var seen = {};
+//     var names = header.map(function (raw) {
+//       var name = String(raw).trim();
+//       if (!(name in seen)) { seen[name] = 0; return name; }
+//       seen[name]++;
+//       return name + "_" + seen[name];
+//     });
+//     return data.slice(1).map(function (row) {
+//       var out = {};
+//       for (var i = 0; i < names.length; i++) out[names[i]] = row[i];
+//       return out;
+//     });
+//   }
+//
+// Until doGet does this, the site refuses to export those three tables rather than blank them — see
+// GameStore.repeatedColumnGuard.
+// ---------------------------------------------------------------------------------------------------------
+
 function doPost(e) {
     var result = { ok: true, updated: {} };
 

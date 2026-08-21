@@ -37,6 +37,10 @@ export interface NormalizedData {
 
     shops: Shop[];
 
+    /** Tables whose repeated columns the source collapsed, so their exports must not write those columns.
+     *  See repeatedColumnsAreLossy. */
+    lossyRepeatedColumnTables: string[];
+
     replaceRules: ReplaceRule[];
 
     /** Valid values per parameter dimension, as curated in the Enums sheet. */
@@ -61,6 +65,18 @@ function splitList(value: string): string[] {
         .split(/[|,;]/)
         .map((entry) => entry.trim())
         .filter(Boolean);
+}
+
+/**
+ * Whether a table's repeated columns arrived intact.
+ *
+ * A source that collapses duplicate headers (the Apps Script JSON endpoint) hands us exactly one column where
+ * the sheet has several, and we cannot tell that one apart from a sheet that genuinely has one. Seeing a single
+ * column from such a source is therefore treated as "we didn't read this", so the export refuses to write it —
+ * writing back what we couldn't read is what blanks the sheet's other slots.
+ */
+function repeatedColumnsAreLossy(table: ParsedTable, columns: string[]): boolean {
+    return Boolean(table.duplicateHeadersCollapsed) && columns.length <= 1;
 }
 
 function findColumn(headers: string[], candidates: string[]): string | undefined {
@@ -167,7 +183,7 @@ function numericSuffix(header: string): number {
     return parseInt(header.match(/\d+/)?.[0] ?? "0", 10);
 }
 
-function normalizeRoundSettingsTable(table: ParsedTable): Round[] {
+function normalizeRoundSettingsTable(table: ParsedTable, lossy?: Set<string>): Round[] {
     const idColumn = findColumn(table.headers, ["RoundId"]);
     if (!idColumn) return [];
 
@@ -181,6 +197,7 @@ function normalizeRoundSettingsTable(table: ParsedTable): Round[] {
     const deckBallsColumns = table.headers
         .filter((header) => /^DeckBalls(_\d+)?$/i.test(header.trim()))
         .sort((a, b) => numericSuffix(a) - numericSuffix(b));
+    if (repeatedColumnsAreLossy(table, deckBallsColumns)) lossy?.add("RoundSettings");
 
     return table.rows
         .filter((row) => (row[idColumn] ?? "").trim() !== "")
@@ -339,13 +356,14 @@ function normalizeBallsTable(table: ParsedTable): Ball[] {
  * row-per-entry shape Decks/DecksShop use — structurally the same as normalizeUpgradeChainsTable's tier columns
  * (or RoundSettings' own DeckBalls columns), just with a "Ball" prefix instead of "UpgradeId"/"DeckBalls".
  */
-function normalizeBallGroupsTable(table: ParsedTable): BallGroup[] {
+function normalizeBallGroupsTable(table: ParsedTable, lossy?: Set<string>): BallGroup[] {
     const deckIdColumn = findColumn(table.headers, ["DeckId"]);
     if (!deckIdColumn) return [];
 
     const ballColumns = table.headers
         .filter((header) => /^Ball(_\d+)?$/i.test(header.trim()))
         .sort((a, b) => numericSuffix(a) - numericSuffix(b));
+    if (repeatedColumnsAreLossy(table, ballColumns)) lossy?.add("BallGroups");
 
     return table.rows
         .filter((row) => (row[deckIdColumn] ?? "").trim() !== "")
@@ -414,7 +432,7 @@ function normalizeShopSettingsTable(table: ParsedTable): Shop[] {
  * scope; `Shops` is the round's link to ShopSettings, which is where the shop's contents now live. The legacy
  * per-round `HousesInShop` column is still read and written back untouched — see SprintRound.housesInShopPackId.
  */
-function normalizeSprintsTable(table: ParsedTable): Sprint[] {
+function normalizeSprintsTable(table: ParsedTable, lossy?: Set<string>): Sprint[] {
     const sprintIdColumn = findColumn(table.headers, ["SprintId"]);
     if (!sprintIdColumn) return [];
 
@@ -431,6 +449,7 @@ function normalizeSprintsTable(table: ParsedTable): Sprint[] {
     const roundSettingsColumns = table.headers
         .filter((header) => /^RoundSettings(_\d+)?$/i.test(header.trim()))
         .sort((a, b) => numericSuffix(a) - numericSuffix(b));
+    if (repeatedColumnsAreLossy(table, roundSettingsColumns)) lossy?.add("Sprints");
 
     const order: string[] = [];
     const roundsBySprintId = new Map<string, { round: SprintRound; roundNumber: number }[]>();
@@ -570,6 +589,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
     const ballGroups: BallGroup[] = [];
     const sprints: Sprint[] = [];
     const shops: Shop[] = [];
+    const lossyRepeatedColumns = new Set<string>();
     const replaceRules: ReplaceRule[] = [];
     const enumValues: Record<string, string[]> = {};
     const warnings: ImportWarning[] = [];
@@ -603,7 +623,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             }
             upgradeChains.push(...normalized);
         } else if (type === "RoundSettings") {
-            const normalized = normalizeRoundSettingsTable(table);
+            const normalized = normalizeRoundSettingsTable(table, lossyRepeatedColumns);
             if (normalized.length === 0) {
                 warnings.push({
                     sourceName: table.sourceName,
@@ -639,7 +659,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             }
             balls.push(...normalized);
         } else if (type === "BallGroups") {
-            const normalized = normalizeBallGroupsTable(table);
+            const normalized = normalizeBallGroupsTable(table, lossyRepeatedColumns);
             if (normalized.length === 0) {
                 warnings.push({
                     sourceName: table.sourceName,
@@ -648,7 +668,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             }
             ballGroups.push(...normalized);
         } else if (type === "Sprints") {
-            const normalized = normalizeSprintsTable(table);
+            const normalized = normalizeSprintsTable(table, lossyRepeatedColumns);
             if (normalized.length === 0) {
                 warnings.push({
                     sourceName: table.sourceName,
@@ -722,6 +742,7 @@ export function normalizeClassifiedTables(classified: ClassifiedTable[]): {
             ballGroups,
             sprints,
             shops,
+            lossyRepeatedColumnTables: [...lossyRepeatedColumns],
             replaceRules,
             enumValues,
         },

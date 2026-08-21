@@ -89,7 +89,9 @@ export async function fetchAppsScriptJson(url: string): Promise<ParsedTable[]> {
         // Union of keys across every row, not just the first — a sparse first row (e.g. a blank cell in a
         // placeholder/comment row) would otherwise silently drop a column from `headers` for the whole table.
         const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
-        return { sourceName, headers, rows };
+        // A JSON object can't hold two keys with the same name, so the sheet's repeated columns are already
+        // gone by the time we get here — see ParsedTable.duplicateHeadersCollapsed.
+        return { sourceName, headers, rows, duplicateHeadersCollapsed: true };
     });
 }
 

@@ -160,6 +160,10 @@ export class GameStore {
     /** ShopSettings rows, grouped by ShopId. A round points at one of these via its Sprint's `Shops` column. */
     shops: Shop[] = [];
 
+    /** Tables whose repeated columns the import source collapsed — their exports refuse to write those columns
+     *  rather than blank the slots that never arrived. See ParsedTable.duplicateHeadersCollapsed. */
+    lossyRepeatedColumnTables: string[] = [];
+
     replaceRules: ReplaceRule[] = [];
 
     enumValues: Record<string, string[]> = {};
@@ -377,6 +381,7 @@ export class GameStore {
             this.ballGroups = cache.importCache.ballGroups ?? [];
             this.sprints = cache.importCache.sprints ?? [];
             this.shops = cache.importCache.shops ?? [];
+            this.lossyRepeatedColumnTables = cache.importCache.lossyRepeatedColumnTables ?? [];
             this.replaceRules = cache.importCache.replaceRules ?? [];
             this.enumValues = cache.importCache.enumValues ?? {};
         }
@@ -1208,6 +1213,25 @@ export class GameStore {
     }
 
     /**
+     * Refuses an export that would write repeated columns the import never actually read.
+     *
+     * This is not hypothetical: the Apps Script endpoint serialises rows as JSON objects, so Sprints' nine
+     * same-named `RoundSettings` columns arrived as one empty value, and exporting the sprints wrote that
+     * emptiness back over all nine — the sheet's whole round-pool grid, gone in one call. Anything that writes
+     * a repeated column asks this first.
+     */
+    private repeatedColumnGuard(table: string, what: string): ExportResult | null {
+        if (!this.lossyRepeatedColumnTables.includes(table)) return null;
+        return {
+            ok: false,
+            error:
+                `Источник схлопнул повторяющиеся колонки таблицы ${table}, поэтому ${what} прочитаны не полностью. ` +
+                "Экспорт отменён, иначе он затёр бы их в таблице. Обновите doGet в Apps Script так, чтобы " +
+                "одноимённые колонки приходили как Name, Name_1, Name_2 (см. docs/apps-script-export.gs).",
+        };
+    }
+
+    /**
      * Writes the «Магазины» edits back to ShopSettings.
      *
      * A shop is a *variable-size group of rows* sharing one ShopId, so it exports the same way decks and packs
@@ -1318,6 +1342,11 @@ export class GameStore {
 
         for (const [deckId, source] of this.blueprintDeletedDecks) {
             (decks[source] ??= {})[deckId] = [];
+        }
+
+        if (this.blueprintDirtyBallGroupIds.size > 0 || this.blueprintDeletedBallGroupIds.size > 0) {
+            const blocked = this.repeatedColumnGuard("BallGroups", "колоды шаров (Ball)");
+            if (blocked) return blocked;
         }
 
         const ballGroups: Record<string, string[]> = {};
@@ -1496,6 +1525,9 @@ export class GameStore {
             throw new Error("Не задан источник конфигурации на странице «Источники»");
         }
 
+        const blocked = this.repeatedColumnGuard("RoundSettings", "наборы шаров раунда (DeckBalls)");
+        if (blocked) return blocked;
+
         const fields: Record<string, Record<string, string>> = {};
         const deckBalls: Record<string, string[]> = {};
 
@@ -1550,6 +1582,9 @@ export class GameStore {
         if (!this.sources.configUrl) {
             throw new Error("Не задан источник конфигурации на странице «Источники»");
         }
+
+        const blocked = this.repeatedColumnGuard("Sprints", "пулы раундов (RoundSettings)");
+        if (blocked) return blocked;
 
         const sprints: NonNullable<Parameters<typeof postExportPayload>[1]["sprints"]> = {};
 
@@ -2091,6 +2126,7 @@ export class GameStore {
             this.ballGroups = mergeById(this.ballGroups, result.data.ballGroups);
             this.sprints = mergeById(this.sprints, result.data.sprints);
             this.shops = mergeById(this.shops, result.data.shops);
+            this.lossyRepeatedColumnTables = result.data.lossyRepeatedColumnTables;
             this.replaceRules = mergeById(this.replaceRules, result.data.replaceRules);
             this.enumValues = mergeParamValueSources(this.enumValues, result.data.enumValues);
         } else {
@@ -2106,6 +2142,7 @@ export class GameStore {
                 this.ballGroups = result.data.ballGroups;
                 this.sprints = result.data.sprints;
                 this.shops = result.data.shops;
+                this.lossyRepeatedColumnTables = result.data.lossyRepeatedColumnTables;
                 this.replaceRules = result.data.replaceRules;
                 this.enumValues = result.data.enumValues;
             }
@@ -2130,6 +2167,7 @@ export class GameStore {
             ballGroups: this.ballGroups,
             sprints: this.sprints,
             shops: this.shops,
+            lossyRepeatedColumnTables: this.lossyRepeatedColumnTables,
             replaceRules: this.replaceRules,
             enumValues: this.enumValues,
         });
@@ -2199,6 +2237,7 @@ export class GameStore {
         this.ballGroups = [];
         this.sprints = [];
         this.shops = [];
+        this.lossyRepeatedColumnTables = [];
         this.replaceRules = [];
         this.enumValues = {};
         this.rebuildDerivedCaches();
@@ -2539,6 +2578,7 @@ export class GameStore {
             ballGroups: payload.ballGroups,
             sprints: payload.sprints,
             shops: payload.shops,
+            lossyRepeatedColumnTables: [],
             replaceRules: payload.replaceRules,
             enumValues: payload.enumValues,
         });
@@ -2590,6 +2630,7 @@ export class GameStore {
                 ballGroups: this.ballGroups,
                 sprints: this.sprints,
                 shops: this.shops,
+                lossyRepeatedColumnTables: this.lossyRepeatedColumnTables,
                 replaceRules: this.replaceRules,
                 enumValues: this.enumValues,
             },
@@ -2630,6 +2671,7 @@ export class GameStore {
             this.ballGroups = state.importCache.ballGroups ?? [];
             this.sprints = state.importCache.sprints ?? [];
             this.shops = state.importCache.shops ?? [];
+            this.lossyRepeatedColumnTables = state.importCache.lossyRepeatedColumnTables ?? [];
             this.replaceRules = state.importCache.replaceRules ?? [];
             this.enumValues = state.importCache.enumValues ?? {};
             saveImportCache(state.importCache);
