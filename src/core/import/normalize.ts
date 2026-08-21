@@ -411,8 +411,8 @@ function normalizeShopSettingsTable(table: ParsedTable): Shop[] {
  * once-per-group. `RoundNumber` itself is read only to SORT each group's rows into the right order, then
  * discarded — confirmed with the user it's purely derived from row position ("автоматически подставляется"), so
  * from here on array order alone is the source of truth (see Sprint.rounds' doc). `PacksDeck` is real but out of
- * scope; `Shops` is the round's link to ShopSettings, which is where the shop's contents now live (the old
- * per-round `HousesInShop` column is gone — it could hold only one house pack).
+ * scope; `Shops` is the round's link to ShopSettings, which is where the shop's contents now live. The legacy
+ * per-round `HousesInShop` column is still read and written back untouched — see SprintRound.housesInShopPackId.
  */
 function normalizeSprintsTable(table: ParsedTable): Sprint[] {
     const sprintIdColumn = findColumn(table.headers, ["SprintId"]);
@@ -425,6 +425,7 @@ function normalizeSprintsTable(table: ParsedTable): Sprint[] {
     const rewardTicketsPerBallColumn = findColumn(table.headers, ["RewardTicketsPerBall"]);
     const rewardPackColumn = findColumn(table.headers, ["RewardPack"]);
     const shopsColumn = findColumn(table.headers, ["Shops"]);
+    const housesInShopColumn = findColumn(table.headers, ["HousesInShop"]);
     const packDeckStartColumn = findColumn(table.headers, ["PackDeckStart"]);
 
     const roundSettingsColumns = table.headers
@@ -454,6 +455,7 @@ function normalizeSprintsTable(table: ParsedTable): Sprint[] {
                 : undefined,
             rewardPackId: rewardPackColumn ? row[rewardPackColumn]?.trim() || undefined : undefined,
             shopId: shopsColumn ? row[shopsColumn]?.trim() || undefined : undefined,
+            housesInShopPackId: housesInShopColumn ? row[housesInShopColumn]?.trim() || undefined : undefined,
             packDeckStartId: packDeckStartColumn ? row[packDeckStartColumn]?.trim() || undefined : undefined,
             roundIds: roundSettingsColumns
                 .map((column) => row[column]?.trim())

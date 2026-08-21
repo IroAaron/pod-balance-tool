@@ -1565,6 +1565,8 @@ export class GameStore {
                     RewardTicketsPerBall: round.rewardTicketsPerBall?.toString() ?? "",
                     RewardPack: round.rewardPackId ?? "",
                     Shops: round.shopId ?? "",
+                    // Written back as-is: the engine still reads it (see SprintRound.housesInShopPackId).
+                    HousesInShop: round.housesInShopPackId ?? "",
                     PackDeckStart: round.packDeckStartId ?? "",
                 },
                 repeatedValues: round.roundIds,

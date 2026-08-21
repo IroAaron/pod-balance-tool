@@ -15,9 +15,19 @@ export interface SprintRound {
     rewardPackId?: string;
 
     /** ShopId — the round's shop, from the `Shops` column. What the shop offers (house packs, card packs and
-     *  their weights) lives in ShopSettings; the round only names it. Replaced the old per-round HousesInShop
-     *  column, which could only ever hold one house pack. */
+     *  their weights) lives in ShopSettings; the round only names it. This supersedes housesInShopPackId below,
+     *  which could only ever hold one house pack. */
     shopId?: string;
+
+    /**
+     * Pack id, from the legacy per-round `HousesInShop` column.
+     *
+     * Superseded by `shopId`, but still carried and written back verbatim: the engine hasn't moved to reading
+     * shops yet, so the column has to keep its current values. Exporting a sprint rewrites its rows whole, so
+     * dropping this from the model would have blanked a column the game still depends on. Remove it (here, in
+     * normalize and in the export row) once the engine reads ShopSettings and the column is gone from the sheet.
+     */
+    housesInShopPackId?: string;
 
     /** Pack id. */
     packDeckStartId?: string;

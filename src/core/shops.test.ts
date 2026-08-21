@@ -183,6 +183,32 @@ describe("exporting shops", () => {
         expect(store.shopPendingExportCount).toBe(0);
     });
 
+    it("keeps the legacy HousesInShop value when a sprint round is exported", async () => {
+        const store = makeStore();
+        store.upsertSprint({
+            id: "main_sprint",
+            rounds: [
+                {
+                    id: "r1",
+                    shopId: "shop_lvl_1_4",
+                    housesInShopPackId: "shop_houses1_0",
+                    roundIds: [],
+                },
+            ],
+        });
+
+        await store.exportSprintChanges();
+
+        const payload = postExportPayload.mock.calls.at(-1)?.[1] as {
+            sprints: Record<string, { columns: Record<string, string> }[]>;
+        };
+        const columns = payload.sprints.main_sprint[0].columns;
+        expect(columns.Shops).toBe("shop_lvl_1_4");
+        // The engine still reads this column, so a sprint export must not blank it — exporting rewrites the
+        // whole row, and anything absent from the payload comes back empty.
+        expect(columns.HousesInShop).toBe("shop_houses1_0");
+    });
+
     it("refuses to create a shop whose id is already taken", () => {
         const store = makeStore();
         store.createShop("shop_1");

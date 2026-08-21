@@ -219,6 +219,12 @@ const SprintRoundCard = memo(function SprintRoundCard({
                 <ShopSelect value={round.shopId} onCommit={(v) => onCommit(round.id, { shopId: v })} />
 
                 <PackSelect
+                    label="HousesInShop (устаревшее)"
+                    value={round.housesInShopPackId}
+                    onCommit={(v) => onCommit(round.id, { housesInShopPackId: v })}
+                />
+
+                <PackSelect
                     label="PackDeckStart (колода стартового поля)"
                     value={round.packDeckStartId}
                     onCommit={(v) => onCommit(round.id, { packDeckStartId: v })}

@@ -594,6 +594,7 @@ describe("Sprints", () => {
             rewardTicketsPerBall: 10,
             rewardPackId: undefined,
             shopId: "shop_1",
+            housesInShopPackId: "shop_houses1_0",
             packDeckStartId: "start_field_fill_pack",
             roundIds: [
                 "standart_in_a_activate_all_top_per_loop",
@@ -615,16 +616,15 @@ describe("Sprints", () => {
             rewardTicketsPerBall: 10,
             rewardPackId: "artefact_pack",
             shopId: "shop_3",
+            housesInShopPackId: "shop_houses1_2",
             packDeckStartId: "start_field_fill_pack",
             roundIds: ["round_one_ball_mult_speed", "round_black_white_0"],
         });
 
-        // PacksDeck ("field_fill_1"/"field_fill_start") is still deliberately ignored; HousesInShop no longer
-        // surfaces either — a round names a shop, and what the shop sells lives in ShopSettings.
+        // PacksDeck ("field_fill_1"/"field_fill_start") is still deliberately ignored.
         const serialized = JSON.stringify(data.sprints);
         expect(serialized).not.toContain("field_fill_1");
         expect(serialized).not.toContain("field_fill_start");
-        expect(serialized).not.toContain("shop_houses");
     });
 
     it("preserves a round id that repeats within one row's RoundSettings pool (confirmed real data, not deduped)", () => {
